@@ -140,6 +140,49 @@ describe("Pi launch", () => {
 		});
 	});
 
+	it("keeps untrusted launch metadata inside shell comments", async () => {
+		await withFixture(async ({ request, root, sessionDir }) => {
+			const preambles: string[] = [];
+			let pane = 0;
+			const operations: PiLaunchOperations = {
+				createPane: () => `pane-${++pane}`,
+				createWorktree: () => {
+					throw new Error("unexpected worktree creation");
+				},
+				waitForShellReady: async () => {},
+				runScript: (_surface, _command, options) => {
+					preambles.push(options.scriptPreamble);
+					return options.scriptPath;
+				},
+			};
+			const injectedName =
+				"Worker\nprintf fresh-injection\rprintf carriage-return\u2028printf line-separator\u2029printf paragraph-separator";
+
+			await launchPiSubagent({ ...request, name: injectedName }, operations);
+
+			const resumedSession = join(root, "resumed.jsonl");
+			writeFileSync(resumedSession, "existing session\n");
+			await launchPiSubagent(
+				{
+					kind: "resume",
+					id: "resume-injection",
+					name: injectedName,
+					sessionFile: resumedSession,
+					parent: { sessionId: "parent", sessionDir },
+				},
+				operations,
+			);
+
+			assert.equal(preambles.length, 2);
+			for (const preamble of preambles) {
+				const lines = preamble.split("\n");
+				assert.equal(lines.length, 4);
+				assert.ok(lines.every((line) => line.startsWith("# ")));
+				assert.doesNotMatch(preamble, /\nprintf (?:fresh|carriage)/);
+			}
+		});
+	});
+
 	it("clears inherited auto-exit state for interactive children", async () => {
 		await withFixture(async ({ request }) => {
 			let command = "";
