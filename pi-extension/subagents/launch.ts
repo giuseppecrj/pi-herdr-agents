@@ -631,10 +631,10 @@ function startPiProcess(
 	return operations.runScript(artifacts.surface, command, {
 		scriptPath: launchScriptFile,
 		scriptPreamble: [
-			`# Subagent launch script for ${resolved.request.name}`,
-			`# Generated: ${new Date().toISOString()}`,
-			`# Session: ${artifacts.sessionFile}`,
-			`# Surface: ${artifacts.surface}`,
+			shellComment(`Subagent launch script for ${resolved.request.name}`),
+			shellComment(`Generated: ${new Date().toISOString()}`),
+			shellComment(`Session: ${artifacts.sessionFile}`),
+			shellComment(`Surface: ${artifacts.surface}`),
 		].join("\n"),
 	});
 }
@@ -719,11 +719,13 @@ async function launchResumedPiSubagent(
 				`${safeName(request.name) || "resume"}-resume-${Date.now()}.sh`,
 			),
 			scriptPreamble: [
-				`# Subagent resume script for ${request.name}`,
-				`# Generated: ${new Date().toISOString()}`,
-				`# Session: ${request.sessionFile}`,
-				`# Surface: ${surface}`,
-				...(messageFile ? [`# Resume message file: ${messageFile}`] : []),
+				shellComment(`Subagent resume script for ${request.name}`),
+				shellComment(`Generated: ${new Date().toISOString()}`),
+				shellComment(`Session: ${request.sessionFile}`),
+				shellComment(`Surface: ${surface}`),
+				...(messageFile
+					? [shellComment(`Resume message file: ${messageFile}`)]
+					: []),
 			].join("\n"),
 		},
 	);
@@ -790,6 +792,10 @@ function timestampForFile(includeMilliseconds = true): string {
 			.slice(0, includeMilliseconds ? 23 : 19) +
 		(includeMilliseconds ? "Z" : "")
 	);
+}
+
+function shellComment(value: string): string {
+	return `# ${value.replace(/[\r\n\u2028\u2029]/g, " ")}`;
 }
 
 function safeName(name: string): string {
