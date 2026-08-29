@@ -76,7 +76,7 @@ subagent({ name: "DB scout", agent: "scout", model: "<provider>/<fast-tier-id>",
 // Both return immediately; each result comes back independently.
 ```
 
-Use ordinary panes for read-only agents. Give each independent writing agent a unique managed worktree; see [Worktree subagents](docs/worktree-subagents.md).
+Use ordinary panes for read-only agents. A single or sequential writer can work in the parent checkout; give each parallel independent writing agent a unique managed worktree. See [Worktree subagents](docs/worktree-subagents.md).
 
 ## How it works
 
@@ -397,7 +397,7 @@ prompts, handoffs, and results.
 
 ### Isolated worktree runs
 
-Use one worktree per independent writing task; keep read-only agents in ordinary panes. `cwd` selects the source Git repository, `branch` must be unique, and `base` is resolved to an exact commit before creation. If `base` is omitted, the source checkout's committed `HEAD` is used. Parent-checkout changes that have not been committed are not copied.
+Use one worktree per parallel independent writing task; a single or sequential writer can work in the parent checkout, and read-only agents use ordinary panes. `cwd` selects the source Git repository, `branch` must be unique, and `base` is resolved to an exact commit before creation. If `base` is omitted, the source checkout's committed `HEAD` is used. Parent-checkout changes that have not been committed are not copied.
 
 A launch with `worktree` and an effective bundled `scout`, `reviewer`, or `adversarial-reviewer` returns a non-blocking warning. Scouts and reviewers normally need an ordinary pane; the adversarial reviewer is a coordinator that uses an ordinary pane for its child reviewers. To inspect or review an existing worker result, start an ordinary child in that retained worktree path. Project or global role overrides do not receive these bundled-role warnings.
 
