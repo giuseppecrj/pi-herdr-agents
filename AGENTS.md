@@ -55,7 +55,7 @@ Read [`docs/worktree-subagents.md`](docs/worktree-subagents.md) before changing 
 ## Orchestration guidance
 
 - Use ordinary panes for read-only scouts and reviewers.
-- Use unique worktree branches for independent parallel writing tasks.
+- A single or sequential writer can work in the parent checkout; reserve unique worktree branches for independent parallel writing tasks.
 - Keep overlapping or dependent writing tasks sequential unless the dependency is committed and used as the next exact base.
 - Tell worktree workers whether to commit. A good default is: edit, test, commit, report the SHA, and do not push/merge/remove.
 - The parent owns review, integration, publication, and cleanup.
