@@ -71,8 +71,8 @@ For an isolated writing task:
 Pi can also call the tool directly:
 
 ```typescript
-subagent({ name: "Auth scout", agent: "scout", task: "Map the authentication flow" });
-subagent({ name: "DB scout", agent: "scout", task: "Map the session schema" });
+subagent({ name: "Auth scout", agent: "scout", model: "<provider>/<fast-tier-id>", thinking: "low", task: "Map the authentication flow" });
+subagent({ name: "DB scout", agent: "scout", model: "<provider>/<fast-tier-id>", thinking: "low", task: "Map the session schema" });
 // Both return immediately; each result comes back independently.
 ```
 
@@ -346,22 +346,24 @@ status and model configuration are loaded when the extension starts.
 ## Spawning Subagents
 
 ```typescript
-// Named agent with defaults from agent definition or config.json
-subagent({ name: "Scout", agent: "scout", task: "Analyze the codebase..." });
+// Explicit fast-tier runtime for bounded reconnaissance
+subagent({ name: "Scout", agent: "scout", model: "<provider>/<fast-tier-id>", thinking: "low", task: "Analyze the codebase..." });
 
 // Force a full-context fork for this spawn
-subagent({ name: "Iterate", fork: true, task: "Fix the bug where..." });
+subagent({ name: "Iterate", fork: true, model: "<provider>/<mid-tier-id>", thinking: "medium", task: "Fix the bug where..." });
 
-// Agent defaults can choose a different session-mode via frontmatter
-subagent({ name: "Planner", agent: "planner", task: "Work through the design with me" });
+// Explicit frontier-tier runtime for architecture work
+subagent({ name: "Planner", agent: "planner", model: "<provider>/<frontier-tier-id>", thinking: "high", task: "Work through the design with me" });
 
-// Custom working directory
-subagent({ name: "Designer", agent: "game-designer", cwd: "agents/game-designer", task: "..." });
+// Explicit mid-tier runtime with a custom working directory
+subagent({ name: "Designer", agent: "game-designer", model: "<provider>/<mid-tier-id>", thinking: "medium", cwd: "agents/game-designer", task: "..." });
 
 // Isolated ticket branch in a Herdr-managed Git worktree
 subagent({
   name: "Ticket 123",
   agent: "worker",
+  model: "<provider>/<mid-tier-id>",
+  thinking: "medium",
   worktree: { branch: "ticket/123", base: "main" },
   task: "Implement ticket 123, test it, and commit the result",
 });
@@ -377,7 +379,7 @@ subagent({
 | `fork`                 | boolean | `false`        | Force the full-context fork mode for this spawn, overriding any agent `session-mode` frontmatter  |
 | `interactive`          | boolean | derived        | Mark this spawn as interactive (don't wake the parent on stall/recovery). Defaults to the agent's `interactive` frontmatter, otherwise the inverse of `auto-exit`. |
 | `model`                | string  | configured or parent | Exact authenticated `provider/model-id`, or an ordered comma-separated Pi fallback list; fallback lists are unavailable for worktree spawns. Resolution is tool argument → agent frontmatter → per-agent config → global config → parent |
-| `thinking`             | string  | parent level   | Pi thinking level (`off` through `max`); omit to inherit the parent                                |
+| `thinking`             | string  | parent level   | Pick the model tier first, then set thinking within that model's range: minimal/low for bounded mechanical work, medium for ordinary implementation or review, high+ for architecture, security, or hard diagnosis. Omitting still inherits the parent level; this is a discouraged fallback for orchestrated children. |
 | `systemPrompt`         | string  | —              | Role/system-prompt text for a bare spawn; named agents keep their definition body                  |
 | `skills`               | string  | —              | Comma-separated skill names                                                                       |
 | `tools`                | string  | —              | Comma-separated tool names                                                                        |

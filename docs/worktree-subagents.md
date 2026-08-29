@@ -30,6 +30,8 @@ Use an ordinary subagent pane instead when the task is read-only, interactive, o
 subagent({
   name: "Scout auth",
   agent: "scout",
+  model: "<scout-provider>/<fast-tier-id>",
+  thinking: "low",
   task: "Map the auth flow; do not modify files.",
 });
 ```
