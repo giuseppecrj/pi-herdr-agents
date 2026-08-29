@@ -173,7 +173,7 @@ function buildSubagentRoutingGuidelines(catalog?: string): string[] {
 		"Use fast tier for bounded mechanical work and recon, mid tier for ordinary implementation or review, and frontier tier for architecture, security, hard diagnosis, or adversarial review. Use minimal/low thinking for mechanical work, medium for ordinary work, and high+ for hard work.",
 		"Review agents must use a different provider/family than the model that produced the work; a stronger model in the same family is quality escalation, not independent review. Use an exact authenticated provider/model-id from the live catalog below, never an alias or fuzzy name.",
 		"Omitting model and thinking still inherits the parent runtime, but this is a discouraged fallback for orchestrated children.",
-		"Before launching a new group of subagents, choose a short task slug and name each new child <task>-<role>[-n], for example login-api or login-test2. Use only plan, research, ui, api, build, test, review, browser, security, perf, or merge as roles; leave existing names unchanged. After the final launch, print name | agent kind | role | model | worktree, then use each name in prompts, handoffs, and results.",
+		"Before launching a new group of subagents, choose a short task slug and name each new child <task>-<role>[-n], for example login-api or login-test2. Use only plan, research, ui, api, build, test, review, browser, security, perf, or merge as roles; leave existing names unchanged. After the final launch, print name | agent kind | role | model | worktree (if any), then use each name in prompts, handoffs, and results.",
 		catalog ??
 			"Authenticated subagent model catalog becomes available after session start.",
 	];
@@ -3055,7 +3055,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			label: "Subagent",
 			description:
 				"Spawn a sub-agent in a dedicated terminal herdr pane, or in an isolated Herdr-managed Git worktree when worktree is provided. " +
-				"Use unique worktree branches for independent writing tasks; use ordinary panes for read-only tasks. The worktree base is committed state, so uncommitted parent changes are not copied. " +
+				"Use ordinary panes for read-only tasks; a single or sequential writer can work in the parent checkout without a worktree. " +
+				"Reserve unique worktree branches for parallel independent writers starting from committed state — the worktree base is committed HEAD, so uncommitted parent changes are not copied. " +
 				"Worktree runs retain their workspace after completion for parent review; they are not pushed, merged, or removed automatically. " +
 				"This is a fire-and-forget async tool: the call returns immediately with only an acknowledgement. " +
 				"When the sub-agent finishes, the harness AUTOMATICALLY delivers its result as a steer message that wakes you up and starts a new turn — you do not need to do anything to receive it. " +
@@ -3064,7 +3065,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				"After spawning, either end your turn immediately, or work on other independent tasks (including spawning more subagents in parallel). The harness will wake you with the result when it is ready.",
 			promptSnippet:
 				"Spawn a sub-agent in a dedicated terminal herdr pane, or in an isolated Herdr-managed Git worktree when worktree is provided. " +
-				"Use unique worktree branches for independent writing tasks; use ordinary panes for read-only tasks. The worktree base is committed state, so uncommitted parent changes are not copied. " +
+				"Use ordinary panes for read-only tasks; a single or sequential writer can work in the parent checkout without a worktree. " +
+				"Reserve unique worktree branches for parallel independent writers starting from committed state — the worktree base is committed HEAD, so uncommitted parent changes are not copied. " +
 				"Worktree runs retain their workspace after completion for parent review; they are not pushed, merged, or removed automatically. " +
 				"This is a fire-and-forget async tool: the call returns immediately with only an acknowledgement. " +
 				"When the sub-agent finishes, the harness AUTOMATICALLY delivers its result as a steer message that wakes you up and starts a new turn — you do not need to do anything to receive it. " +
