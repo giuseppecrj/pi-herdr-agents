@@ -9,4 +9,6 @@ prototypes/
 sessions/
 run.jsonl
 .reviews/
+oxlint.config.ts
+tools/
 *.tgz

@@ -73,6 +73,10 @@ describe("bundled orchestration skill", () => {
 			assert.doesNotMatch(path, /(^|\/)(?:claude\.ts|plugin)(?:\/|$)/);
 		}
 		assert.equal(packageFiles.has("agents/claude-reviewer.md"), false);
+		assert.equal(packageFiles.has("oxlint.config.ts"), false);
+		for (const path of packageFiles) {
+			assert.doesNotMatch(path, /^tools\//);
+		}
 		for (const path of packageFiles) {
 			assert.doesNotMatch(
 				path,
