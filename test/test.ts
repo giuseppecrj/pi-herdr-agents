@@ -3283,7 +3283,15 @@ describe("tool registration", () => {
 		assert.match(subagent.promptGuidelines.join("\n"), /fake\/fast/);
 		assert.match(
 			subagent.promptGuidelines.join("\n"),
-			/inherit the parent runtime/,
+			/explicitly set both model and thinking for every child/,
+		);
+		assert.match(
+			subagent.promptGuidelines.join("\n"),
+			/different provider\/family than the model that produced the work/,
+		);
+		assert.match(
+			subagent.promptGuidelines.join("\n"),
+			/Omitting model and thinking still inherits the parent runtime, but this is a discouraged fallback/,
 		);
 		assert.match(subagent.promptGuidelines.join("\n"), /login-test2/);
 	});

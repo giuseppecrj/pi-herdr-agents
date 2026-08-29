@@ -336,12 +336,12 @@ export function buildAuthenticatedModelCatalog(
     ].filter(Boolean);
     lines.push(`- ${model.provider}/${model.id} — ${facts.join(", ")}`);
   }
-  if (models.length === 0) lines.push("- none discovered; inherit the parent runtime");
+  if (models.length === 0) lines.push("- none discovered; omitting model still inherits the parent runtime");
   if (models.length > visibleModels.length) {
     lines.push(`- … ${models.length - visibleModels.length} more authenticated models omitted`);
   }
   lines.push(
-    "Default: inherit the parent model and thinking. Override thinking first; override model only when task capability, speed, cost, modality, or context warrants it.",
+    "For orchestrated children, explicitly select an exact provider/model-id by task tier first (fast for bounded mechanical work and recon, mid for ordinary implementation or review, frontier for architecture, security, hard diagnosis, or adversarial review), then set supported thinking. Reviews must use a different provider/family than the producing model. Omitting model and thinking inherits the parent runtime as a discouraged fallback.",
   );
   return lines.join("\n");
 }

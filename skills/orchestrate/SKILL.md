@@ -43,7 +43,14 @@ role. Every declared role must be Pi-backed and have a non-empty read-only tool
 set after runner derivation. Use bounded caps no higher than `maxAgents: 8` and
 `maxConcurrency: 4`; leave enough agent calls for one synthesizer and any
 permitted replacement. Exact model and thinking are mandatory for every node.
-Never inherit, guess, or fall back to a parent or role default.
+Pick each node's exact authenticated `provider/model-id` by the tier matched to
+its task: fast for bounded mechanical work and recon, mid for ordinary review,
+and frontier for architecture or hard diagnosis. Then set thinking within that
+model's supported range. When more than one provider is authenticated,
+independent reviewer nodes must use a different provider/family than the model
+that produced the work; do not reuse that family for its review. Never inherit,
+guess, or fall back to a parent or role default. Do not add tier fields to
+workflow metadata; each node continues to pin its exact provider/model.
 
 The first flow is review-only. Do not plan writers, commits, worktrees for
 writing, ticket changes, pull requests, merges, deployments, publishing,

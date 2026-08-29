@@ -169,9 +169,10 @@ function getFirstText(
 
 function buildSubagentRoutingGuidelines(catalog?: string): string[] {
 	return [
-		"For subagent model and thinking selection, inherit the parent runtime by omitting both fields unless the task warrants an override.",
-		"For subagent tasks, prefer changing thinking before changing models: minimal/low for bounded mechanical work, medium for ordinary implementation or review, and high+ for architecture, concurrency, security, or hard diagnosis.",
-		"When overriding a subagent model, use an exact authenticated provider/model-id from the live catalog below. Do not invent aliases or fuzzy names.",
+		"For orchestrated subagent work, explicitly set both model and thinking for every child: first choose a fast, mid, or frontier provider-family tier matched to task complexity, then set thinking within that model's supported range.",
+		"Use fast tier for bounded mechanical work and recon, mid tier for ordinary implementation or review, and frontier tier for architecture, security, hard diagnosis, or adversarial review. Use minimal/low thinking for mechanical work, medium for ordinary work, and high+ for hard work.",
+		"Review agents must use a different provider/family than the model that produced the work; a stronger model in the same family is quality escalation, not independent review. Use an exact authenticated provider/model-id from the live catalog below, never an alias or fuzzy name.",
+		"Omitting model and thinking still inherits the parent runtime, but this is a discouraged fallback for orchestrated children.",
 		"Before launching a new group of subagents, choose a short task slug and name each new child <task>-<role>[-n], for example login-api or login-test2. Use only plan, research, ui, api, build, test, review, browser, security, perf, or merge as roles; leave existing names unchanged. After the final launch, print name | agent kind | role | model | worktree, then use each name in prompts, handoffs, and results.",
 		catalog ??
 			"Authenticated subagent model catalog becomes available after session start.",
@@ -184,7 +185,7 @@ const ThinkingLevelSchema = Type.Union(
 	THINKING_LEVELS.map((level) => Type.Literal(level)),
 	{
 		description:
-			"Pi thinking level. Omit to inherit the parent level. Prefer changing thinking before changing models: minimal/low for bounded mechanical work, medium for ordinary implementation or review, high+ for architecture, concurrency, security, or hard diagnosis.",
+			"Pi thinking level. Pick the model tier first, then set thinking within that model's range: minimal/low for bounded mechanical work, medium for ordinary implementation or review, high+ for architecture, security, or hard diagnosis. Omitting still inherits the parent level; do not omit on orchestrated child work.",
 	},
 );
 
@@ -209,7 +210,7 @@ const SubagentParams = Type.Object({
 	model: Type.Optional(
 		Type.String({
 			description:
-				"Exact authenticated provider/model-id, or an ordered comma-separated fallback list. Omit to inherit the parent model. Fallbacks are Pi-backed only and cannot be used with worktrees.",
+				"Explicitly pick an exact authenticated provider/model-id in a fast, mid, or frontier provider-family tier matched to the task, or use an ordered comma-separated fallback list. Review must use a different provider/family than the producing model. Omitting still inherits the parent model; do not omit for orchestrated children. Fallbacks are Pi-backed only and cannot be used with worktrees.",
 		}),
 	),
 	thinking: Type.Optional(ThinkingLevelSchema),

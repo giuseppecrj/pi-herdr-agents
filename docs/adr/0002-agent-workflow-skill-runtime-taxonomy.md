@@ -132,7 +132,9 @@ the package's `/plan` workflow, not as a second kind of subagent definition.
 A role describes the work; a runtime describes which authenticated Pi
 provider/model and thinking level one invocation uses. The model-resolution
 chain is explicit invocation choice, agent default, per-agent configuration,
-global configuration, then the parent model.
+global configuration, then the parent model. Inheritance is the resolver fallback,
+not the orchestrator default; independent review requires a different
+provider/family than the model that produced the work.
 
 Apply these rules:
 

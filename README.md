@@ -197,9 +197,15 @@ This package does not install optional prerequisites.
 
 Bundled agents use model defaults from `config.json` when configured; otherwise
 they inherit the parent model. Thinking defaults still come from agent
-frontmatter or the parent level. The orchestrating agent can override either
-field for a specific task using an exact authenticated model ID and a supported
-Pi thinking level. Prefer changing thinking before changing models.
+frontmatter or the parent level. This resolution chain remains available as a
+fallback, but orchestrators should explicitly set each child's exact
+authenticated `provider/model-id` and supported thinking level. Select the
+model tier first: fast for bounded mechanical work and recon, mid for ordinary
+implementation or review, and frontier for architecture, security, hard
+diagnosis, or adversarial review. Then select thinking within that model's
+supported range. Independent reviewers must use a different provider/family
+than the model that produced the work; a stronger model in the same family is a
+quality escalation, not independent review.
 
 Discovery loads definitions in **package → global → project** order, so effective
 priority remains **project** (`.pi/agents/`) > **global**

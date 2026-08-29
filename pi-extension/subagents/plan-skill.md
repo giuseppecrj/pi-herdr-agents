@@ -38,6 +38,10 @@ Phase 7: Review
 
 ---
 
+## Runtime
+
+Set `model` and `thinking` on every spawn. Use an exact authenticated provider/model ID: a fast-tier model for scouts, a mid-tier model for ordinary workers, and a frontier-tier model only for architecture or hard diagnosis. Reviewers must use a different provider/family than workers. Do not omit `model` in this workflow.
+
 ## Fire-and-forget completion
 
 `subagent` is fire-and-forget. After each spawn:
@@ -83,6 +87,8 @@ Standard filenames:
 subagent({
   name: "🔍 Scout",
   agent: "scout",
+  model: "<scout-provider>/<fast-tier-id>",
+  thinking: "low",
   task: `Analyze the codebase for [user's request area]. Map file structure, key modules, patterns, conventions, and existing code related to [feature area]. Focus on what a planner would need to understand before designing this feature.
 
 Put your full findings in your final assistant message.`,
@@ -105,6 +111,8 @@ Spawn the interactive planner with the scout's context and the user's request. T
 subagent({
   name: "💬 Planner",
   agent: "planner",
+  model: "<planner-provider>/<frontier-tier-id>",
+  thinking: "high",
   interactive: true,
   task: `Plan: [what the user wants to build]
 
@@ -132,6 +140,8 @@ If the planner significantly changed scope (new subsystems, areas the original s
 subagent({
   name: "🔍 Scout (updated scope)",
   agent: "scout",
+  model: "<scout-provider>/<fast-tier-id>",
+  thinking: "low",
   task: "The plan changed scope. Gather context for [new areas]. Read the plan at [plan path]. Focus on [specific files/modules the planner identified that weren't in the original scout]. Put findings in your final assistant message.",
 });
 ```
@@ -171,6 +181,8 @@ Sequential example:
 subagent({
   name: "🔨 Worker 1/N",
   agent: "worker",
+  model: "<worker-provider>/<mid-tier-id>",
+  thinking: "medium",
   task: `Implement Task 1 from the plan.
 
 Plan: [plan path]
@@ -187,6 +199,8 @@ For independent writing tasks, first ensure their shared base is committed. The 
 subagent({
   name: "🔨 Task-1",
   agent: "worker",
+  model: "<worker-provider>/<mid-tier-id>",
+  thinking: "medium",
   cwd: "/absolute/path/to/source-repo",
   worktree: { branch: "plan-name/task-1", base: "HEAD" },
   task: `Implement Task 1.
@@ -229,6 +243,8 @@ After all shared-checkout changes and accepted worktree results are integrated:
 subagent({
   name: "Reviewer",
   agent: "reviewer",
+  model: "<review-provider>/<mid-tier-id>",
+  thinking: "medium",
   interactive: false,
   task: "Review the recent changes. Plan: [plan path]. Put the full review in your final assistant message.",
 });

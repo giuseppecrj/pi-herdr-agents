@@ -10,6 +10,8 @@ Run Pi inside Herdr from a Git checkout, then give each independent writing task
 subagent({
   name: "Ticket 123",
   agent: "worker",
+  model: "<worker-provider>/<mid-tier-id>",
+  thinking: "medium",
   cwd: "/path/to/repository",
   worktree: { branch: "ticket/123", base: "main" },
   task: "Implement ticket 123, run its tests, commit the result, and report the commit SHA. Do not push, merge, or remove the worktree.",
@@ -70,6 +72,8 @@ Independent tasks can launch concurrently from the same committed base:
 subagent({
   name: "API ticket",
   agent: "worker",
+  model: "<worker-provider>/<mid-tier-id>",
+  thinking: "medium",
   worktree: { branch: "tickets/api", base: "main" },
   task: "Implement the API ticket, test it, and commit. Do not push or merge.",
 });
@@ -77,6 +81,8 @@ subagent({
 subagent({
   name: "UI ticket",
   agent: "worker",
+  model: "<worker-provider>/<mid-tier-id>",
+  thinking: "medium",
   worktree: { branch: "tickets/ui", base: "main" },
   task: "Implement the UI ticket, test it, and commit. Do not push or merge.",
 });
@@ -138,6 +144,8 @@ For parallel read-only review, prepare one stable existing checkout of the pull 
 subagent({
   name: "PR reviewer",
   agent: "reviewer",
+  model: "<review-provider>/<mid-tier-id>",
+  thinking: "medium",
   cwd: "/path/to/pr-checkout",
   task: "Review base <base-sha> through head <head-sha>. First report git rev-parse HEAD. Do not modify files.",
 });
