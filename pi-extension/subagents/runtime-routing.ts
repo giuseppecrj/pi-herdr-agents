@@ -2,8 +2,8 @@ import {
   clampThinkingLevel,
   getSupportedThinkingLevels,
   type Model,
-  type ModelThinkingLevel,
 } from "@earendil-works/pi-ai";
+import { isFiniteNumber, isString } from "./type-guards.ts";
 
 export const THINKING_LEVELS = [
   "off",
@@ -16,7 +16,7 @@ export const THINKING_LEVELS = [
 ] as const;
 
 export function isThinkingLevel(value: string): value is ThinkingLevel {
-  return (THINKING_LEVELS as readonly string[]).includes(value);
+  return THINKING_LEVELS.some((level) => level === value);
 }
 
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
@@ -95,7 +95,7 @@ export function parseExactModelRef(
 }
 
 function toRoutingModel(value: any): RoutingModel | undefined {
-  if (!value || typeof value.provider !== "string" || typeof value.id !== "string") {
+  if (!value || !isString(value.provider) || !isString(value.id)) {
     return undefined;
   }
   return {
@@ -104,8 +104,8 @@ function toRoutingModel(value: any): RoutingModel | undefined {
     reasoning: value.reasoning ?? false,
     thinkingLevelMap: value.thinkingLevelMap,
     input: Array.isArray(value.input) ? value.input : undefined,
-    contextWindow: typeof value.contextWindow === "number" ? value.contextWindow : undefined,
-    maxTokens: typeof value.maxTokens === "number" ? value.maxTokens : undefined,
+    contextWindow: isFiniteNumber(value.contextWindow) ? value.contextWindow : undefined,
+    maxTokens: isFiniteNumber(value.maxTokens) ? value.maxTokens : undefined,
     cost: value.cost,
   };
 }
@@ -177,10 +177,15 @@ function formatSupported(model: RoutingModel): string {
   return levels.length > 0 ? levels.join(", ") : "(none)";
 }
 
+interface FieldSelection {
+  value?: string;
+  source: RuntimeSource;
+}
+
 function selectField(
   requestValue: string | undefined,
   agentValue: string | undefined,
-): { value?: string; source: RuntimeSource } {
+): FieldSelection {
   if (requestValue != null && requestValue !== "") {
     return { value: requestValue, source: "request" };
   }
@@ -252,14 +257,13 @@ export function resolveRuntimePlan(
       );
     }
     const supported = getSupportedThinkingLevels(asPiModel(selectedModel));
-    if (!supported.includes(preferredThinking as ModelThinkingLevel)) {
+    if (!supported.includes(preferredThinking)) {
       throw new RuntimeResolutionError(
         `thinking ${JSON.stringify(preferredThinking)} is not supported by ${JSON.stringify(`${provider}/${modelId}`)}; supported: ${formatSupported(selectedModel)}`,
       );
     }
   } else if (selectedModel) {
-    const clamped = clampThinkingLevel(asPiModel(selectedModel), preferredThinking);
-    thinking = clamped as ThinkingLevel;
+    thinking = clampThinkingLevel(asPiModel(selectedModel), preferredThinking);
     if (thinking !== preferredThinking) {
       thinkingAdjustment = {
         from: preferredThinking,
@@ -269,17 +273,18 @@ export function resolveRuntimePlan(
     }
   }
 
-  return {
+  const plan: ResolvedRuntimePlan = {
     provider,
     modelId,
     model: `${provider}/${modelId}`,
     thinking,
     modelSource: modelSelection.source,
     thinkingSource: thinkingSelection.source,
-    ...(modelSelection.value ? { requestedModel: modelSelection.value } : {}),
-    ...(thinkingSelection.value ? { requestedThinking: preferredThinking } : {}),
-    ...(thinkingAdjustment ? { thinkingAdjustment } : {}),
   };
+  if (modelSelection.value) plan.requestedModel = modelSelection.value;
+  if (thinkingSelection.value) plan.requestedThinking = preferredThinking;
+  if (thinkingAdjustment) plan.thinkingAdjustment = thinkingAdjustment;
+  return plan;
 }
 
 /** Resolve every configured fallback before launching the first child. */

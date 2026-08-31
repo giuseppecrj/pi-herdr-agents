@@ -2,6 +2,7 @@ import type {
 	AgentToolResult,
 	ExtensionAPI,
 	ExtensionContext,
+	SessionShutdownEvent,
 } from "@earendil-works/pi-coding-agent";
 import { keyHint } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "@sinclair/typebox";
@@ -71,6 +72,7 @@ import {
 	type WorkflowRolePolicy,
 	type WorkflowTerminalGate,
 	type WorkflowTerminalOutcome,
+	type WorkflowTerminalState,
 } from "./workflow.ts";
 
 import {
@@ -90,9 +92,17 @@ import {
 } from "./status.ts";
 import {
 	readSubagentActivityFile,
+	isSubagentActivityScope,
 	type ActivityReadResult,
 	type SubagentActivityState,
 } from "./activity.ts";
+import {
+	isFiniteNumber,
+	isPlainObject,
+	isString,
+	type JsonObject,
+	type JsonValue,
+} from "./type-guards.ts";
 import {
 	createLifecycle,
 	formatLifecycleTransitionLine,
@@ -133,6 +143,17 @@ const WIDGET_INTERVAL_KEY = Symbol.for("pi-subagents/widget-interval");
 const STATUS_INTERVAL_KEY = Symbol.for("pi-subagents/status-interval");
 const RUNTIME_KEY = Symbol.for("pi-subagents/runtime");
 
+function readGlobalSlot<T>(key: symbol): T | undefined {
+	// SAFETY: `globalThis` has no index signature for our extension-private
+	// symbol keys; only this module ever writes the values read back here.
+	return (globalThis as Record<symbol, T | undefined>)[key];
+}
+
+function writeGlobalSlot<T>(key: symbol, value: T): void {
+	// SAFETY: see readGlobalSlot above; this module is the sole writer.
+	(globalThis as Record<symbol, T | undefined>)[key] = value;
+}
+
 const BTW_BOUNDARY = `You are answering an ephemeral BTW side question.
 Treat inherited conversation history only as reference context. Do not resume or complete an
 earlier task. Answer only the question after this boundary. Do not modify the workspace unless
@@ -155,15 +176,15 @@ function getFirstText(
 }
 
 {
-	const prevInterval = (globalThis as any)[WIDGET_INTERVAL_KEY];
+	const prevInterval = readGlobalSlot<ReturnType<typeof setInterval>>(WIDGET_INTERVAL_KEY);
 	if (prevInterval) {
 		clearInterval(prevInterval);
-		(globalThis as any)[WIDGET_INTERVAL_KEY] = null;
+		writeGlobalSlot<ReturnType<typeof setInterval> | null>(WIDGET_INTERVAL_KEY, null);
 	}
-	const prevStatusInterval = (globalThis as any)[STATUS_INTERVAL_KEY];
+	const prevStatusInterval = readGlobalSlot<ReturnType<typeof setInterval>>(STATUS_INTERVAL_KEY);
 	if (prevStatusInterval) {
 		clearInterval(prevStatusInterval);
-		(globalThis as any)[STATUS_INTERVAL_KEY] = null;
+		writeGlobalSlot<ReturnType<typeof setInterval> | null>(STATUS_INTERVAL_KEY, null);
 	}
 }
 
@@ -449,10 +470,12 @@ function listMarkdownFiles(path: string): string[] {
 		.map((entry) => join(path, entry));
 }
 
-function findPackageMetadata(path: string): {
+interface PackageMetadata {
 	provider?: string;
 	providerVersion?: string;
-} {
+}
+
+function findPackageMetadata(path: string): PackageMetadata {
 	let current = statSync(path).isDirectory() ? path : dirname(path);
 	while (true) {
 		const packagePath = join(current, "package.json");
@@ -460,8 +483,8 @@ function findPackageMetadata(path: string): {
 			try {
 				const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
 				return {
-					provider: typeof pkg.name === "string" ? pkg.name : undefined,
-					providerVersion: typeof pkg.version === "string" ? pkg.version : undefined,
+					provider: isString(pkg.name) ? pkg.name : undefined,
+					providerVersion: isString(pkg.version) ? pkg.version : undefined,
 				};
 			} catch {
 				return {};
@@ -473,10 +496,14 @@ function findPackageMetadata(path: string): {
 	}
 }
 
-function discoverRolePackPaths(pi?: Pick<ExtensionAPI, "events">): {
+interface RolePackDiscoveryResult {
 	paths: string[];
 	diagnostics: AgentDiagnostic[];
-} {
+}
+
+function discoverRolePackPaths(
+	pi?: Pick<ExtensionAPI, "events">,
+): RolePackDiscoveryResult {
 	const paths = new Set<string>();
 	const diagnostics: AgentDiagnostic[] = [];
 	if (!pi?.events) return { paths: [], diagnostics };
@@ -484,8 +511,8 @@ function discoverRolePackPaths(pi?: Pick<ExtensionAPI, "events">): {
 	try {
 		pi.events.emit(ROLE_PACK_DISCOVERY_EVENT, {
 			apiVersion: 1,
-			register(path: unknown) {
-				if (typeof path !== "string" || !isAbsolute(path)) {
+			register(path: any) {
+				if (!isString(path) || !isAbsolute(path)) {
 					diagnostics.push({
 						code: "invalid-role-pack-path",
 						message: "Role packs must register an absolute file or directory path.",
@@ -720,15 +747,17 @@ function resolveEffectiveSessionMode(
 	return agentDefs?.sessionMode ?? "standalone";
 }
 
-function resolveLaunchBehavior(
-	params: Static<typeof SubagentParams>,
-	agentDefs: AgentDefaults | null,
-): {
+interface LaunchBehavior {
 	sessionMode: SubagentSessionMode;
 	seededSessionMode: "lineage-only" | "fork" | null;
 	inheritsConversationContext: boolean;
 	taskDelivery: "direct" | "artifact";
-} {
+}
+
+function resolveLaunchBehavior(
+	params: Static<typeof SubagentParams>,
+	agentDefs: AgentDefaults | null,
+): LaunchBehavior {
 	const sessionMode = resolveEffectiveSessionMode(params, agentDefs);
 	const inheritsConversationContext = sessionMode === "fork";
 	return {
@@ -821,7 +850,7 @@ function shouldRetainSubagentSurface(
 	return !!running.worktree;
 }
 
-const BUNDLED_WORKTREE_WARNINGS: Readonly<Record<string, string>> = {
+const BUNDLED_WORKTREE_WARNINGS = {
 	scout:
 		"The bundled scout role is read-only and normally does not need a new worktree. " +
 		"Use an ordinary pane instead; to inspect an existing worker result, start it in the retained worktree path. " +
@@ -834,14 +863,16 @@ const BUNDLED_WORKTREE_WARNINGS: Readonly<Record<string, string>> = {
 		"The bundled adversarial-reviewer coordinates read-only reviewers and writes review artifacts. " +
 		"It normally uses an ordinary pane, not a new worktree. " +
 		"Herdr worktree workspaces persist until explicitly removed.",
-};
+} satisfies Readonly<Record<string, string>>;
 
 function resolveWorktreeLaunchWarning(
 	params: Pick<Static<typeof SubagentParams>, "agent" | "worktree">,
 	pi?: Pick<ExtensionAPI, "events">,
 ): string | undefined {
 	if (!params.worktree || !params.agent) return undefined;
-	const warning = BUNDLED_WORKTREE_WARNINGS[params.agent];
+	const warning = Object.entries(BUNDLED_WORKTREE_WARNINGS).find(
+		([agent]) => agent === params.agent,
+	)?.[1];
 	return warning && loadAgentDefaults(params.agent, pi)?.source === "package"
 		? warning
 		: undefined;
@@ -932,7 +963,7 @@ function formatSessionReference(sessionFile?: string): string {
 
 function resolveUnexpectedErrorPresentation(
 	prefix: string,
-	error: unknown,
+	error: any,
 	sessionFile?: string,
 ): string {
 	const message = error instanceof Error ? error.message : String(error);
@@ -942,10 +973,79 @@ function resolveUnexpectedErrorPresentation(
 	);
 }
 
+interface SubagentResultDetails {
+	name: string;
+	task?: string;
+	agent?: string;
+	exitCode?: number;
+	elapsed?: number;
+	sessionFile?: string;
+	error?: string;
+	errorMessage?: string;
+	fallbackAttempts?: string[];
+	worktree?: WorktreeHandoff;
+	runtimePlan?: ResolvedRuntimePlan;
+}
+
+interface WorkflowAgentCompletedDetails extends JsonObject {
+	id: string;
+	node: string;
+	role: string;
+	sessionFile: string;
+	sessionExists: boolean;
+	exitCode: number;
+	finalAssistantContentLength: number;
+	errorMessage?: string;
+	finalAssistantStopReason?: string;
+}
+
+interface WorkflowResultEnvelope extends JsonObject {
+	runId: string;
+	state: WorkflowTerminalState;
+	result?: JsonValue;
+	error?: { code: string; message: string };
+	checkout?: JsonObject;
+}
+
+interface SubagentPingDetails {
+	name: string;
+	message: string;
+	agent?: string;
+	sessionFile: string;
+	worktree?: WorktreeHandoff;
+}
+
+interface SubagentStartedDetails {
+	id: string;
+	name: string;
+	task: string;
+	agent?: string;
+	sessionFile: string;
+	launchScriptFile?: string;
+	model?: string;
+	thinking?: ThinkingLevel;
+	runtimePlan?: ResolvedRuntimePlan;
+	worktree?: WorktreeLaunch;
+	warning?: string;
+	status: "started";
+}
+
+interface PartialWorktreeArgs {
+	branch?: unknown;
+}
+
+interface PartialSubagentArgs {
+	name?: unknown;
+	task?: unknown;
+	agent?: unknown;
+	cwd?: unknown;
+	worktree?: PartialWorktreeArgs;
+}
+
 function sendSubagentResult(
 	api: Pick<ExtensionAPI, "sendMessage">,
 	content: string,
-	details: Record<string, unknown>,
+	details: SubagentResultDetails,
 ): void {
 	const resultContent = boundResultPresentation(content, "");
 	const promptContent = boundResultPresentation(
@@ -1146,8 +1246,8 @@ function createSubagentRuntime(): SubagentRuntime {
 
 /** Runtime state preserved across /reload. */
 const runtime: SubagentRuntime =
-	(globalThis as any)[RUNTIME_KEY] ??
-	((globalThis as any)[RUNTIME_KEY] = createSubagentRuntime());
+	readGlobalSlot<SubagentRuntime>(RUNTIME_KEY) ?? createSubagentRuntime();
+writeGlobalSlot(RUNTIME_KEY, runtime);
 if (!runtime.workflowOutcomes) {
 	runtime.workflowOutcomes = new Map<string, WorkflowTerminalOutcome>();
 }
@@ -1156,7 +1256,9 @@ if (runtime.workflowStartupScanned === undefined) {
 }
 const runningSubagents = runtime.runningSubagents;
 
-export function shouldPreserveSubagentsOnShutdown(reason: unknown): boolean {
+export function shouldPreserveSubagentsOnShutdown(
+	reason: SessionShutdownEvent["reason"] | undefined,
+): boolean {
 	return (
 		reason === "reload" ||
 		reason === "new" ||
@@ -1166,7 +1268,7 @@ export function shouldPreserveSubagentsOnShutdown(reason: unknown): boolean {
 }
 
 export function cleanupSubagentsForShutdown(
-	reason: unknown,
+	reason: SessionShutdownEvent["reason"] | undefined,
 	agents: Map<string, Pick<RunningSubagent, "abortController" | "lifecycle">>,
 ): void {
 	if (shouldPreserveSubagentsOnShutdown(reason)) return;
@@ -1367,7 +1469,7 @@ function updateWidget() {
 		if (widgetInterval) {
 			clearInterval(widgetInterval);
 			widgetInterval = null;
-			(globalThis as any)[WIDGET_INTERVAL_KEY] = null;
+			writeGlobalSlot<ReturnType<typeof setInterval> | null>(WIDGET_INTERVAL_KEY, null);
 		}
 		return;
 	}
@@ -1442,35 +1544,31 @@ function ensureLifecycle(running: RunningSubagent): SubagentLifecycle {
 		state?.phase === "waiting" ||
 		state?.phase === "starting"
 	) {
+		const activity: SubagentActivityState = {
+			version: 1,
+			runningChildId: running.id,
+			createdAt: running.startTime,
+			updatedAt: state.lastActivityAtMs ?? running.startTime,
+			sequence: state.lastActivitySequence ?? 0,
+			latestEvent:
+				state.latestEvent === "agent_end" ? "agent_end" : "agent_start",
+			phase: state.phase,
+			agentActive: state.phase === "active",
+			turnActive: state.phase === "active",
+			providerActive: false,
+			toolActive: state.activeScope === "tool",
+		};
+		if (isSubagentActivityScope(state.activeScope)) {
+			activity.activeScope = state.activeScope;
+		}
+		if (state.activeSinceMs != null) activity.activeSince = state.activeSinceMs;
+		if (state.waitingSinceMs != null) activity.waitingSince = state.waitingSinceMs;
+		if (state.activityLabel && state.activeScope === "tool") {
+			activity.toolName = state.activityLabel;
+		}
 		lifecycle = observeActivity(
 			lifecycle,
-			{
-				ok: true,
-				activity: {
-					version: 1,
-					runningChildId: running.id,
-					createdAt: running.startTime,
-					updatedAt: state.lastActivityAtMs ?? running.startTime,
-					sequence: state.lastActivitySequence ?? 0,
-					latestEvent:
-						state.latestEvent === "agent_end" ? "agent_end" : "agent_start",
-					phase: state.phase,
-					agentActive: state.phase === "active",
-					turnActive: state.phase === "active",
-					providerActive: false,
-					toolActive: state.activeScope === "tool",
-					...(state.activeScope ? { activeScope: state.activeScope as any } : {}),
-					...(state.activeSinceMs == null
-						? {}
-						: { activeSince: state.activeSinceMs }),
-					...(state.waitingSinceMs == null
-						? {}
-						: { waitingSince: state.waitingSinceMs }),
-					...(state.activityLabel && state.activeScope === "tool"
-						? { toolName: state.activityLabel }
-						: {}),
-				},
-			},
+			{ ok: true, activity },
 			state.lastActivityAtMs ?? running.startTime,
 		);
 	} else if (running.startTime) {
@@ -1614,7 +1712,7 @@ function startStatusRefresh(pi: ExtensionAPI) {
 			if (statusInterval) {
 				clearInterval(statusInterval);
 				statusInterval = null;
-				(globalThis as any)[STATUS_INTERVAL_KEY] = null;
+				writeGlobalSlot<ReturnType<typeof setInterval> | null>(STATUS_INTERVAL_KEY, null);
 			}
 			return;
 		}
@@ -1670,7 +1768,7 @@ function startStatusRefresh(pi: ExtensionAPI) {
 		}
 	}, 1000);
 
-	(globalThis as any)[STATUS_INTERVAL_KEY] = statusInterval;
+	writeGlobalSlot(STATUS_INTERVAL_KEY, statusInterval);
 }
 
 function buildBtwLaunchCommand(params: {
@@ -1802,6 +1900,12 @@ export const __test__ = {
 	getActiveWorkflow() {
 		return runtime.activeWorkflow;
 	},
+	getPendingWorkflow() {
+		return runtime.pendingWorkflow;
+	},
+	setPendingWorkflowForTest(pending: PendingWorkflow | undefined) {
+		runtime.pendingWorkflow = pending;
+	},
 };
 
 function startWidgetRefresh() {
@@ -1810,7 +1914,7 @@ function startWidgetRefresh() {
 	widgetInterval = setInterval(() => {
 		updateWidget();
 	}, 1000);
-	(globalThis as any)[WIDGET_INTERVAL_KEY] = widgetInterval;
+	writeGlobalSlot(WIDGET_INTERVAL_KEY, widgetInterval);
 }
 
 /**
@@ -2038,15 +2142,12 @@ async function watchSubagent(
 					observedModel === running.runtimePlan.model
 						? undefined
 						: `Resolved model ${running.runtimePlan.model} but child reported ${observedModel}`;
-				running.runtimePlan = {
-					...running.runtimePlan,
-					...(observedThinking ? { thinking: observedThinking } : {}),
-					observed: {
-						model: observedModel,
-						...(observedThinking ? { thinking: observedThinking } : {}),
-					},
-					...(mismatch ? { runtimeMismatch: mismatch } : {}),
-				};
+				const updatedPlan: ResolvedRuntimePlan = { ...running.runtimePlan };
+				if (observedThinking) updatedPlan.thinking = observedThinking;
+				updatedPlan.observed = { model: observedModel };
+				if (observedThinking) updatedPlan.observed.thinking = observedThinking;
+				if (mismatch) updatedPlan.runtimeMismatch = mismatch;
+				running.runtimePlan = updatedPlan;
 			}
 			summary =
 				findLastAssistantMessage(allEntries) ??
@@ -2081,7 +2182,7 @@ async function watchSubagent(
 						result.exitCode,
 					);
 
-		return {
+		const watchResult: SubagentResult = {
 			name,
 			task,
 			summary,
@@ -2089,9 +2190,10 @@ async function watchSubagent(
 			exitCode: result.exitCode,
 			elapsed,
 			ping: result.ping,
-			...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
-			...(worktreeHandoff ? { worktree: worktreeHandoff } : {}),
 		};
+		if (result.errorMessage) watchResult.errorMessage = result.errorMessage;
+		if (worktreeHandoff) watchResult.worktree = worktreeHandoff;
+		return watchResult;
 	} catch (err: any) {
 		const worktreeHandoff = finalizeSubagentSurface(running, "failed", true);
 		running.lifecycle = markFailed(
@@ -2103,7 +2205,7 @@ async function watchSubagent(
 		updateWidget();
 
 		if (signal.aborted) {
-			return {
+			const cancelledResult: SubagentResult = {
 				name,
 				task,
 				summary: "Subagent cancelled.",
@@ -2111,18 +2213,20 @@ async function watchSubagent(
 				elapsed: Math.floor((Date.now() - startTime) / 1000),
 				error: "cancelled",
 				sessionFile,
-				...(worktreeHandoff ? { worktree: worktreeHandoff } : {}),
 			};
+			if (worktreeHandoff) cancelledResult.worktree = worktreeHandoff;
+			return cancelledResult;
 		}
-		return {
+		const errorResult: SubagentResult = {
 			name,
 			task,
 			summary: `Subagent error: ${err?.message ?? String(err)}`,
 			exitCode: 1,
 			elapsed: Math.floor((Date.now() - startTime) / 1000),
 			error: err?.message ?? String(err),
-			...(worktreeHandoff ? { worktree: worktreeHandoff } : {}),
 		};
+		if (worktreeHandoff) errorResult.worktree = worktreeHandoff;
+		return errorResult;
 	}
 }
 
@@ -2263,20 +2367,19 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		if (widgetInterval) {
 			clearInterval(widgetInterval);
 			widgetInterval = null;
-			(globalThis as any)[WIDGET_INTERVAL_KEY] = null;
+			writeGlobalSlot<ReturnType<typeof setInterval> | null>(WIDGET_INTERVAL_KEY, null);
 		}
 		if (statusInterval) {
 			clearInterval(statusInterval);
 			statusInterval = null;
-			(globalThis as any)[STATUS_INTERVAL_KEY] = null;
+			writeGlobalSlot<ReturnType<typeof setInterval> | null>(STATUS_INTERVAL_KEY, null);
 		}
 
-		const shutdownReason = (event as any).reason;
-		cleanupSubagentsForShutdown(shutdownReason, runningSubagents);
+		cleanupSubagentsForShutdown(event.reason, runningSubagents);
 		if (
-			shutdownReason === "new" ||
-			shutdownReason === "resume" ||
-			shutdownReason === "fork"
+			event.reason === "new" ||
+			event.reason === "resume" ||
+			event.reason === "fork"
 		) {
 			runtime.pendingWorkflow = undefined;
 		}
@@ -2326,31 +2429,23 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		journal: ReturnType<typeof createWorkflowJournal>,
 		roles: WorkflowRole[],
 		prompt: string,
-		options: unknown,
+		options: any,
 	) => {
 		if (owner.controller.signal.aborted || owner.gate.phase !== "running") {
 			return workflowFailure("cancelled", "Workflow cancelled.");
 		}
-		if (!options || typeof options !== "object" || Array.isArray(options)) {
+		if (!isPlainObject(options)) {
 			return workflowFailure(
 				"workflow_agent_options",
 				"Workflow agent options must contain kind: review and one declared review node.",
 			);
 		}
-		const entries = Object.entries(options as Record<string, unknown>);
-		const {
-			kind,
-			node,
-			role: legacyRole,
-		} = options as {
-			kind?: unknown;
-			node?: unknown;
-			role?: unknown;
-		};
+		const entries = Object.entries(options);
+		const { kind, node, role: legacyRole } = options;
 		if (
 			entries.length !== 2 ||
 			kind !== "review" ||
-			(typeof node !== "string" && typeof legacyRole !== "string")
+			(!isString(node) && !isString(legacyRole))
 		) {
 			return workflowFailure(
 				"workflow_agent_options",
@@ -2359,8 +2454,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		}
 		const resolved = resolveWorkflowReviewNode(
 			candidate.rolePolicies,
-			typeof node === "string" ? node : undefined,
-			typeof legacyRole === "string" ? legacyRole : undefined,
+			isString(node) ? node : undefined,
+			isString(legacyRole) ? legacyRole : undefined,
 		);
 		if ("error" in resolved)
 			return workflowFailure("policy_error", resolved.error);
@@ -2436,19 +2531,20 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			const sessionExists = existsSync(sessionFile);
 			const childEntries = sessionExists ? getNewEntries(sessionFile, 0) : [];
 			const finalAssistant = inspectFinalAssistantMessage(childEntries);
-			journal.append("agent_completed", {
+			const completedDetails: WorkflowAgentCompletedDetails = {
 				id,
 				node: nodeId,
 				role: role.name,
 				sessionFile,
 				sessionExists,
 				exitCode: watched.exitCode,
-				...(watched.errorMessage ? { errorMessage: watched.errorMessage } : {}),
 				finalAssistantContentLength: finalAssistant.contentLength,
-				...(finalAssistant.stopReason
-					? { finalAssistantStopReason: finalAssistant.stopReason }
-					: {}),
-			});
+			};
+			if (watched.errorMessage) completedDetails.errorMessage = watched.errorMessage;
+			if (finalAssistant.stopReason) {
+				completedDetails.finalAssistantStopReason = finalAssistant.stopReason;
+			}
+			journal.append("agent_completed", completedDetails);
 			if (watched.exitCode !== 0 || watched.errorMessage) {
 				return workflowFailure(
 					"child_error",
@@ -2508,13 +2604,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		outcome: WorkflowTerminalOutcome,
 		checkoutResult?: WorkflowReaderCheckout,
 	) => {
-		const envelope = {
+		const envelope: WorkflowResultEnvelope = {
 			runId: candidate.runId,
 			state: outcome.state,
-			...(outcome.result === undefined ? {} : { result: outcome.result }),
-			...(outcome.error ? { error: outcome.error } : {}),
-			...(checkoutResult ? { checkout: checkoutResult } : {}),
 		};
+		if (outcome.result !== undefined) envelope.result = outcome.result;
+		if (outcome.error) envelope.error = outcome.error;
+		if (checkoutResult) envelope.checkout = { ...checkoutResult };
 		const terminalEventId = journal.append(outcome.state, { envelope });
 		const content =
 			outcome.state === "cancelled"
@@ -3202,18 +3298,19 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 								? `\n\n${formatWorktreeHandoff(result.worktree)}`
 								: "";
 							const sessionRef = `\n\nSession: ${result.sessionFile}\nResume: pi --session ${result.sessionFile}`;
+							const pingDetails: SubagentPingDetails = {
+								name: result.ping.name,
+								message: result.ping.message,
+								agent: running.agent,
+								sessionFile: result.sessionFile,
+							};
+							if (result.worktree) pingDetails.worktree = result.worktree;
 							completionApi.sendMessage(
 								{
 									customType: "subagent_ping",
 									content: `Sub-agent "${result.ping.name}" needs help (${formatElapsed(result.elapsed)}):\n\n${result.ping.message}${worktreeRef}${sessionRef}`,
 									display: true,
-									details: {
-										name: result.ping.name,
-										message: result.ping.message,
-										agent: running.agent,
-										sessionFile: result.sessionFile,
-										...(result.worktree ? { worktree: result.worktree } : {}),
-									},
+									details: pingDetails,
 								},
 								{ triggerTurn: true, deliverAs: "steer" },
 							);
@@ -3226,22 +3323,19 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 							completedRunning.runtimePlan?.runtimeMismatch,
 						);
 
-						sendSubagentResult(completionApi, presentation, {
+						const resultDetails: SubagentResultDetails = {
 							name: completedRunning.name,
 							task: completedRunning.task,
 							agent: completedRunning.agent,
 							exitCode: result.exitCode,
 							elapsed: result.elapsed,
 							sessionFile: result.sessionFile,
-							...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
-							...(result.fallbackAttempts
-								? { fallbackAttempts: result.fallbackAttempts }
-								: {}),
-							...(result.worktree ? { worktree: result.worktree } : {}),
-							...(completedRunning.runtimePlan
-								? { runtimePlan: completedRunning.runtimePlan }
-								: {}),
-						});
+						};
+						if (result.errorMessage) resultDetails.errorMessage = result.errorMessage;
+						if (result.fallbackAttempts) resultDetails.fallbackAttempts = result.fallbackAttempts;
+						if (result.worktree) resultDetails.worktree = result.worktree;
+						if (completedRunning.runtimePlan) resultDetails.runtimePlan = completedRunning.runtimePlan;
+						sendSubagentResult(completionApi, presentation, resultDetails);
 					})
 					.catch((err) => {
 						if (!shouldDeliverSubagentCompletion(running)) {
@@ -3253,6 +3347,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						running.lifecycle = markDelivery(running.lifecycle, "delivered");
 						runningSubagents.delete(running.id);
 						updateWidget();
+						const errDetails: SubagentResultDetails = {
+							name: running.name,
+							task: running.task,
+							error: err?.message,
+							sessionFile: running.sessionFile,
+						};
+						if (running.worktree) errDetails.worktree = running.worktree;
 						sendSubagentResult(
 							selectCompletionApi(pi, runtime.pi),
 							resolveUnexpectedErrorPresentation(
@@ -3260,17 +3361,25 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 								err,
 								running.sessionFile,
 							),
-							{
-								name: running.name,
-								task: running.task,
-								error: err?.message,
-								sessionFile: running.sessionFile,
-								...(running.worktree ? { worktree: running.worktree } : {}),
-							},
+							errDetails,
 						);
 					});
 
 				// Return immediately
+				const startedDetails: SubagentStartedDetails = {
+					id: running.id,
+					name: params.name,
+					task: params.task,
+					agent: params.agent,
+					sessionFile: running.sessionFile,
+					launchScriptFile: running.launchScriptFile,
+					model: running.runtimePlan?.model,
+					thinking: running.runtimePlan?.thinking,
+					runtimePlan: running.runtimePlan,
+					status: "started",
+				};
+				if (running.worktree) startedDetails.worktree = running.worktree;
+				if (worktreeLaunchWarning) startedDetails.warning = worktreeLaunchWarning;
 				return {
 					content: [
 						{
@@ -3286,41 +3395,32 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 								`Until then, move on to other work or tell the user you're waiting.`,
 						},
 					],
-					details: {
-						id: running.id,
-						name: params.name,
-						task: params.task,
-						agent: params.agent,
-						sessionFile: running.sessionFile,
-						launchScriptFile: running.launchScriptFile,
-						model: running.runtimePlan?.model,
-						thinking: running.runtimePlan?.thinking,
-						runtimePlan: running.runtimePlan,
-						...(running.worktree ? { worktree: running.worktree } : {}),
-						...(worktreeLaunchWarning ? { warning: worktreeLaunchWarning } : {}),
-						status: "started",
-					},
+					details: startedDetails,
 				};
 			},
 
 			renderCall(args, theme) {
-				const partialArgs = args as Record<string, unknown>;
+				const partialArgs: PartialSubagentArgs = isPlainObject(args)
+					? args
+					: {};
 				const name =
-					typeof partialArgs.name === "string" && partialArgs.name
+					isString(partialArgs.name) && partialArgs.name
 						? partialArgs.name
 						: "(unnamed)";
-				const task = typeof partialArgs.task === "string" ? partialArgs.task : "";
+				const task = isString(partialArgs.task) ? partialArgs.task : "";
 				const agent =
-					typeof partialArgs.agent === "string" && partialArgs.agent
+					isString(partialArgs.agent) && partialArgs.agent
 						? theme.fg("dim", ` (${partialArgs.agent})`)
 						: "";
 				const cwdHint =
-					typeof partialArgs.cwd === "string" && partialArgs.cwd
+					isString(partialArgs.cwd) && partialArgs.cwd
 						? theme.fg("dim", ` in ${partialArgs.cwd}`)
 						: "";
-				const worktree = partialArgs.worktree as { branch?: unknown } | undefined;
+				const worktree = isPlainObject(partialArgs.worktree)
+					? partialArgs.worktree
+					: undefined;
 				const worktreeHint =
-					typeof worktree?.branch === "string"
+					isString(worktree?.branch)
 						? theme.fg("dim", ` on ${worktree.branch} (worktree)`)
 						: "";
 				let text =
@@ -3350,6 +3450,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			},
 
 			renderResult(result, _opts, theme) {
+				// SAFETY: renderResult only ever receives the details this tool's own
+				// execute() above returned; the framework's TDetails type isn't threaded
+				// through this callback precisely enough for TypeScript to see that.
 				const details = result.details as any;
 				const name = details?.name ?? "(unnamed)";
 
@@ -3415,6 +3518,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			},
 
 			renderResult(result, _opts, theme) {
+				// SAFETY: renderResult only ever receives the details this tool's own
+				// execute() above returned; the framework's TDetails type isn't threaded
+				// through this callback precisely enough for TypeScript to see that.
 				const details = result.details as any;
 				if (details?.status === "interrupt_requested") {
 					return new Text(
@@ -3469,6 +3575,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			},
 
 			renderResult(result, _opts, theme) {
+				// SAFETY: renderResult only ever receives the details this tool's own
+				// execute() above returned; the framework's TDetails type isn't threaded
+				// through this callback precisely enough for TypeScript to see that.
 				const details = result.details as any;
 				const agents = details?.agents ?? [];
 				const diagnostics = details?.diagnostics ?? [];
@@ -3544,6 +3653,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			},
 
 			renderResult(result, _opts, theme) {
+				// SAFETY: renderResult only ever receives the details this tool's own
+				// execute() above returned; the framework's TDetails type isn't threaded
+				// through this callback precisely enough for TypeScript to see that.
 				const details = result.details as any;
 				const name = details?.name ?? "Resume";
 
@@ -3650,15 +3762,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 							running.runtimePlan?.runtimeMismatch,
 						);
 
-						sendSubagentResult(completionApi, presentation, {
+						const resumeDetails: SubagentResultDetails = {
 							name,
 							task: params.message ?? "resumed session",
 							exitCode: result.exitCode,
 							elapsed: result.elapsed,
 							sessionFile: params.sessionPath,
-							...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
-							...(running.runtimePlan ? { runtimePlan: running.runtimePlan } : {}),
-						});
+						};
+						if (result.errorMessage) resumeDetails.errorMessage = result.errorMessage;
+						if (running.runtimePlan) resumeDetails.runtimePlan = running.runtimePlan;
+						sendSubagentResult(completionApi, presentation, resumeDetails);
 					})
 					.catch((err) => {
 						if (!shouldDeliverSubagentCompletion(running)) {
@@ -3967,6 +4080,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 	// ── subagent_result message renderer ──
 	pi.registerMessageRenderer("subagent_result", (message, options, theme) => {
+		// SAFETY: this renderer is only ever wired to messages this extension sends
+		// with customType "subagent_result"; registerMessageRenderer has no static
+		// link between the customType string and a details shape.
 		const details = message.details as any;
 		if (!details) return undefined;
 
@@ -3975,8 +4091,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			render(width: number): string[] {
 				const name = details.name ?? "subagent";
 				const exitCode = details.exitCode ?? 0;
-				const errorMessage =
-					typeof details.errorMessage === "string" ? details.errorMessage : "";
+				const errorMessage = isString(details.errorMessage) ? details.errorMessage : "";
 				const failed = exitCode !== 0 || !!errorMessage;
 				const elapsed =
 					details.elapsed == null ? "?" : formatElapsed(details.elapsed);
@@ -3994,12 +4109,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					: "";
 
 				const header = `${icon} ${theme.fg("toolTitle", theme.bold(name))}${agentTag} ${theme.fg("dim", "—")} ${status} ${theme.fg("dim", `(${elapsed})`)}`;
-				const rawContent =
-					typeof details.resultContent === "string"
-						? details.resultContent
-						: typeof message.content === "string"
-							? message.content
-							: "";
+				const rawContent = isString(details.resultContent)
+					? details.resultContent
+					: isString(message.content)
+						? message.content
+						: "";
 
 				// Clean summary (remove session ref and leading label for display)
 				const summary = rawContent
@@ -4057,9 +4171,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 	// ── subagent_status message renderer ──
 	pi.registerMessageRenderer("subagent_status", (message, options, theme) => {
+		// SAFETY: this renderer is only ever wired to messages this extension sends
+		// with customType "subagent_status"; registerMessageRenderer has no static
+		// link between the customType string and a details shape.
 		const details = message.details as any;
 		const lines = Array.isArray(details?.lines) ? details.lines : [];
-		const overflow = typeof details?.overflow === "number" ? details.overflow : 0;
+		const overflow = isFiniteNumber(details?.overflow) ? details.overflow : 0;
 		if (lines.length === 0 && overflow === 0) return undefined;
 
 		return {
@@ -4093,6 +4210,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 	// ── subagent_ping message renderer ──
 	pi.registerMessageRenderer("subagent_ping", (message, options, theme) => {
+		// SAFETY: this renderer is only ever wired to messages this extension sends
+		// with customType "subagent_ping"; registerMessageRenderer has no static
+		// link between the customType string and a details shape.
 		const details = message.details as any;
 		if (!details) return undefined;
 

@@ -13,6 +13,7 @@ import { getSubagentActivityFile } from "./activity.ts";
 import { createLifecycle, type SubagentLifecycle } from "./lifecycle.ts";
 import type { ResolvedRuntimePlan } from "./runtime-routing.ts";
 import { HerdrWorktreeCreateError } from "./herdr.ts";
+import type { JsonObject } from "./type-guards.ts";
 import {
 	createWorktreeSessionFork,
 	seedSubagentSessionFile,
@@ -43,6 +44,20 @@ export interface WorktreeLaunch {
 	sessionFile?: string;
 	sourceSessionFile?: string;
 	handoffMessage?: string;
+}
+
+interface FailedWorktreeManifest extends JsonObject {
+	state: "failed";
+	id: string;
+	name: string;
+	sourceCwd: string;
+	branch: string;
+	baseRef: string;
+	baseSha: string;
+	createdAt: number;
+	path?: string;
+	workspaceId?: string;
+	error?: string;
 }
 
 export interface WorktreeHandoff extends WorktreeLaunch {
@@ -356,14 +371,15 @@ function prepareLaunchSurface(
 			baseSha,
 		);
 	} catch (error) {
-		writeWorktreeManifest(manifestFile, {
+		const failedManifest: FailedWorktreeManifest = {
 			state: "failed",
 			...ownership,
-			...(error instanceof HerdrWorktreeCreateError
-				? error.recoveredWorktree
-				: {}),
-			error: errorMessage(error),
-		});
+		};
+		if (error instanceof HerdrWorktreeCreateError) {
+			Object.assign(failedManifest, error.recoveredWorktree);
+		}
+		failedManifest.error = errorMessage(error);
+		writeWorktreeManifest(manifestFile, failedManifest);
 		throw error;
 	}
 
@@ -794,10 +810,10 @@ function resolveGitCommit(cwd: string, ref: string): string {
 
 export function writeWorktreeManifest(
 	path: string,
-	value: Record<string, unknown>,
+	value: JsonObject,
 ): void {
 	mkdirSync(dirname(path), { recursive: true });
-	let existing: Record<string, unknown> = {};
+	let existing: JsonObject = {};
 	if (existsSync(path)) {
 		try {
 			existing = JSON.parse(readFileSync(path, "utf8"));
@@ -931,6 +947,6 @@ export function runSubagentScript(
 	}
 }
 
-function errorMessage(error: unknown): string {
+function errorMessage(error: any): string {
 	return error instanceof Error ? error.message : String(error);
 }

@@ -114,10 +114,9 @@ export function observePaneInspection(
   }
 
   if (inspection.kind === "missing") {
-    return {
-      ...lifecycle,
-      pane: { kind: "missing", detectedAt: observedAt, ...(inspection.error ? { error: inspection.error } : {}) },
-    };
+    const pane: PaneObservation = { kind: "missing", detectedAt: observedAt };
+    if (inspection.error) pane.error = inspection.error;
+    return { ...lifecycle, pane };
   }
 
   const agentStatus = inspection.agentStatus;
@@ -155,12 +154,13 @@ export function observePaneInspection(
           observedAt: lifecycle.turn.kind === "starting" ? lifecycle.turn.observedAt : observedAt,
         };
   } else if (agentStatus === "working") {
-    turn = {
+    const activeTurn: TurnState = {
       kind: "active",
       startedAt: lifecycle.turn.kind === "active" ? lifecycle.turn.startedAt : observedAt,
       source: "herdr",
-      ...(lifecycle.activityDetail ? { activity: lifecycle.activityDetail } : {}),
     };
+    if (lifecycle.activityDetail) activeTurn.activity = lifecycle.activityDetail;
+    turn = activeTurn;
   } else if (agentStatus === "done" || agentStatus === "idle") {
     turn = hasWorked
       ? {
@@ -200,14 +200,15 @@ export function observeActivity(
     }
     if (activity.phase !== "active") return null;
     if (activity.activeScope === "tool") {
-      return {
+      const toolDetail: ActivityDetail = {
         kind: "scope",
         scope: "tool",
         since: activity.toolStartedAt ?? activity.activeSince ?? activity.updatedAt,
         observedAt: activity.updatedAt,
         sequence: activity.sequence,
-        ...(activity.toolName ? { label: activity.toolName } : {}),
       };
+      if (activity.toolName) toolDetail.label = activity.toolName;
+      return toolDetail;
     }
     if (activity.activeScope === "provider") {
       return { kind: "scope", scope: "provider", since: activity.activeSince ?? activity.updatedAt, observedAt: activity.updatedAt, sequence: activity.sequence, label: "provider" };
@@ -225,10 +226,9 @@ export function observeActivity(
     const since = lifecycle.activityHealth.kind === "problem"
       ? lifecycle.activityHealth.since
       : observedAt;
-    return {
-      ...lifecycle,
-      activityHealth: { kind: "problem", reason: read.reason, since, ...(read.error ? { error: read.error } : {}) },
-    };
+    const activityHealth: ActivityHealth = { kind: "problem", reason: read.reason, since };
+    if (read.error) activityHealth.error = read.error;
+    return { ...lifecycle, activityHealth };
   }
 
   if (!detail) {
@@ -369,17 +369,15 @@ export function markFailed(
   const detected = lifecycle.process.kind === "finalizing"
     ? lifecycle.process.detectedAt
     : Math.max(start, detectedAt);
-  return {
-    ...lifecycle,
-    process: {
-      kind: "failed",
-      startedAt: start,
-      detectedAt: detected,
-      completedAt: Math.max(detected, detectedAt),
-      error,
-      ...(exitCode == null ? {} : { exitCode }),
-    },
+  const process: ProcessState = {
+    kind: "failed",
+    startedAt: start,
+    detectedAt: detected,
+    completedAt: Math.max(detected, detectedAt),
+    error,
   };
+  if (exitCode != null) process.exitCode = exitCode;
+  return { ...lifecycle, process };
 }
 
 export function markDelivery(lifecycle: SubagentLifecycle, delivery: CompletionDelivery): SubagentLifecycle {

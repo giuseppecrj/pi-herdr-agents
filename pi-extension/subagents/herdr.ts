@@ -1,5 +1,6 @@
 import { execFile, execSync, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
+import { isFiniteNumber, isPlainObject, isString } from "./type-guards.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -40,7 +41,7 @@ export function isHerdrAvailable(): boolean {
 	return process.env.HERDR_ENV === "1" && hasCommand("herdr");
 }
 
-function parseHerdrJson(value: string): unknown {
+function parseHerdrJson(value: string) {
 	try {
 		return JSON.parse(value);
 	} catch {
@@ -50,9 +51,8 @@ function parseHerdrJson(value: string): unknown {
 
 function extractHerdrPaneId(output: string, context: string): string {
 	const parsed = parseHerdrJson(output);
-	const paneId = (parsed as { result?: { pane?: { pane_id?: unknown } } })
-		?.result?.pane?.pane_id;
-	if (typeof paneId !== "string" || !paneId) {
+	const paneId = parsed?.result?.pane?.pane_id;
+	if (!isString(paneId) || !paneId) {
 		throw new Error(
 			`Unexpected herdr ${context} output: ${output.trim() || "(empty)"}`,
 		);
@@ -62,9 +62,8 @@ function extractHerdrPaneId(output: string, context: string): string {
 
 function extractHerdrRootPaneId(output: string, context: string): string {
 	const parsed = parseHerdrJson(output);
-	const paneId = (parsed as { result?: { root_pane?: { pane_id?: unknown } } })
-		?.result?.root_pane?.pane_id;
-	if (typeof paneId !== "string" || !paneId) {
+	const paneId = parsed?.result?.root_pane?.pane_id;
+	if (!isString(paneId) || !paneId) {
 		throw new Error(
 			`Unexpected herdr ${context} output: ${output.trim() || "(empty)"}`,
 		);
@@ -80,24 +79,17 @@ export interface HerdrWorktreeSurface {
 }
 
 function extractHerdrWorktree(output: string): HerdrWorktreeSurface {
-	const parsed = parseHerdrJson(output) as {
-		result?: {
-			type?: unknown;
-			workspace?: { workspace_id?: unknown };
-			root_pane?: { pane_id?: unknown };
-			worktree?: { path?: unknown; branch?: unknown };
-		};
-	} | null;
+	const parsed = parseHerdrJson(output);
 	const result = parsed?.result;
 	if (
 		result?.type !== "worktree_created" ||
-		typeof result.workspace?.workspace_id !== "string" ||
+		!isString(result.workspace?.workspace_id) ||
 		!result.workspace.workspace_id ||
-		typeof result.root_pane?.pane_id !== "string" ||
+		!isString(result.root_pane?.pane_id) ||
 		!result.root_pane.pane_id ||
-		typeof result.worktree?.path !== "string" ||
+		!isString(result.worktree?.path) ||
 		!result.worktree.path ||
-		typeof result.worktree.branch !== "string" ||
+		!isString(result.worktree.branch) ||
 		!result.worktree.branch
 	) {
 		throw new Error(
@@ -133,11 +125,13 @@ function buildCurrentPaneArgs(): string[] {
 	return ["pane", "current", "--current"];
 }
 
-function getHerdrCurrentPaneInfo(): {
+interface HerdrCurrentPaneInfo {
 	pane_id: string;
 	tab_id: string;
 	workspace_id: string;
-} {
+}
+
+function getHerdrCurrentPaneInfo(): HerdrCurrentPaneInfo {
 	const paneId = process.env.HERDR_PANE_ID;
 	const tabId = process.env.HERDR_TAB_ID;
 	const workspaceId = process.env.HERDR_WORKSPACE_ID;
@@ -147,11 +141,8 @@ function getHerdrCurrentPaneInfo(): {
 	if (!paneId || !tabId || !workspaceId) {
 		const output = herdrExec(buildCurrentPaneArgs());
 		const parsed = parseHerdrJson(output);
-		const pane = (parsed as { result?: { pane?: unknown } } | null)?.result
-			?.pane as
-			| { pane_id?: string; tab_id?: string; workspace_id?: string }
-			| undefined;
-		if (!pane?.pane_id || !pane?.tab_id || !pane?.workspace_id) {
+		const pane = parsed?.result?.pane;
+		if (!isString(pane?.pane_id) || !isString(pane?.tab_id) || !isString(pane?.workspace_id)) {
 			throw new Error(
 				`Unexpected herdr pane current output: ${output.trim() || "(empty)"}`,
 			);
@@ -251,38 +242,23 @@ export class HerdrWorktreeCreateError extends Error {
 }
 
 export function parseHerdrWorktreeList(output: string): HerdrWorktreeInfo[] {
-	const parsed = parseHerdrJson(output) as {
-		result?: {
-			type?: unknown;
-			worktrees?: Array<{
-				branch?: unknown;
-				path?: unknown;
-				label?: unknown;
-				open_workspace_id?: unknown;
-				is_linked_worktree?: unknown;
-			}>;
-		};
-	} | null;
+	const parsed = parseHerdrJson(output);
 	const worktrees = parsed?.result?.worktrees;
 	if (parsed?.result?.type !== "worktree_list" || !Array.isArray(worktrees)) {
 		throw new Error("Unexpected herdr worktree list output");
 	}
 	return worktrees.map((worktree) => {
-		if (
-			typeof worktree.branch !== "string" ||
-			typeof worktree.path !== "string"
-		) {
+		if (!isString(worktree.branch) || !isString(worktree.path)) {
 			throw new Error("Unexpected herdr worktree list entry");
 		}
-		return {
+		const info: HerdrWorktreeInfo = {
 			branch: worktree.branch,
 			path: worktree.path,
-			...(typeof worktree.label === "string" ? { label: worktree.label } : {}),
-			...(typeof worktree.open_workspace_id === "string"
-				? { workspaceId: worktree.open_workspace_id }
-				: {}),
 			isLinkedWorktree: worktree.is_linked_worktree === true,
 		};
+		if (isString(worktree.label)) info.label = worktree.label;
+		if (isString(worktree.open_workspace_id)) info.workspaceId = worktree.open_workspace_id;
+		return info;
 	});
 }
 
@@ -293,12 +269,7 @@ export function listHerdrWorktrees(cwd?: string): HerdrWorktreeInfo[] {
 }
 
 function parseHerdrPaneList(output: string, workspaceId: string): string[] {
-	const parsed = parseHerdrJson(output) as {
-		result?: {
-			type?: unknown;
-			panes?: Array<{ pane_id?: unknown; workspace_id?: unknown }>;
-		};
-	} | null;
+	const parsed = parseHerdrJson(output);
 	if (
 		parsed?.result?.type !== "pane_list" ||
 		!Array.isArray(parsed.result.panes)
@@ -308,7 +279,7 @@ function parseHerdrPaneList(output: string, workspaceId: string): string[] {
 	return parsed.result.panes
 		.filter((pane) => pane.workspace_id === workspaceId)
 		.map((pane) => pane.pane_id)
-		.filter((paneId): paneId is string => typeof paneId === "string");
+		.filter(isString);
 }
 
 function recoverHerdrWorktree(
@@ -429,33 +400,21 @@ function parsePaneGetOutput(
 	output: string,
 	surface: string,
 ): PaneInspectionResult {
-	const parsed = parseHerdrJson(output) as {
-		result?: { pane?: unknown };
-		error?: { code?: unknown; message?: unknown };
-	} | null;
+	const parsed = parseHerdrJson(output);
 	const errorObj = parsed?.error;
 	if (errorObj?.code === "pane_not_found" || errorObj?.code === "not_found") {
 		return {
 			kind: "missing",
-			error:
-				typeof errorObj.message === "string"
-					? errorObj.message
-					: "pane not found",
+			error: isString(errorObj.message) ? errorObj.message : "pane not found",
 		};
 	}
-	const pane = parsed?.result?.pane;
-	if (!pane || typeof pane !== "object")
+	const record = parsed?.result?.pane;
+	if (!isPlainObject(record))
 		return { kind: "unavailable", error: "pane get returned no pane record" };
-	const record = pane as {
-		pane_id?: unknown;
-		agent?: unknown;
-		agent_status?: unknown;
-	};
 	if (record.pane_id !== surface)
 		return { kind: "unavailable", error: "pane id mismatch" };
-	const agent = typeof record.agent === "string" ? record.agent : undefined;
-	const rawStatus =
-		typeof record.agent_status === "string" ? record.agent_status : "unknown";
+	const agent = isString(record.agent) ? record.agent : undefined;
+	const rawStatus = isString(record.agent_status) ? record.agent_status : "unknown";
 	const agentStatus =
 		rawStatus === "idle" ||
 		rawStatus === "working" ||
@@ -464,12 +423,14 @@ function parsePaneGetOutput(
 		rawStatus === "unknown"
 			? rawStatus
 			: "unknown";
-	return { kind: "present", ...(agent ? { agent } : {}), agentStatus };
+	const result: PaneInspectionResult = { kind: "present", agentStatus };
+	if (agent) result.agent = agent;
+	return result;
 }
 
 function parsePaneGetError(error: any): PaneInspectionResult {
 	for (const raw of [error?.stderr, error?.stdout]) {
-		if (typeof raw !== "string" || !raw.trim()) continue;
+		if (!isString(raw) || !raw.trim()) continue;
 		try {
 			const parsed = parsePaneGetOutput(raw, "");
 			if (parsed.kind === "missing") return parsed;
@@ -529,43 +490,23 @@ export function parsePaneProcessInfo(
 	output: string,
 	paneId: string,
 ): HerdrPaneProcessInfo {
-	const parsed = parseHerdrJson(output) as {
-		result?: {
-			process_info?: {
-				pane_id?: unknown;
-				shell_pid?: unknown;
-				foreground_process_group_id?: unknown;
-				foreground_processes?: Array<{
-					pid?: unknown;
-					name?: unknown;
-					argv0?: unknown;
-					argv?: unknown;
-					cwd?: unknown;
-				}>;
-			};
-		};
-	} | null;
+	const parsed = parseHerdrJson(output);
 	const info = parsed?.result?.process_info;
-	if (!info || typeof info !== "object") {
+	if (!isPlainObject(info)) {
 		throw new Error(
 			`Unexpected herdr pane process-info output: ${output.trim() || "(empty)"}`,
 		);
 	}
-	if (typeof info.pane_id === "string" && info.pane_id !== paneId) {
+	if (isString(info.pane_id) && info.pane_id !== paneId) {
 		throw new Error(
 			`herdr pane process-info pane id mismatch: ${info.pane_id} != ${paneId}`,
 		);
 	}
 	const pids = new Set<number>();
-	if (
-		typeof info.shell_pid === "number" &&
-		Number.isInteger(info.shell_pid) &&
-		info.shell_pid > 0
-	) {
+	if (Number.isInteger(info.shell_pid) && info.shell_pid > 0) {
 		pids.add(info.shell_pid);
 	}
 	if (
-		typeof info.foreground_process_group_id === "number" &&
 		Number.isInteger(info.foreground_process_group_id) &&
 		info.foreground_process_group_id > 0
 	) {
@@ -573,33 +514,24 @@ export function parsePaneProcessInfo(
 	}
 	const foregroundProcesses: HerdrForegroundProcess[] = [];
 	for (const process of info.foreground_processes ?? []) {
-		if (
-			typeof process?.pid === "number" &&
-			Number.isInteger(process.pid) &&
-			process.pid > 0
-		) {
+		if (Number.isInteger(process?.pid) && process.pid > 0) {
 			pids.add(process.pid);
-			foregroundProcesses.push({
-				pid: process.pid,
-				...(typeof process.name === "string" ? { name: process.name } : {}),
-				...(typeof process.argv0 === "string" ? { argv0: process.argv0 } : {}),
-				...(Array.isArray(process.argv) &&
-				process.argv.every((value) => typeof value === "string")
-					? { argv: process.argv as string[] }
-					: {}),
-				...(typeof process.cwd === "string" ? { cwd: process.cwd } : {}),
-			});
+			const entry: HerdrForegroundProcess = { pid: process.pid };
+			if (isString(process.name)) entry.name = process.name;
+			if (isString(process.argv0)) entry.argv0 = process.argv0;
+			if (Array.isArray(process.argv) && process.argv.every(isString)) {
+				entry.argv = process.argv;
+			}
+			if (isString(process.cwd)) entry.cwd = process.cwd;
+			foregroundProcesses.push(entry);
 		}
 	}
-	return {
-		paneId,
-		...(typeof info.shell_pid === "number" ? { shellPid: info.shell_pid } : {}),
-		...(typeof info.foreground_process_group_id === "number"
-			? { foregroundProcessGroupId: info.foreground_process_group_id }
-			: {}),
-		pids: [...pids],
-		foregroundProcesses,
-	};
+	const result: HerdrPaneProcessInfo = { paneId, pids: [...pids], foregroundProcesses };
+	if (isFiniteNumber(info.shell_pid)) result.shellPid = info.shell_pid;
+	if (isFiniteNumber(info.foreground_process_group_id)) {
+		result.foregroundProcessGroupId = info.foreground_process_group_id;
+	}
+	return result;
 }
 
 export function getHerdrPaneProcessInfo(surface: string): HerdrPaneProcessInfo {
@@ -705,6 +637,8 @@ export function isProcessAlive(pid: number): boolean {
 		process.kill(pid, 0);
 		return true;
 	} catch (error) {
+		// SAFETY: process.kill only throws Node's fs/process errors here, which
+		// are always Error instances carrying an ErrnoException `code`.
 		return (error as NodeJS.ErrnoException).code === "EPERM";
 	}
 }

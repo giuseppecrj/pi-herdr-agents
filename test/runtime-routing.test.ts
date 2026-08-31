@@ -7,6 +7,7 @@ import {
   resolveRuntimePlans,
   wrapPiModelRegistry,
   type ParentRuntime,
+  type RoutingModel,
   type RuntimeRequest,
 } from "../pi-extension/subagents/runtime-routing.ts";
 
@@ -19,7 +20,7 @@ const parent: ParentRuntime = {
 function model(
   provider: string,
   id: string,
-  overrides: Record<string, unknown> = {},
+  overrides: Partial<RoutingModel> = {},
 ) {
   return {
     provider,

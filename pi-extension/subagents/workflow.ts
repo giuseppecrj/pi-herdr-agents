@@ -20,6 +20,9 @@ import {
 	type ModelRegistryAdapter,
 	type ThinkingLevel,
 } from "./runtime-routing.ts";
+import { isBoolean, isPlainObject, isString, type JsonValue } from "./type-guards.ts";
+
+export type { JsonValue };
 
 const MAX_WORKFLOW_BYTES = 256 * 1024;
 const MAX_AGENTS = 8;
@@ -189,6 +192,8 @@ function resolveArtifact(cwd: string, requestedPath: string) {
 		fail("workflow run journal already exists");
 	} catch (error) {
 		if (error instanceof WorkflowPreparationError) throw error;
+		// SAFETY: lstatSync only throws Node's fs errors here, which are always
+		// Error instances carrying an ErrnoException `code`.
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
 			fail(
 				`Cannot inspect workflow run journal: ${error instanceof Error ? error.message : String(error)}`,
@@ -199,42 +204,30 @@ function resolveArtifact(cwd: string, requestedPath: string) {
 	return { root, path, runId: parts[0] };
 }
 
-function object(value: unknown, label: string): Record<string, unknown> {
-	if (value == null || typeof value !== "object" || Array.isArray(value)) {
+function object(value: any, label: string) {
+	if (!isPlainObject(value)) {
 		fail(`${label} must be an object`);
 	}
-	return value as Record<string, unknown>;
+	return value;
 }
 
-function exactKeys(
-	value: Record<string, unknown>,
-	allowed: ReadonlySet<string>,
-	label: string,
-) {
+function exactKeys(value: any, allowed: ReadonlySet<string>, label: string) {
 	const unsupported = Object.keys(value).filter((key) => !allowed.has(key));
 	if (unsupported.length > 0)
 		fail(`${label} has unsupported field(s): ${unsupported.join(", ")}`);
 }
 
-function string(value: unknown, label: string): string {
-	if (typeof value !== "string" || value.trim() === "")
+function string(value: any, label: string): string {
+	if (!isString(value) || value.trim() === "")
 		fail(`${label} must be a non-empty string`);
 	return value;
 }
 
-function positiveInteger(
-	value: unknown,
-	label: string,
-	maximum: number,
-): number {
-	if (
-		!Number.isInteger(value) ||
-		(value as number) < 1 ||
-		(value as number) > maximum
-	) {
+function positiveInteger(value: any, label: string, maximum: number): number {
+	if (!Number.isInteger(value) || value < 1 || value > maximum) {
 		fail(`${label} must be an integer from 1 to ${maximum}`);
 	}
-	return value as number;
+	return value;
 }
 
 function parseMetadata(source: string): WorkflowMetadata {
@@ -530,13 +523,10 @@ function userMessageText(entry: WorkflowSessionEntry): string | undefined {
 	if (!Array.isArray(entry.message.content)) return undefined;
 	const text = entry.message.content
 		.filter(
-			(block): block is { type: string; text: string } =>
-				!!block &&
-				typeof block === "object" &&
-			(block as { type?: unknown }).type === "text" &&
-			typeof (block as { text?: unknown }).text === "string",
+			(block: any) =>
+				isPlainObject(block) && block.type === "text" && isString(block.text),
 		)
-		.map((block) => block.text)
+		.map((block: any) => block.text)
 		.join("");
 	return text || undefined;
 }
@@ -568,7 +558,7 @@ export function validateWorkflowApproval(
 	}
 	const text = approval && userMessageText(approval);
 	const expected = `APPROVE ${candidate.scriptHash.slice(0, 8)}`;
-	if (text !== expected || typeof approval?.id !== "string") {
+	if (text !== expected || !isString(approval?.id)) {
 		fail(
 			`workflow approval must be the latest user message and exactly ${expected}`,
 		);
@@ -600,7 +590,7 @@ export function sameWorkflowCandidate(
 
 export interface WorkflowJournal {
 	path: string;
-	append(type: string, details?: Record<string, unknown>): string;
+	append(type: string, details?: Record<string, JsonValue>): string;
 }
 
 const WORKFLOW_TERMINAL_EVENTS = new Set<WorkflowTerminalState>([
@@ -613,11 +603,11 @@ const WORKFLOW_TERMINAL_EVENTS = new Set<WorkflowTerminalState>([
 export interface WorkflowStartupRecord {
 	runId: string;
 	journalPath: string;
-	lastEvent?: Record<string, unknown>;
+	lastEvent?: Record<string, JsonValue>;
 	interrupted: boolean;
 }
 
-function readLastValidWorkflowEvent(path: string): Record<string, unknown> | undefined {
+function readLastValidWorkflowEvent(path: string): Record<string, JsonValue> | undefined {
 	let lines: string[];
 	try {
 		lines = readFileSync(path, "utf8").split("\n");
@@ -627,14 +617,9 @@ function readLastValidWorkflowEvent(path: string): Record<string, unknown> | und
 	for (let index = lines.length - 1; index >= 0; index -= 1) {
 		if (!lines[index].trim()) continue;
 		try {
-			const event: unknown = JSON.parse(lines[index]);
-			if (
-				event &&
-				typeof event === "object" &&
-				!Array.isArray(event) &&
-				typeof (event as Record<string, unknown>).type === "string"
-			) {
-				return event as Record<string, unknown>;
+			const event = JSON.parse(lines[index]);
+			if (isPlainObject(event) && isString(event.type)) {
+				return event;
 			}
 		} catch {
 			// A torn final line is not evidence of a newer workflow state.
@@ -693,11 +678,11 @@ export function recoverWorkflowStartup(
 			continue;
 		}
 		const type = lastEvent.type;
-		if (typeof type !== "string" || type === "approved") {
+		if (!isString(type) || type === "approved") {
 			records.push(record);
 			continue;
 		}
-		if (type === "delivery" || WORKFLOW_TERMINAL_EVENTS.has(type as WorkflowTerminalState)) {
+		if (type === "delivery" || WORKFLOW_TERMINAL_EVENTS.has(type)) {
 			records.push(record);
 			continue;
 		}
@@ -733,7 +718,7 @@ export function createWorkflowJournal(
 	approval: WorkflowApproval,
 ): WorkflowJournal {
 	const path = join(dirname(candidate.path), "run.jsonl");
-	const append = (type: string, details: Record<string, unknown> = {}) => {
+	const append = (type: string, details: Record<string, JsonValue> = {}) => {
 		const id = randomUUID();
 		appendFileSync(
 			path,
@@ -848,14 +833,6 @@ export function disposeWorkflowReaderCheckout(
 	}
 }
 
-export type JsonValue =
-	| null
-	| boolean
-	| number
-	| string
-	| JsonValue[]
-	| { [key: string]: JsonValue };
-
 export type WorkflowTerminalState =
 	| "completed"
 	| "failed"
@@ -920,15 +897,17 @@ export function claimWorkflowTerminal(
 }
 
 /** Map confirmed process exit evidence into the cancel terminal outcome. */
+export interface CancelTerminationResult {
+	outcome: WorkflowTerminalOutcome;
+	checkout?: WorkflowReaderCheckout;
+	retainCheckout: boolean;
+}
+
 export function cancelTerminationResult(
 	survivingPids: readonly number[],
 	checkoutPath?: string,
 	options: { identityUnconfirmed?: boolean } = {},
-): {
-	outcome: WorkflowTerminalOutcome;
-	checkout?: WorkflowReaderCheckout;
-	retainCheckout: boolean;
-} {
+): CancelTerminationResult {
 	const unconfirmed =
 		survivingPids.length > 0 || options.identityUnconfirmed === true;
 	if (unconfirmed) {
@@ -936,7 +915,7 @@ export function cancelTerminationResult(
 			survivingPids.length > 0
 				? `Workflow cancellation could not confirm process exit for: ${survivingPids.join(", ")}`
 				: "Workflow cancellation could not confirm process exit: active pane process identity was not captured.";
-		return {
+		const result: CancelTerminationResult = {
 			retainCheckout: true,
 			outcome: {
 				state: "failed",
@@ -945,16 +924,15 @@ export function cancelTerminationResult(
 					message,
 				},
 			},
-			...(checkoutPath
-				? {
-						checkout: {
-							path: checkoutPath,
-							status: "retained" as const,
-							reason: "cancel_termination_failed",
-						},
-					}
-				: {}),
 		};
+		if (checkoutPath) {
+			result.checkout = {
+				path: checkoutPath,
+				status: "retained",
+				reason: "cancel_termination_failed",
+			};
+		}
+		return result;
 	}
 	return {
 		retainCheckout: false,
@@ -965,14 +943,12 @@ export function cancelTerminationResult(
 	};
 }
 
-function validateJson(
-	value: unknown,
-	seen = new Set<object>(),
-): value is JsonValue {
-	if (value === null || typeof value === "boolean" || typeof value === "string")
-		return true;
-	if (typeof value === "number") return Number.isFinite(value);
-	if (typeof value !== "object" || seen.has(value)) return false;
+function validateJson(value: any, seen = new Set<object>()): value is JsonValue {
+	if (value === null || isBoolean(value) || isString(value)) return true;
+	if (Object.prototype.toString.call(value) === "[object Number]") {
+		return Number.isFinite(value);
+	}
+	if (!(value instanceof Object) || seen.has(value)) return false;
 	if (
 		Object.getPrototypeOf(value) !== Object.prototype &&
 		!Array.isArray(value)
@@ -987,15 +963,15 @@ function validateJson(
 			).every(Boolean) &&
 			Reflect.ownKeys(value).every(
 				(key) =>
-					typeof key === "string" &&
+					isString(key) &&
 					(key === "length" ||
 						(/^(0|[1-9]\d*)$/.test(key) && Number(key) < value.length)),
 			)
 		: Reflect.ownKeys(value).every(
 			(key) =>
-				typeof key === "string" &&
+				isString(key) &&
 				Object.prototype.propertyIsEnumerable.call(value, key) &&
-				validateJson(value[key as keyof typeof value], seen),
+				validateJson(value[key], seen),
 		);
 	seen.delete(value);
 	return valid;
@@ -1010,7 +986,7 @@ export async function executeWorkflow(
 		onWorker?: (worker: Worker) => void;
 		onAgent?: (
 			prompt: string,
-			options: unknown,
+			options: any,
 		) => JsonValue | Promise<JsonValue>;
 	} = {},
 ): Promise<WorkflowExecutionResult> {
@@ -1031,7 +1007,7 @@ export async function executeWorkflow(
 			const queued = agentQueue.splice(0);
 			for (const start of queued) start(result);
 		};
-		const invokeAgent = (prompt: string, agentOptions: unknown) =>
+		const invokeAgent = (prompt: string, agentOptions: any) =>
 			new Promise<JsonValue>((resolveAgent) => {
 				const start = (forced?: JsonValue) => {
 					if (forced !== undefined) {
@@ -1103,13 +1079,13 @@ export async function executeWorkflow(
 			options.signal.addEventListener("abort", onAbort, { once: true });
 		}
 
-		worker.on("message", (message: unknown) => {
+		worker.on("message", (message: any) => {
 			if (settled) return;
-			if (!message || typeof message !== "object")
+			if (!isPlainObject(message))
 				return fail("workflow_protocol", "Invalid workflow Worker message");
-			const event = message as Record<string, unknown>;
+			const event = message;
 			if (event.type === "log") {
-				if (typeof event.message !== "string")
+				if (!isString(event.message))
 					return fail("workflow_protocol", "Workflow log must be a string");
 				if (++logs > MAX_LOGS || event.message.length > MAX_LOG_CHARS) {
 					return fail("workflow_limit", "Workflow log limit exceeded");
@@ -1125,9 +1101,9 @@ export async function executeWorkflow(
 				return;
 			}
 			if (event.type === "agent") {
-				const id = typeof event.id === "string" ? event.id : "";
+				const id = isString(event.id) ? event.id : "";
 				const prompt = event.prompt;
-				if (!id || typeof prompt !== "string")
+				if (!id || !isString(prompt))
 					return fail("workflow_protocol", "Invalid workflow agent request");
 				if (options.signal?.aborted) {
 					worker.postMessage({
@@ -1166,9 +1142,7 @@ export async function executeWorkflow(
 			if (event.type === "error") {
 				return fail(
 					"workflow_error",
-					typeof event.message === "string"
-						? event.message
-						: "Workflow Worker failed",
+					isString(event.message) ? event.message : "Workflow Worker failed",
 				);
 			}
 			if (event.type !== "result")
@@ -1184,7 +1158,7 @@ export async function executeWorkflow(
 			}
 			finish({ state: "completed", result: event.result });
 		});
-		worker.once("error", (error: unknown) =>
+		worker.once("error", (error: any) =>
 			fail(
 				"workflow_worker_error",
 				error instanceof Error ? error.message : String(error),

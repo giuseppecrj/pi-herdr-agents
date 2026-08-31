@@ -18,6 +18,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import * as subagentsModule from "../pi-extension/subagents/index.ts";
+import { isString } from "../pi-extension/subagents/type-guards.ts";
 import rolePackExample from "../examples/role-pack/extension.ts";
 import {
 	cleanupSubagentsForShutdown,
@@ -38,6 +39,7 @@ import {
 	seedSubagentSessionFile,
 	createBtwSessionSnapshot,
 	createWorktreeSessionFork,
+	type SessionEntry,
 } from "../pi-extension/subagents/session.ts";
 
 import {
@@ -67,6 +69,7 @@ import {
 	createSubagentActivityRecorder,
 	getSubagentActivityFile,
 	readSubagentActivityFile,
+	type SubagentActivityState,
 } from "../pi-extension/subagents/activity.ts";
 import subagentDoneExtension, {
 	shouldMarkUserTookOver,
@@ -88,7 +91,9 @@ import {
 	observeActivity as observeLifecycleActivity,
 	observePaneInspection,
 	projectLifecycle,
+	type SubagentLifecycle,
 } from "../pi-extension/subagents/lifecycle.ts";
+import type { PendingWorkflow } from "../pi-extension/subagents/workflow.ts";
 
 // Tool-registration behavior is environment-sensitive for child subagents.
 // Isolate the unit suite from inherited parent/child capability variables.
@@ -141,6 +146,9 @@ function createMockExtensionApi(extensionEvents = createEventBus()) {
 		eventHandlers,
 		sentUserMessages,
 		sentMessages,
+		// SAFETY: this fixture implements only the ExtensionAPI members these
+		// tests exercise; TypeScript cannot verify partial-mock compatibility
+		// without also declaring every unused SDK method.
 		api: {
 			events: extensionEvents,
 			on(event: string, handler: Function) {
@@ -231,9 +239,9 @@ async function withIsolatedAgentEnv(
 		rmSync(root, { recursive: true, force: true });
 	}
 }
-const SESSION_HEADER = { type: "session", id: "sess-001", version: 3 };
-const MODEL_CHANGE = { type: "model_change", id: "mc-001", parentId: null };
-const USER_MSG = {
+const SESSION_HEADER: SessionEntry = { type: "session", id: "sess-001", version: 3 };
+const MODEL_CHANGE: SessionEntry = { type: "model_change", id: "mc-001", parentId: null };
+const USER_MSG: SessionEntry = {
 	type: "message",
 	id: "user-001",
 	parentId: "mc-001",
@@ -242,7 +250,7 @@ const USER_MSG = {
 		content: [{ type: "text", text: "Hello, plan something" }],
 	},
 };
-const ASSISTANT_MSG = {
+const ASSISTANT_MSG: SessionEntry = {
 	type: "message",
 	id: "asst-001",
 	parentId: "user-001",
@@ -251,7 +259,7 @@ const ASSISTANT_MSG = {
 		content: [{ type: "text", text: "Here is my plan..." }],
 	},
 };
-const ASSISTANT_MSG_2 = {
+const ASSISTANT_MSG_2: SessionEntry = {
 	type: "message",
 	id: "asst-002",
 	parentId: "asst-001",
@@ -263,7 +271,7 @@ const ASSISTANT_MSG_2 = {
 		],
 	},
 };
-const TOOL_RESULT = {
+const TOOL_RESULT: SessionEntry = {
 	type: "message",
 	id: "tool-001",
 	parentId: "asst-001",
@@ -329,25 +337,25 @@ describe("session.ts", () => {
 
 	describe("findLastAssistantMessage", () => {
 		it("finds last assistant text", () => {
-			const entries = [USER_MSG, ASSISTANT_MSG, ASSISTANT_MSG_2] as any[];
+			const entries = [USER_MSG, ASSISTANT_MSG, ASSISTANT_MSG_2];
 			const text = findLastAssistantMessage(entries);
 			assert.equal(text, "Updated plan with details.");
 		});
 
 		it("skips thinking blocks, gets text only", () => {
-			const entries = [ASSISTANT_MSG_2] as any[];
+			const entries = [ASSISTANT_MSG_2];
 			const text = findLastAssistantMessage(entries);
 			assert.equal(text, "Updated plan with details.");
 		});
 
 		it("skips tool results", () => {
-			const entries = [ASSISTANT_MSG, TOOL_RESULT] as any[];
+			const entries = [ASSISTANT_MSG, TOOL_RESULT];
 			const text = findLastAssistantMessage(entries);
 			assert.equal(text, "Here is my plan...");
 		});
 
 		it("returns null when no assistant messages", () => {
-			const entries = [USER_MSG] as any[];
+			const entries = [USER_MSG];
 			assert.equal(findLastAssistantMessage(entries), null);
 		});
 
@@ -356,22 +364,24 @@ describe("session.ts", () => {
 		});
 
 		it("reports an empty final completion instead of reusing an earlier assistant message", () => {
-			const realMsg = {
+			const realMsg: SessionEntry = {
 				type: "message",
+				id: "real",
 				message: {
 					role: "assistant",
 					content: [{ type: "text", text: "Real summary content." }],
 				},
 			};
-			const emptyMsg = {
+			const emptyMsg: SessionEntry = {
 				type: "message",
+				id: "empty",
 				message: {
 					role: "assistant",
 					content: [],
 					stopReason: "stop",
 				},
 			};
-			const entries = [realMsg, emptyMsg] as any[];
+			const entries = [realMsg, emptyMsg];
 			assert.equal(findLastAssistantMessage(entries), "Real summary content.");
 			assert.deepEqual(inspectFinalAssistantMessage(entries), {
 				text: null,
@@ -385,15 +395,17 @@ describe("session.ts", () => {
 			// normal, then the provider went 529 and auto-retry gave up. Without
 			// the errorMessage fallback we'd return the stale earlier summary and
 			// the orchestrator would believe the subagent completed.
-			const earlierGood = {
+			const earlierGood: SessionEntry = {
 				type: "message",
+				id: "earlier-good",
 				message: {
 					role: "assistant",
 					content: [{ type: "text", text: "Investigating the bug..." }],
 				},
 			};
-			const overloadError = {
+			const overloadError: SessionEntry = {
 				type: "message",
+				id: "overload-error",
 				message: {
 					role: "assistant",
 					content: [],
@@ -401,7 +413,7 @@ describe("session.ts", () => {
 					errorMessage: "Anthropic 529 Overloaded after 3 retries",
 				},
 			};
-			const entries = [earlierGood, overloadError] as any[];
+			const entries = [earlierGood, overloadError];
 			assert.equal(
 				findLastAssistantMessage(entries),
 				"Subagent error: Anthropic 529 Overloaded after 3 retries",
@@ -411,8 +423,9 @@ describe("session.ts", () => {
 		it("prefers text content even when an error stopReason is set", () => {
 			// If the model produced text before the error (rare but possible), we
 			// prefer the actual content over the synthetic error fallback.
-			const msg = {
+			const msg: SessionEntry = {
 				type: "message",
+				id: "partial",
 				message: {
 					role: "assistant",
 					content: [{ type: "text", text: "Here is partial output." }],
@@ -421,21 +434,22 @@ describe("session.ts", () => {
 				},
 			};
 			assert.equal(
-				findLastAssistantMessage([msg] as any[]),
+				findLastAssistantMessage([msg]),
 				"Here is partial output.",
 			);
 		});
 
 		it("does not invent a summary for a stop=error message with no errorMessage", () => {
-			const msg = {
+			const msg: SessionEntry = {
 				type: "message",
+				id: "no-error-message",
 				message: {
 					role: "assistant",
 					content: [],
 					stopReason: "error",
 				},
 			};
-			assert.equal(findLastAssistantMessage([msg] as any[]), null);
+			assert.equal(findLastAssistantMessage([msg]), null);
 		});
 	});
 
@@ -467,7 +481,7 @@ describe("session.ts", () => {
 			);
 
 			assert.ok(id, "should return an id");
-			assert.equal(typeof id, "string");
+			assert.ok(isString(id));
 
 			// Read back and verify
 			const lines = readFileSync(file, "utf8").trim().split("\n");
@@ -659,10 +673,11 @@ describe("session.ts", () => {
 				["root-user", "root-assistant", "active-user", "active-assistant"],
 			);
 			assert.equal(readFileSync(parentFile, "utf8"), parentBefore);
-			assert.equal(
-				(child.getLeafEntry() as any).content,
-				"Continue in the worktree.",
-			);
+			const leafEntry = child.getLeafEntry();
+			if (leafEntry?.type !== "custom_message") {
+				throw new Error("expected a custom_message leaf entry");
+			}
+			assert.equal(leafEntry.content, "Continue in the worktree.");
 		});
 
 		it("preserves compaction entries on the active branch", () => {
@@ -1433,7 +1448,7 @@ describe("model configuration", () => {
 });
 
 describe("subagent discovery", () => {
-	const testApi = (subagentsModule as any).__test__;
+	const testApi = subagentsModule.__test__;
 
 	it("loads session-mode from frontmatter", async () => {
 		await withIsolatedAgentEnv(async ({ projectAgentsDir }) => {
@@ -1910,7 +1925,7 @@ describe("subagent discovery", () => {
 				(request: { register(path: string): void }) =>
 					request.register(rolesDir),
 			);
-			(subagentsModule as any).default(api);
+			subagentsModule.default(api);
 
 			const listTool = registeredTools.find(
 				(tool) => tool.name === "subagents_list",
@@ -1949,7 +1964,7 @@ describe("subagent discovery", () => {
 			const plugin = createMockExtensionApi(eventBus);
 			rolePackExample(plugin.api);
 			const host = createMockExtensionApi(eventBus);
-			(subagentsModule as any).default(host.api);
+			subagentsModule.default(host.api);
 			const listTool = host.registeredTools.find(
 				(tool) => tool.name === "subagents_list",
 			);
@@ -2020,7 +2035,7 @@ describe("subagent discovery", () => {
 					request.register(secondRoles);
 				},
 			);
-			(subagentsModule as any).default(api);
+			subagentsModule.default(api);
 
 			const listTool = registeredTools.find(
 				(tool) => tool.name === "subagents_list",
@@ -2092,7 +2107,7 @@ describe("subagent discovery", () => {
 					(request: { register(path: string): void }) =>
 						request.register(rolesDir),
 				);
-				(subagentsModule as any).default(api);
+				subagentsModule.default(api);
 
 				const listTool = registeredTools.find(
 					(tool) => tool.name === "subagents_list",
@@ -2129,7 +2144,7 @@ describe("subagent discovery", () => {
 				);
 
 				const { api, registeredTools } = createMockExtensionApi();
-				(subagentsModule as any).default(api);
+				subagentsModule.default(api);
 
 				const tool = registeredTools.find(
 					(tool) => tool.name === "subagents_list",
@@ -2180,7 +2195,7 @@ describe("subagent discovery", () => {
 					["description: Legacy scout override", "cli: claude"].join("\n"),
 				);
 				const { api, registeredTools } = createMockExtensionApi();
-				(subagentsModule as any).default(api);
+				subagentsModule.default(api);
 
 				const tool = registeredTools.find(
 					(tool) => tool.name === "subagents_list",
@@ -2250,7 +2265,7 @@ describe("subagent discovery", () => {
 			);
 
 			const { api, registeredTools } = createMockExtensionApi();
-			(subagentsModule as any).default(api);
+			subagentsModule.default(api);
 
 			const tool = registeredTools.find(
 				(tool) => tool.name === "subagents_list",
@@ -2305,7 +2320,7 @@ describe("subagent discovery", () => {
 				);
 
 				const { api, registeredTools } = createMockExtensionApi();
-				(subagentsModule as any).default(api);
+				subagentsModule.default(api);
 
 				const tool = registeredTools.find(
 					(tool) => tool.name === "subagents_list",
@@ -2494,7 +2509,7 @@ describe("subagent-done.ts", () => {
 });
 
 describe("lifecycle.ts", () => {
-	const activity = (overrides: Record<string, unknown> = {}) => ({
+	const activity = (overrides: Partial<SubagentActivityState> = {}) => ({
 		version: 1 as const,
 		runningChildId: "child",
 		createdAt: 1_000,
@@ -3113,7 +3128,7 @@ describe("commands", () => {
 
 				const { api, registeredCommands, sentUserMessages } =
 					createMockExtensionApi();
-				(subagentsModule as any).default(api);
+				subagentsModule.default(api);
 				const subagent = registeredCommands.find(
 					(command) => command.name === "subagent",
 				);
@@ -3145,7 +3160,7 @@ describe("commands", () => {
 
 	it("registers /worktree with only its list subcommand", async () => {
 		const { api, registeredCommands } = createMockExtensionApi();
-		(subagentsModule as any).default(api);
+		subagentsModule.default(api);
 
 		const worktree = registeredCommands.find(
 			(command) => command.name === "worktree",
@@ -3180,7 +3195,7 @@ describe("commands", () => {
 	it("registers direct BTW commands without steering the parent", async () => {
 		const { api, registeredCommands, sentUserMessages } =
 			createMockExtensionApi();
-		(subagentsModule as any).default(api);
+		subagentsModule.default(api);
 
 		const btw = registeredCommands.find((command) => command.name === "btw");
 		const close = registeredCommands.find(
@@ -3207,7 +3222,7 @@ describe("commands", () => {
 	});
 
 	it("builds a standalone BTW command without worker control machinery", () => {
-		const command = (subagentsModule as any).__test__.buildBtwLaunchCommand({
+		const command = subagentsModule.__test__.buildBtwLaunchCommand({
 			cwd: "/tmp/project path",
 			sessionFile: "/tmp/btw.jsonl",
 			question: "What does that API do?",
@@ -3229,7 +3244,7 @@ describe("commands", () => {
 		const { api, registeredCommands, sentUserMessages } =
 			createMockExtensionApi();
 
-		(subagentsModule as any).default(api);
+		subagentsModule.default(api);
 
 		const iterate = registeredCommands.find(
 			(command) => command.name === "iterate",
@@ -3248,7 +3263,7 @@ describe("commands", () => {
 describe("tool registration", () => {
 	it("refreshes subagent routing guidance from the live authenticated model registry", () => {
 		const { api, registeredTools, eventHandlers } = createMockExtensionApi();
-		(subagentsModule as any).default(api);
+		subagentsModule.default(api);
 
 		const subagent = registeredTools.find((tool) => tool.name === "subagent");
 		assert.ok(subagent);
@@ -3302,7 +3317,7 @@ describe("tool registration", () => {
 			"subagent,subagent_interrupt,subagent_resume,subagents_list";
 		try {
 			const { api, registeredTools } = createMockExtensionApi();
-			(subagentsModule as any).default(api);
+			subagentsModule.default(api);
 			assert.equal(
 				registeredTools.some((tool) => tool.name === "subagent"),
 				true,
@@ -3321,7 +3336,7 @@ describe("tool registration", () => {
 		process.env.PI_DENY_TOOLS = "subagent,subagent_interrupt";
 		try {
 			const { api, registeredTools } = createMockExtensionApi();
-			(subagentsModule as any).default(api);
+			subagentsModule.default(api);
 			assert.equal(
 				registeredTools.some((tool) => tool.name === "subagent"),
 				false,
@@ -3341,7 +3356,7 @@ describe("tool registration", () => {
 	});
 
 	it("expands spawning false to deny subagent interruption", () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		const denied = testApi.resolveDenyTools({ spawning: false });
 
 		assert.equal(denied.has("subagent"), true);
@@ -3351,7 +3366,7 @@ describe("tool registration", () => {
 
 	it("exposes worktree branch and optional base on the subagent tool", () => {
 		const { api, registeredTools } = createMockExtensionApi();
-		(subagentsModule as any).default(api);
+		subagentsModule.default(api);
 
 		const subagentTool = registeredTools.find(
 			(tool) => tool.name === "subagent",
@@ -3365,7 +3380,7 @@ describe("tool registration", () => {
 	});
 
 	it("warns when an effective bundled role normally uses an ordinary pane", async () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		const worktree = { branch: "review/unneeded-worktree" };
 
 		await withIsolatedAgentEnv(async ({ projectAgentsDir }) => {
@@ -3400,7 +3415,7 @@ describe("tool registration", () => {
 
 	it("renders partial subagent tool-call args without throwing", () => {
 		const { api, registeredTools } = createMockExtensionApi();
-		(subagentsModule as any).default(api);
+		subagentsModule.default(api);
 
 		const subagentTool = registeredTools.find(
 			(tool) => tool.name === "subagent",
@@ -3423,7 +3438,7 @@ describe("tool registration", () => {
 
 	it("registers subagent_resume with an autoExit override", () => {
 		const { api, registeredTools } = createMockExtensionApi();
-		(subagentsModule as any).default(api);
+		subagentsModule.default(api);
 
 		const resumeTool = registeredTools.find(
 			(tool) => tool.name === "subagent_resume",
@@ -3492,7 +3507,61 @@ describe("subagent parent lifecycle", () => {
 		assert.equal(shouldDeliverSubagentCompletion(suppressed), false);
 
 		// Pre-lifecycle fixtures without a lifecycle field still default to pending.
+		// SAFETY: intentionally simulates legacy data missing the (typed as
+		// required) `lifecycle` field; the implementation reads it optionally.
 		assert.equal(shouldDeliverSubagentCompletion({} as any), true);
+	});
+
+	it("runs the registered shutdown handler for session transitions", async () => {
+		const pending: PendingWorkflow = {
+			runId: "pending-run",
+			path: "/tmp/pending-workflow.js",
+			scriptHash: "a".repeat(64),
+			bytes: "",
+			metadata: {
+				version: 1,
+				name: "pending",
+				sources: [],
+				baseSha: "a".repeat(40),
+				maxAgents: 1,
+				maxConcurrency: 1,
+				roles: [],
+			},
+			repository: { root: "/tmp", commonDir: "/tmp/.git" },
+			baseSha: "a".repeat(40),
+			sources: [],
+			rolePolicies: [],
+			parentSession: {
+				id: "parent-session",
+				file: "/tmp/parent.jsonl",
+				prepareLeafId: "leaf",
+			},
+		};
+		const testApi = subagentsModule.__test__;
+
+		try {
+			for (const [reason, clearsPending] of [
+				["new", true],
+				["reload", false],
+				["quit", false],
+			] as const) {
+				testApi.setPendingWorkflowForTest(pending);
+				const { api, eventHandlers } = createMockExtensionApi();
+				subagentsModule.default(api);
+				const shutdown = eventHandlers.get("session_shutdown")?.[0];
+				assert.ok(shutdown, "expected session shutdown handler");
+
+				await assert.doesNotReject(() =>
+					shutdown({ type: "session_shutdown", reason }, {}),
+				);
+				assert.equal(
+					testApi.getPendingWorkflow(),
+					clearsPending ? undefined : pending,
+				);
+			}
+		} finally {
+			testApi.setPendingWorkflowForTest(undefined);
+		}
 	});
 
 	it("delivers completion through the reloaded extension API", () => {
@@ -3505,7 +3574,7 @@ describe("subagent parent lifecycle", () => {
 });
 
 describe("subagent activity snapshots", () => {
-	function validActivity(overrides: Record<string, unknown> = {}) {
+	function validActivity(overrides: any = {}) {
 		return {
 			version: 1,
 			runningChildId: "child-1",
@@ -3596,8 +3665,8 @@ describe("subagent activity snapshots", () => {
 				writeFileSync(activityFile, `${JSON.stringify(activity)}\n`);
 
 				const read = readSubagentActivityFile(activityFile, `child-${index}`);
-				assert.equal(read.ok, false);
-				assert.equal((read as { ok: false; reason: string }).reason, "invalid");
+				if (read.ok) throw new Error("expected an invalid activity read");
+				assert.equal(read.reason, "invalid");
 			}
 		});
 	});
@@ -3680,7 +3749,17 @@ describe("subagent activity snapshots", () => {
 });
 
 describe("subagent interruption", () => {
-	function makeRunning(overrides: Record<string, unknown> = {}) {
+	interface RunningFixtureOverrides {
+		id?: string;
+		name?: string;
+		surface?: string;
+		sessionFile?: string;
+		lifecycle?: SubagentLifecycle;
+		activityFile?: string;
+		abortController?: Pick<AbortController, "abort">;
+	}
+
+	function makeRunning(overrides: RunningFixtureOverrides = {}) {
 		return {
 			id: "a1",
 			name: "Worker",
@@ -3697,7 +3776,7 @@ describe("subagent interruption", () => {
 	it("registers subagent_interrupt in the main session extension", () => {
 		const { api, registeredTools } = createMockExtensionApi();
 
-		(subagentsModule as any).default(api);
+		subagentsModule.default(api);
 
 		assert.equal(
 			registeredTools.some((tool) => tool.name === "subagent_interrupt"),
@@ -3706,8 +3785,8 @@ describe("subagent interruption", () => {
 	});
 
 	it("resolves interrupt targets by exact id and reports name ambiguity", () => {
-		const testApi = (subagentsModule as any).__test__;
-		const runningMap = testApi.runningSubagents as Map<string, any>;
+		const testApi = subagentsModule.__test__;
+		const runningMap = testApi.runningSubagents;
 		runningMap.clear();
 
 		try {
@@ -3750,7 +3829,7 @@ describe("subagent interruption", () => {
 	});
 
 	it("returns an explicit error when Escape delivery fails", () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		let aborted = false;
 		const running = makeRunning({
 			abortController: {
@@ -3770,8 +3849,8 @@ describe("subagent interruption", () => {
 	});
 
 	it("leaves status unchanged when Escape delivery fails in the tool path", () => {
-		const testApi = (subagentsModule as any).__test__;
-		const runningMap = testApi.runningSubagents as Map<string, any>;
+		const testApi = subagentsModule.__test__;
+		const runningMap = testApi.runningSubagents;
 		runningMap.clear();
 
 		const activeLifecycle = observeLifecycleActivity(
@@ -3818,7 +3897,7 @@ describe("subagent interruption", () => {
 	});
 
 	it("sends Escape without aborting or mutating running state", () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		let aborted = false;
 		let sentSurface = "";
 		const running = makeRunning({
@@ -3843,8 +3922,8 @@ describe("subagent interruption", () => {
 	});
 
 	it("refreshes the latest activity snapshot before forcing local interrupt waiting", () => {
-		const testApi = (subagentsModule as any).__test__;
-		const runningMap = testApi.runningSubagents as Map<string, any>;
+		const testApi = subagentsModule.__test__;
+		const runningMap = testApi.runningSubagents;
 		let sentSurface = "";
 		runningMap.clear();
 
@@ -3895,8 +3974,8 @@ describe("subagent interruption", () => {
 	});
 
 	it("acknowledges Pi-backed interrupt requests and forces local status waiting", () => {
-		const testApi = (subagentsModule as any).__test__;
-		const runningMap = testApi.runningSubagents as Map<string, any>;
+		const testApi = subagentsModule.__test__;
+		const runningMap = testApi.runningSubagents;
 		let sentSurface = "";
 		runningMap.clear();
 
@@ -3958,8 +4037,8 @@ describe("subagent interruption", () => {
 	});
 
 	it("sends Escape again for repeated interrupt requests", () => {
-		const testApi = (subagentsModule as any).__test__;
-		const runningMap = testApi.runningSubagents as Map<string, any>;
+		const testApi = subagentsModule.__test__;
+		const runningMap = testApi.runningSubagents;
 		const surfaces: string[] = [];
 		runningMap.clear();
 
@@ -3981,7 +4060,7 @@ describe("subagent interruption", () => {
 	});
 
 	it("formats exit code 130 as an ordinary failure", () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		const presentation = testApi.resolveResultPresentation(
 			{
 				exitCode: 130,
@@ -4003,7 +4082,7 @@ describe("subagent interruption", () => {
 		// quickly. With the error sidecar plumbed through, the presentation
 		// must call out the failure, include the underlying error, and tell the
 		// orchestrator how to recover.
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		const presentation = testApi.resolveResultPresentation(
 			{
 				exitCode: 1,
@@ -4027,7 +4106,7 @@ describe("subagent interruption", () => {
 	});
 
 	it("leaves small completion presentations unchanged", () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		const presentation = testApi.resolveResultPresentation(
 			{
 				exitCode: 0,
@@ -4046,7 +4125,7 @@ describe("subagent interruption", () => {
 	});
 
 	it("includes a reviewable worktree handoff in completion presentations", () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		const worktree = {
 			path: "/tmp/worktrees/ticket-123",
 			workspaceId: "w9",
@@ -4111,7 +4190,7 @@ describe("subagent interruption", () => {
 			writeFileSync(join(dir, "tracked.txt"), "dirty\n");
 			writeFileSync(join(dir, "untracked.txt"), "new\n");
 
-			const handoff = (subagentsModule as any).__test__.captureWorktreeHandoff({
+			const handoff = subagentsModule.__test__.captureWorktreeHandoff({
 				path: dir,
 				workspaceId: "w9",
 				paneId: "w9:p1",
@@ -4146,7 +4225,7 @@ describe("subagent interruption", () => {
 				baseSha: "1111111",
 				manifestFile: join(dir, "manifest.json"),
 			};
-			const testApi = (subagentsModule as any).__test__;
+			const testApi = subagentsModule.__test__;
 			const handoff = testApi.captureWorktreeHandoff(worktree);
 
 			assert.equal(handoff.headSha, null);
@@ -4176,7 +4255,7 @@ describe("subagent interruption", () => {
 
 	it("marks launch failures as failed while retaining explicit ownership", () => {
 		withTempDir((dir) => {
-			const testApi = (subagentsModule as any).__test__;
+			const testApi = subagentsModule.__test__;
 			const manifestFile = join(dir, "worktree-run.json");
 			const worktree = {
 				path: join(dir, "retained-worktree"),
@@ -4217,7 +4296,7 @@ describe("subagent interruption", () => {
 	});
 
 	it("abbreviates large completion presentations while preserving their head, tail, and session path", () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		const presentation = testApi.resolveResultPresentation(
 			{
 				exitCode: 0,
@@ -4238,7 +4317,7 @@ describe("subagent interruption", () => {
 	});
 
 	it("abbreviates oversized provider errors without losing recovery guidance", () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		const presentation = testApi.resolveResultPresentation(
 			{
 				exitCode: 1,
@@ -4259,7 +4338,7 @@ describe("subagent interruption", () => {
 	});
 
 	it("keeps presentations bounded even when a session reference exceeds filesystem limits", () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		const presentation = testApi.resolveResultPresentation(
 			{
 				exitCode: 0,
@@ -4275,7 +4354,7 @@ describe("subagent interruption", () => {
 	});
 
 	it("bounds unexpected errors from both fresh and resumed delivery paths", () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		const error = new Error(`ERROR-HEAD-${"x".repeat(18_000)}-ERROR-TAIL`);
 
 		for (const prefix of ['Sub-agent "Reviewer" error', "Resume error"]) {
@@ -4293,7 +4372,7 @@ describe("subagent interruption", () => {
 	});
 
 	it("preserves the existing session-before-runtime-warning order for small results", () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		const presentation = testApi.resolveResultPresentation(
 			{
 				exitCode: 0,
@@ -4314,7 +4393,7 @@ describe("subagent interruption", () => {
 	});
 
 	it("delivers bounded fresh and resumed results through one custom message", () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 
 		for (const name of ["fresh", "resumed"]) {
 			const { api, sentMessages, sentUserMessages } = createMockExtensionApi();
@@ -4382,7 +4461,7 @@ describe("subagent status renderer", () => {
 
 	it("keeps recovery session details in expanded unexpected-error results", () => {
 		const { api, registeredMessageRenderers } = createMockExtensionApi();
-		(subagentsModule as any).default(api);
+		subagentsModule.default(api);
 
 		const rendererEntry = registeredMessageRenderers.find(
 			(entry) => entry.name === "subagent_result",
@@ -4417,7 +4496,7 @@ describe("subagent status renderer", () => {
 
 	it("renders result details while keeping the custom message context small", () => {
 		const { api, registeredMessageRenderers } = createMockExtensionApi();
-		(subagentsModule as any).default(api);
+		subagentsModule.default(api);
 
 		const rendererEntry = registeredMessageRenderers.find(
 			(entry) => entry.name === "subagent_result",
@@ -4453,7 +4532,7 @@ describe("subagent status renderer", () => {
 
 	it("renders only capped lines plus overflow", () => {
 		const { api, registeredMessageRenderers } = createMockExtensionApi();
-		(subagentsModule as any).default(api);
+		subagentsModule.default(api);
 
 		const rendererEntry = registeredMessageRenderers.find(
 			(entry) => entry.name === "subagent_status",
@@ -4495,7 +4574,7 @@ describe("subagent status renderer", () => {
 
 	it("stays within narrow widths", () => {
 		const { api, registeredMessageRenderers } = createMockExtensionApi();
-		(subagentsModule as any).default(api);
+		subagentsModule.default(api);
 
 		const rendererEntry = registeredMessageRenderers.find(
 			(entry) => entry.name === "subagent_status",
@@ -4531,7 +4610,7 @@ describe("subagent status renderer", () => {
 
 describe("subagents widget rendering", () => {
 	it("shows interrupted agents as open while process runtime continues", () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		const interruptedAt = 20_000;
 		const lifecycle = markInterruptRequested(
 			{
@@ -4571,7 +4650,7 @@ describe("subagents widget rendering", () => {
 	});
 
 	it("hydrates legacy activity done as waiting, not finalizing", () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		const doneAt = 20_000;
 		const legacyDone = observeStatus(
 			createStatusState({ startTimeMs: 5_000 }),
@@ -4610,7 +4689,7 @@ describe("subagents widget rendering", () => {
 	});
 
 	it("freezes runtime when the subagent reports done", () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		const doneAt = 20_000;
 		const lifecycle = markCompletionDetected(
 			createLifecycle(5_000),
@@ -4647,7 +4726,7 @@ describe("subagents widget rendering", () => {
 	});
 
 	it("keeps a blue border and summarizes mixed active and open agents", () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		const now = 30_000;
 		const active = observeLifecycleActivity(
 			createLifecycle(5_000),
@@ -4716,9 +4795,9 @@ describe("subagents widget rendering", () => {
 	});
 
 	it("keeps every rendered line within a very narrow width", () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		assert.ok(testApi, "expected subagents test helpers to be exported");
-		assert.equal(typeof testApi.renderSubagentWidgetLines, "function");
+		assert.ok(testApi.renderSubagentWidgetLines instanceof Function);
 
 		const originalNow = Date.now;
 		Date.now = () => 1_000_000;
@@ -4766,18 +4845,18 @@ describe("subagents widget rendering", () => {
 	});
 
 	it("truncates the right-hand status instead of overflowing when it alone is too wide", () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		assert.ok(testApi, "expected subagents test helpers to be exported");
-		assert.equal(typeof testApi.borderLine, "function");
+		assert.ok(testApi.borderLine instanceof Function);
 
 		const line = testApi.borderLine(" A ", " 999 msgs (999.9KB) ", 16);
 		assert.equal(visibleWidth(line), 16);
 	});
 
 	it("handles ultra-narrow widths without exceeding the width contract", () => {
-		const testApi = (subagentsModule as any).__test__;
+		const testApi = subagentsModule.__test__;
 		assert.ok(testApi, "expected subagents test helpers to be exported");
-		assert.equal(typeof testApi.renderSubagentWidgetLines, "function");
+		assert.ok(testApi.renderSubagentWidgetLines instanceof Function);
 
 		const widths = [0, 1, 2];
 		for (const width of widths) {
@@ -4811,7 +4890,7 @@ describe("herdr.ts", () => {
 	describe("isHerdrAvailable", () => {
 		it("returns boolean based on HERDR_ENV", () => {
 			const result = isHerdrAvailable();
-			assert.equal(typeof result, "boolean");
+			assert.ok(result === true || result === false);
 		});
 	});
 

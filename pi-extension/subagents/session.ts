@@ -10,19 +10,22 @@ import {
 } from "node:fs";
 import { randomBytes, randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
+import { isString, type JsonValue } from "./type-guards.ts";
 
 export interface SessionEntry {
 	type: string;
 	id: string;
 	parentId?: string;
-	[key: string]: unknown;
+	[key: string]: JsonValue | undefined;
 }
 
 export interface MessageEntry extends SessionEntry {
 	type: "message";
 	message: {
 		role: "user" | "assistant" | "toolResult";
-		content: Array<{ type: string; text?: string; [key: string]: unknown }>;
+		content: Array<{ type: string; text?: string; [key: string]: JsonValue | undefined }>;
+		stopReason?: string;
+		errorMessage?: string;
 	};
 }
 
@@ -116,7 +119,7 @@ export function createWorktreeSessionFork(params: {
 		const lines = readFileSync(temporaryFile, "utf8")
 			.split("\n")
 			.filter((line) => line.trim());
-		const header = JSON.parse(lines[0]) as Record<string, unknown>;
+		const header = JSON.parse(lines[0]);
 		header.cwd = params.childCwd;
 		header.parentSession = params.parentSessionFile;
 		mkdirSync(dirname(params.childSessionFile), { recursive: true });
@@ -147,7 +150,7 @@ export function createWorktreeSessionFork(params: {
 
 function parseEntry(line: string): SessionEntry {
 	try {
-		return JSON.parse(line) as SessionEntry;
+		return JSON.parse(line);
 	} catch (error) {
 		throw new Error(
 			`Invalid session entry: ${error instanceof Error ? error.message : String(error)}`,
@@ -205,12 +208,11 @@ export function findObservedSessionRuntime(
 	const observed: ObservedSessionRuntime = {};
 	for (const entry of entries) {
 		if (entry.type === "model_change") {
-			if (typeof entry.provider === "string")
-				observed.provider = entry.provider;
-			if (typeof entry.modelId === "string") observed.modelId = entry.modelId;
+			if (isString(entry.provider)) observed.provider = entry.provider;
+			if (isString(entry.modelId)) observed.modelId = entry.modelId;
 		} else if (
 			entry.type === "thinking_level_change" &&
-			typeof entry.thinkingLevel === "string"
+			isString(entry.thinkingLevel)
 		) {
 			observed.thinking = entry.thinkingLevel;
 		}
@@ -231,21 +233,22 @@ export function inspectFinalAssistantMessage(
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const entry = entries[i];
 		if (entry.type !== "message") continue;
+		// SAFETY: entries with type "message" always carry a `message` field;
+		// SessionEntry's index signature can't express this per-variant guarantee.
 		const msg = entry as MessageEntry;
 		if (msg.message.role !== "assistant") continue;
 
-		const texts = msg.message.content
-			.filter(
-				(block) => block.type === "text" && typeof block.text === "string",
-			)
-			.map((block) => block.text as string);
+		const texts = msg.message.content.flatMap((block) =>
+			block.type === "text" && isString(block.text) ? [block.text] : [],
+		);
 		const text = texts.join("\n");
-		const stopReason = (msg.message as { stopReason?: unknown }).stopReason;
-		return {
+		const stopReason = msg.message.stopReason;
+		const result: FinalAssistantMessage = {
 			text: text.trim() ? text : null,
 			contentLength: text.length,
-			...(typeof stopReason === "string" ? { stopReason } : {}),
 		};
+		if (isString(stopReason)) result.stopReason = stopReason;
+		return result;
 	}
 	return { text: null, contentLength: 0 };
 }
@@ -256,26 +259,24 @@ export function findLastAssistantMessage(
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const entry = entries[i];
 		if (entry.type !== "message") continue;
+		// SAFETY: entries with type "message" always carry a `message` field;
+		// SessionEntry's index signature can't express this per-variant guarantee.
 		const msg = entry as MessageEntry;
 		if (msg.message.role !== "assistant") continue;
 
-		const texts = msg.message.content
-			.filter(
-				(block) =>
-					block.type === "text" &&
-					typeof block.text === "string" &&
-					block.text.trim() !== "",
-			)
-			.map((block) => block.text as string);
+		const texts = msg.message.content.flatMap((block) =>
+			block.type === "text" && isString(block.text) && block.text.trim() !== ""
+				? [block.text]
+				: [],
+		);
 
 		if (texts.length > 0 && texts.join("").trim()) return texts.join("\n");
 
-		const stopReason = (msg.message as { stopReason?: unknown }).stopReason;
-		const errorMessage = (msg.message as { errorMessage?: unknown })
-			.errorMessage;
+		const stopReason = msg.message.stopReason;
+		const errorMessage = msg.message.errorMessage;
 		if (
 			stopReason === "error" &&
-			typeof errorMessage === "string" &&
+			isString(errorMessage) &&
 			errorMessage.trim() !== ""
 		) {
 			return `Subagent error: ${errorMessage.trim()}`;

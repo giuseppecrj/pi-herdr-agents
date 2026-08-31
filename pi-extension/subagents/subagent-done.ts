@@ -8,6 +8,7 @@ import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { writeFileSync } from "node:fs";
 import { createSubagentActivityRecorder } from "./activity.ts";
+import { isString } from "./type-guards.ts";
 
 export function shouldMarkUserTookOver(agentStarted: boolean): boolean {
   return agentStarted;
@@ -59,7 +60,7 @@ export function findLatestAssistantError(
     const msg = messages[i];
     if (msg?.role !== "assistant") continue;
     if (msg.stopReason !== "error") return null;
-    const raw = typeof msg.errorMessage === "string" ? msg.errorMessage.trim() : "";
+    const raw = isString(msg.errorMessage) ? msg.errorMessage.trim() : "";
     return {
       errorMessage: raw || "Subagent agent loop ended with stopReason=error (no errorMessage field).",
       stopReason: "error",
@@ -179,7 +180,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("agent_end", (event, ctx) => {
-    const messages = (event as any).messages as any[] | undefined;
+    const messages = event.messages;
     const shouldExit = autoExit && shouldAutoExitOnAgentEnd(userTookOver, messages);
 
     if (shouldExit) {
@@ -215,11 +216,11 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("turn_start", (event) => {
-    recorder.turnStart((event as any).turnIndex);
+    recorder.turnStart(event.turnIndex);
   });
 
   pi.on("turn_end", (event) => {
-    recorder.turnEnd((event as any).turnIndex);
+    recorder.turnEnd(event.turnIndex);
   });
 
   pi.on("before_provider_request", () => {
@@ -231,31 +232,31 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("message_update", (event) => {
-    recorder.messageUpdate((event as any).assistantMessageEvent?.type);
+    recorder.messageUpdate(event.assistantMessageEvent?.type);
   });
 
   pi.on("tool_execution_start", (event) => {
-    recorder.toolExecutionStart((event as any).toolCallId, (event as any).toolName);
+    recorder.toolExecutionStart(event.toolCallId, event.toolName);
   });
 
   pi.on("tool_call", (event) => {
-    recorder.toolCall((event as any).toolCallId, (event as any).toolName);
+    recorder.toolCall(event.toolCallId, event.toolName);
   });
 
   pi.on("tool_execution_update", (event) => {
-    recorder.toolExecutionUpdate((event as any).toolCallId, (event as any).toolName);
+    recorder.toolExecutionUpdate(event.toolCallId, event.toolName);
   });
 
   pi.on("tool_result", (event) => {
-    recorder.toolResult((event as any).toolCallId, (event as any).toolName);
+    recorder.toolResult(event.toolCallId, event.toolName);
   });
 
   pi.on("tool_execution_end", (event) => {
-    recorder.toolExecutionEnd((event as any).toolCallId, (event as any).toolName);
+    recorder.toolExecutionEnd(event.toolCallId, event.toolName);
   });
 
   pi.on("session_shutdown", (event) => {
-    recorder.sessionShutdown((event as any).reason);
+    recorder.sessionShutdown(event.reason);
   });
 
   // Toggle expand/collapse with Ctrl+J

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { isBoolean, isFiniteNumber, isPlainObject, isString } from "./type-guards.ts";
 
 export type SubagentActivityPhase = "starting" | "active" | "waiting" | "done";
 export type SubagentActivityScope = "agent" | "turn" | "provider" | "streaming" | "tool";
@@ -105,37 +106,40 @@ export function getSubagentActivityFile(artifactDir: string, runningChildId: str
   return join(artifactDir, "subagent-activity", `${runningChildId}.json`);
 }
 
-function requireObject(value: unknown): Record<string, unknown> | null {
-  if (value == null || typeof value !== "object" || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
+export function isSubagentActivityScope(value: any): value is SubagentActivityScope {
+  return isString(value) && KNOWN_SCOPES.has(value);
 }
 
-function validateFiniteNumber(object: Record<string, unknown>, fieldName: string): string | null {
-  return Number.isFinite(object[fieldName]) ? null : `${fieldName} must be finite`;
+function requireObject(value: any) {
+  return isPlainObject(value) ? value : null;
 }
 
-function validateOptionalFiniteNumber(object: Record<string, unknown>, fieldName: string): string | null {
+function validateFiniteNumber(object: any, fieldName: string): string | null {
+  return isFiniteNumber(object[fieldName]) ? null : `${fieldName} must be finite`;
+}
+
+function validateOptionalFiniteNumber(object: any, fieldName: string): string | null {
   const value = object[fieldName];
-  return value == null || Number.isFinite(value) ? null : `${fieldName} must be finite when present`;
+  return value == null || isFiniteNumber(value) ? null : `${fieldName} must be finite when present`;
 }
 
-function validateInteger(object: Record<string, unknown>, fieldName: string): string | null {
+function validateInteger(object: any, fieldName: string): string | null {
   return Number.isInteger(object[fieldName]) ? null : `${fieldName} must be an integer`;
 }
 
-function validateOptionalInteger(object: Record<string, unknown>, fieldName: string): string | null {
+function validateOptionalInteger(object: any, fieldName: string): string | null {
   const value = object[fieldName];
   return value == null || Number.isInteger(value) ? null : `${fieldName} must be an integer when present`;
 }
 
-function validateBoolean(object: Record<string, unknown>, fieldName: string): string | null {
-  return typeof object[fieldName] === "boolean" ? null : `${fieldName} must be a boolean`;
+function validateBoolean(object: any, fieldName: string): string | null {
+  return isBoolean(object[fieldName]) ? null : `${fieldName} must be a boolean`;
 }
 
-function validateOptionalActivityString(object: Record<string, unknown>, fieldName: string): string | null {
+function validateOptionalActivityString(object: any, fieldName: string): string | null {
   const value = object[fieldName];
   if (value == null) return null;
-  if (typeof value !== "string") return `${fieldName} must be a string when present`;
+  if (!isString(value)) return `${fieldName} must be a string when present`;
   if (/\r|\n/.test(value)) return `${fieldName} must not contain newlines`;
   return value.length <= MAX_ACTIVITY_STRING_LENGTH ? null : `${fieldName} is too long`;
 }
@@ -144,21 +148,21 @@ function invalidActivity(error: string): ActivityReadResult {
   return { ok: false, reason: "invalid", error };
 }
 
-function validateActivity(value: unknown, expectedRunningChildId: string): ActivityReadResult {
+function validateActivity(value: any, expectedRunningChildId: string): ActivityReadResult {
   const object = requireObject(value);
   if (!object) return invalidActivity("activity must be an object");
   if (object.version !== 1) return invalidActivity("unsupported activity version");
-  if (typeof object.runningChildId !== "string") return invalidActivity("runningChildId must be a string");
+  if (!isString(object.runningChildId)) return invalidActivity("runningChildId must be a string");
   if (object.runningChildId !== expectedRunningChildId) return { ok: false, reason: "wrong-id" };
-  if (typeof object.latestEvent !== "string" || !KNOWN_EVENTS.has(object.latestEvent as SubagentActivityEvent)) {
+  if (!isString(object.latestEvent) || !KNOWN_EVENTS.has(object.latestEvent)) {
     return invalidActivity("unknown latestEvent");
   }
-  if (typeof object.phase !== "string" || !KNOWN_PHASES.has(object.phase as SubagentActivityPhase)) {
+  if (!isString(object.phase) || !KNOWN_PHASES.has(object.phase)) {
     return invalidActivity("unknown activity phase");
   }
   if (
     object.activeScope != null &&
-    (typeof object.activeScope !== "string" || !KNOWN_SCOPES.has(object.activeScope as SubagentActivityScope))
+    (!isString(object.activeScope) || !KNOWN_SCOPES.has(object.activeScope))
   ) {
     return invalidActivity("unknown activeScope");
   }
@@ -182,7 +186,7 @@ function validateActivity(value: unknown, expectedRunningChildId: string): Activ
   ].find((error) => error != null);
   if (validationError) return invalidActivity(validationError);
 
-  return { ok: true, activity: object as unknown as SubagentActivityState };
+  return { ok: true, activity: object };
 }
 
 export function readSubagentActivityFile(

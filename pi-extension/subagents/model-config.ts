@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isPlainObject, isString } from "./type-guards.ts";
 
 const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const DEFAULT_MODEL_CONFIG_PATH = join(PACKAGE_ROOT, "config.json");
@@ -14,19 +15,18 @@ function invalidModelConfig(source: string, message: string): never {
   throw new Error(`Invalid subagent model config in ${source}: ${message}`);
 }
 
-export function parseModelConfig(rawConfig: unknown, source = "config.json"): ModelConfig {
-  if (rawConfig == null || typeof rawConfig !== "object" || Array.isArray(rawConfig)) {
+export function parseModelConfig(rawConfig: any, source = "config.json"): ModelConfig {
+  if (!isPlainObject(rawConfig)) {
     invalidModelConfig(source, "root must be an object");
   }
 
-  const config = rawConfig as Record<string, unknown>;
-  const models = config.models;
+  const models = rawConfig.models;
   if (models == null) return { agents: {} };
-  if (typeof models !== "object" || Array.isArray(models)) {
+  if (!isPlainObject(models)) {
     invalidModelConfig(source, "models must be an object");
   }
 
-  const value = models as Record<string, unknown>;
+  const value = models;
   const allowedKeys = new Set(["default", "agents"]);
   const unsupportedKeys = Object.keys(value).filter((key) => !allowedKeys.has(key));
   if (unsupportedKeys.length > 0) {
@@ -35,7 +35,7 @@ export function parseModelConfig(rawConfig: unknown, source = "config.json"): Mo
 
   let defaultModel: string | undefined;
   if (value.default != null) {
-    if (typeof value.default !== "string" || value.default.trim() === "") {
+    if (!isString(value.default) || value.default.trim() === "") {
       invalidModelConfig(source, "models.default must be a non-empty string");
     }
     defaultModel = value.default.trim();
@@ -43,11 +43,11 @@ export function parseModelConfig(rawConfig: unknown, source = "config.json"): Mo
 
   const agents: Record<string, string> = {};
   if (value.agents != null) {
-    if (typeof value.agents !== "object" || Array.isArray(value.agents)) {
+    if (!isPlainObject(value.agents)) {
       invalidModelConfig(source, "models.agents must be an object");
     }
-    for (const [agent, model] of Object.entries(value.agents as Record<string, unknown>)) {
-      if (typeof model !== "string" || model.trim() === "") {
+    for (const [agent, model] of Object.entries(value.agents)) {
+      if (!isString(model) || model.trim() === "") {
         invalidModelConfig(source, `models.agents.${agent} must be a non-empty string`);
       }
       Object.defineProperty(agents, agent, {
@@ -79,14 +79,16 @@ export function loadModelConfig(configPath = DEFAULT_MODEL_CONFIG_PATH): ModelCo
   try {
     raw = readFileSync(configPath, "utf8");
   } catch (error) {
+    // SAFETY: readFileSync only throws Node's fs errors here, which are
+    // always Error instances carrying an ErrnoException `code`.
     const errno = error as NodeJS.ErrnoException;
     if (errno.code === "ENOENT") return { agents: {} };
     throw error;
   }
 
-  let parsed: unknown;
+  let parsed;
   try {
-    parsed = JSON.parse(raw) as unknown;
+    parsed = JSON.parse(raw);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(`Invalid JSON in subagent model config ${configPath}: ${detail}`);

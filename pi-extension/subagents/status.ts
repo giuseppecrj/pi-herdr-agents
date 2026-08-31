@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isBoolean, isPlainObject } from "./type-guards.ts";
 
 export const SNAPSHOT_STALLED_AFTER_MS = 60_000;
 export const DEFAULT_STATUS_LINE_LIMIT = 4;
@@ -85,22 +86,22 @@ function invalidStatusConfig(source: string, message: string): never {
   throw new Error(`Invalid subagent status config in ${source}: ${message}`);
 }
 
-function requireObject(value: unknown, source: string, fieldName: string): Record<string, unknown> {
-  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+function requireObject(value: any, source: string, fieldName: string) {
+  if (!isPlainObject(value)) {
     invalidStatusConfig(source, `${fieldName} must be an object`);
   }
-  return value as Record<string, unknown>;
+  return value;
 }
 
-function requireBoolean(value: unknown, source: string, fieldName: string): boolean {
-  if (typeof value !== "boolean") {
+function requireBoolean(value: any, source: string, fieldName: string): boolean {
+  if (!isBoolean(value)) {
     invalidStatusConfig(source, `${fieldName} must be a boolean`);
   }
   return value;
 }
 
 function rejectUnsupportedKeys(
-  value: Record<string, unknown>,
+  value: any,
   allowedKeys: string[],
   source: string,
   fieldName: string,
@@ -135,7 +136,7 @@ function activityLabel(snapshot: Pick<StatusSnapshot, "activityLabel" | "activeS
   return snapshot.activityLabel ?? snapshot.activeScope;
 }
 
-export function parseStatusConfig(rawConfig: unknown, source = "config.json"): StatusConfig {
+export function parseStatusConfig(rawConfig: any, source = "config.json"): StatusConfig {
   const config = requireObject(rawConfig, source, "root");
   const status = requireObject(config.status, source, "status");
   rejectUnsupportedKeys(status, ["enabled"], source, "status");
@@ -147,10 +148,17 @@ export function parseStatusConfig(rawConfig: unknown, source = "config.json"): S
   };
 }
 
-function readStatusConfigFile(configPath: string, examplePath: string): { sourcePath: string; rawConfig: string } {
+interface StatusConfigSource {
+  sourcePath: string;
+  rawConfig: string;
+}
+
+function readStatusConfigFile(configPath: string, examplePath: string): StatusConfigSource {
   try {
     return { sourcePath: configPath, rawConfig: readFileSync(configPath, "utf8") };
   } catch (error) {
+    // SAFETY: readFileSync only throws Node's fs errors here, which are
+    // always Error instances carrying an ErrnoException `code`.
     const errno = error as NodeJS.ErrnoException;
     if (errno.code !== "ENOENT") throw error;
   }
@@ -158,6 +166,7 @@ function readStatusConfigFile(configPath: string, examplePath: string): { source
   try {
     return { sourcePath: examplePath, rawConfig: readFileSync(examplePath, "utf8") };
   } catch (error) {
+    // SAFETY: see above.
     const errno = error as NodeJS.ErrnoException;
     if (errno.code === "ENOENT") {
       throw new Error(
@@ -174,9 +183,9 @@ export function loadStatusConfig(
 ): StatusConfig {
   const { sourcePath, rawConfig } = readStatusConfigFile(configPath, examplePath);
 
-  let parsed: unknown;
+  let parsed;
   try {
-    parsed = JSON.parse(rawConfig) as unknown;
+    parsed = JSON.parse(rawConfig);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(`Invalid JSON in subagent config ${sourcePath}: ${detail}`);
@@ -382,14 +391,16 @@ export function classifyStatus(state: SubagentStatusState, now: number): StatusS
   };
 }
 
-export function advanceStatusState(
-  state: SubagentStatusState,
-  now: number,
-): {
+export interface StatusAdvance {
   nextState: SubagentStatusState;
   snapshot: StatusSnapshot;
   transition: SubagentStatusTransition;
-} {
+}
+
+export function advanceStatusState(
+  state: SubagentStatusState,
+  now: number,
+): StatusAdvance {
   const snapshot = classifyStatus(state, now);
   const transition =
     state.currentKind !== "stalled" && snapshot.kind === "stalled"

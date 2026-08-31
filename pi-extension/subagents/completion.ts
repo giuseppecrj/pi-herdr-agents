@@ -1,5 +1,7 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 
+import { isNonEmptyString, isString } from "./type-guards.ts";
+
 const ABORT_MESSAGE = "Aborted while waiting for subagent to finish";
 const TERMINAL_SENTINEL = /__SUBAGENT_DONE_(\d+)__/;
 
@@ -24,30 +26,22 @@ export interface CompletionOptions {
   onTick?: (elapsedSeconds: number) => void;
 }
 
-export function interpretExitSidecar(data: unknown): CompletionResult {
-  const payload = data as {
-    type?: unknown;
-    name?: unknown;
-    message?: unknown;
-    errorMessage?: unknown;
-  };
-
+export function interpretExitSidecar(payload: any): CompletionResult {
   if (payload?.type === "ping") {
     return {
       reason: "ping",
       exitCode: 0,
       ping: {
-        name: typeof payload.name === "string" ? payload.name : "subagent",
-        message: typeof payload.message === "string" ? payload.message : "",
+        name: isString(payload.name) ? payload.name : "subagent",
+        message: isString(payload.message) ? payload.message : "",
       },
     };
   }
 
   if (payload?.type === "error") {
-    const errorMessage =
-      typeof payload.errorMessage === "string" && payload.errorMessage.trim()
-        ? payload.errorMessage
-        : "Subagent exited with stopReason=error (no errorMessage in sidecar).";
+    const errorMessage = isNonEmptyString(payload.errorMessage)
+      ? payload.errorMessage
+      : "Subagent exited with stopReason=error (no errorMessage in sidecar).";
     return { reason: "error", exitCode: 1, errorMessage };
   }
 

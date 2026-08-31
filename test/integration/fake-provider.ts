@@ -6,6 +6,7 @@ import {
 import { once } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isPlainObject, isString } from "../../pi-extension/subagents/type-guards.ts";
 
 interface ChatMessage {
 	role?: string;
@@ -18,9 +19,27 @@ interface ChatRequest {
 	tools?: Array<{ function?: { name?: string } }>;
 }
 
+interface ToolCallArguments {
+	name?: string;
+	task?: string;
+	agent?: string;
+	model?: string;
+	cwd?: string;
+	systemPrompt?: string;
+	fork?: boolean;
+	worktree?: { branch: string };
+	sessionPath?: string;
+	message?: string;
+	autoExit?: boolean;
+	action?: string;
+	runId?: string;
+	path?: string;
+	command?: string;
+}
+
 interface ToolCall {
 	name: string;
-	arguments: Record<string, unknown>;
+	arguments: ToolCallArguments;
 }
 
 interface ResponsePlan {
@@ -49,18 +68,15 @@ export function resetProviderRequests(): void {
 async function readJson(request: IncomingMessage): Promise<ChatRequest> {
 	const chunks: Buffer[] = [];
 	for await (const chunk of request) chunks.push(Buffer.from(chunk));
-	return JSON.parse(Buffer.concat(chunks).toString("utf8")) as ChatRequest;
+	return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-function messageText(content: unknown): string {
-	if (typeof content === "string") return content;
+function messageText(content: any): string {
+	if (isString(content)) return content;
 	if (!Array.isArray(content)) return "";
 	return content
-		.filter(
-			(part): part is { type?: string; text?: string } =>
-				typeof part === "object" && part !== null,
-		)
-		.filter((part) => part.type === "text" && typeof part.text === "string")
+		.filter((part) => isPlainObject(part))
+		.filter((part) => part.type === "text" && isString(part.text))
 		.map((part) => part.text)
 		.join("\n");
 }
@@ -82,7 +98,7 @@ function toolNames(request: ChatRequest): Set<string> {
 	return new Set(
 		(request.tools ?? [])
 			.map((tool) => tool.function?.name)
-			.filter((name): name is string => typeof name === "string"),
+			.filter(isString),
 	);
 }
 
@@ -92,7 +108,7 @@ function quotedValue(source: string, key: string): string | undefined {
 	);
 	if (!match) return undefined;
 	try {
-		return JSON.parse(`"${match[1]}"`) as string;
+		return JSON.parse(`"${match[1]}"`);
 	} catch {
 		return match[1];
 	}
@@ -113,21 +129,14 @@ function subagentCalls(source: string): ToolCall[] {
 		const branch = section.match(
 			/\bworktree:\s*\{\s*branch:\s*"((?:\\.|[^"\\])*)"/,
 		)?.[1];
-		return [
-			{
-				name: "subagent",
-				arguments: {
-					name,
-					...(agent ? { agent } : {}),
-					...(model ? { model } : {}),
-					...(cwd ? { cwd } : {}),
-					...(systemPrompt ? { systemPrompt } : {}),
-					...(section.includes("fork: true") ? { fork: true } : {}),
-					...(branch ? { worktree: { branch } } : {}),
-					task,
-				},
-			},
-		];
+		const args: ToolCallArguments = { name, task };
+		if (agent) args.agent = agent;
+		if (model) args.model = model;
+		if (cwd) args.cwd = cwd;
+		if (systemPrompt) args.systemPrompt = systemPrompt;
+		if (section.includes("fork: true")) args.fork = true;
+		if (branch) args.worktree = { branch };
+		return [{ name: "subagent", arguments: args }];
 	});
 }
 
@@ -136,15 +145,11 @@ function subagentResumeCall(source: string): ToolCall | null {
 	if (!sessionPath) return null;
 	const name = quotedValue(source, "name");
 	const message = quotedValue(source, "message");
-	return {
-		name: "subagent_resume",
-		arguments: {
-			sessionPath,
-			...(name ? { name } : {}),
-			...(message ? { message } : {}),
-			...(/\bautoExit:\s*false\b/.test(source) ? { autoExit: false } : {}),
-		},
-	};
+	const args: ToolCallArguments = { sessionPath };
+	if (name) args.name = name;
+	if (message) args.message = message;
+	if (/\bautoExit:\s*false\b/.test(source)) args.autoExit = false;
+	return { name: "subagent_resume", arguments: args };
 }
 
 function bashCommand(source: string): string | undefined {
@@ -337,10 +342,21 @@ async function planResponse(request: ChatRequest): Promise<ResponsePlan> {
 		: { text: marker ?? "completed" };
 }
 
+type ChatDelta = Partial<{
+	role: string;
+	content: string;
+	tool_calls: ReadonlyArray<{
+		index: number;
+		id: string;
+		type: "function";
+		function: { name: string; arguments: string };
+	}>;
+}>;
+
 function writeEvent(
 	response: ServerResponse,
 	request: ChatRequest,
-	delta: Record<string, unknown>,
+	delta: ChatDelta,
 	finishReason: string | null,
 ): void {
 	response.write(
@@ -432,7 +448,7 @@ await once(server, "listening");
 server.unref();
 
 const address = server.address();
-if (!address || typeof address === "string")
+if (!address || isString(address))
 	throw new Error("Expected fake provider to bind to a TCP port");
 
 export const TEST_PROVIDER_URL = `http://127.0.0.1:${address.port}/v1`;

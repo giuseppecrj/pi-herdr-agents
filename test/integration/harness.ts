@@ -23,6 +23,7 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { TEST_MODEL as FIXTURE_MODEL, TEST_PROVIDER_URL } from "./fake-provider.ts";
+import { isNonEmptyString } from "../../pi-extension/subagents/type-guards.ts";
 import {
   isTerminalAvailable,
   createSubagentPane,
@@ -186,9 +187,9 @@ function createTestWorkspace(cwd: string): string {
     ["workspace", "create", "--cwd", cwd, "--label", `pi-integ-${Date.now()}`, "--no-focus"],
     { encoding: "utf8" },
   );
-  const parsed = JSON.parse(output) as { result?: { workspace?: { workspace_id?: unknown } } };
+  const parsed = JSON.parse(output);
   const workspaceId = parsed.result?.workspace?.workspace_id;
-  if (typeof workspaceId !== "string" || workspaceId.length === 0) {
+  if (!isNonEmptyString(workspaceId)) {
     throw new Error(`Unexpected herdr workspace create output: ${output.trim() || "(empty)"}`);
   }
   return workspaceId;

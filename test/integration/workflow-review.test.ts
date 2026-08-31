@@ -26,6 +26,7 @@ import {
   PI_TIMEOUT,
   TEST_MODEL,
 } from "./harness.ts";
+import { isString } from "../../pi-extension/subagents/type-guards.ts";
 
 const backends = getAvailableBackends();
 
@@ -283,7 +284,7 @@ for (const backend of backends) {
 					results.every(
 						(result) =>
 							result.ok &&
-							typeof result.value === "string" &&
+							isString(result.value) &&
 							result.value.includes(marker),
 					),
 					true,

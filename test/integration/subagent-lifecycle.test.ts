@@ -49,10 +49,7 @@ const backends = getAvailableBackends();
 function getWorkspaceActiveTab(workspaceId: string): string | null {
 	const workspaces = JSON.parse(
 		execFileSync("herdr", ["workspace", "list"], { encoding: "utf8" }),
-	).result.workspaces as Array<{
-		active_tab_id?: string;
-		workspace_id: string;
-	}>;
+	).result.workspaces;
 	return (
 		workspaces.find((workspace) => workspace.workspace_id === workspaceId)
 			?.active_tab_id ?? null
@@ -74,7 +71,7 @@ function listBtwPanes(workspaceId: string): string[] {
 		execFileSync("herdr", ["tab", "list", "--workspace", workspaceId], {
 			encoding: "utf8",
 		}),
-	).result.tabs as Array<{ label?: string; tab_id: string }>;
+	).result.tabs;
 	const btwTabIds = new Set(
 		tabs.filter((tab) => tab.label === "BTW").map((tab) => tab.tab_id),
 	);
@@ -82,7 +79,7 @@ function listBtwPanes(workspaceId: string): string[] {
 		execFileSync("herdr", ["pane", "list", "--workspace", workspaceId], {
 			encoding: "utf8",
 		}),
-	).result.panes as Array<{ pane_id: string; tab_id: string }>;
+	).result.panes;
 	return panes
 		.filter((pane) => btwTabIds.has(pane.tab_id))
 		.map((pane) => pane.pane_id);

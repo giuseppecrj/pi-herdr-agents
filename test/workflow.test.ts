@@ -30,6 +30,7 @@ import {
 	recoverWorkflowStartup,
 	prepareWorkflow,
 	validateWorkflowApproval,
+	type JsonValue,
 	type WorkflowRole,
 } from "../pi-extension/subagents/workflow.ts";
 
@@ -55,7 +56,7 @@ function writeWorkflow(root: string, body: string, run = "review") {
 	return path;
 }
 
-function workflow(baseSha: string, overrides: Record<string, unknown> = {}) {
+function workflow(baseSha: string, overrides: any = {}) {
 	return `/* herdr-workflow
 ${JSON.stringify(
 	{
@@ -132,6 +133,9 @@ function createExtensionApi() {
 		tools,
 		sentMessages,
 		nextMessage,
+		// SAFETY: this fixture implements only the ExtensionAPI members these
+		// tests exercise; TypeScript cannot verify partial-mock compatibility
+		// without also declaring every unused SDK method.
 		api: {
 			events: createEventBus(),
 			on() {},
@@ -224,9 +228,9 @@ describe("workflow preparation", () => {
 		);
 		const parentOnly = join(root, "parent-only.txt");
 		writeFileSync(parentOnly, "uncommitted\n");
-		const events: Array<{ type: string; [key: string]: unknown }> = [];
+		const events: Array<{ type: string; [key: string]: JsonValue }> = [];
 		const journal = {
-			append(type: string, details: Record<string, unknown> = {}) {
+			append(type: string, details: Record<string, JsonValue> = {}) {
 				events.push({ type, ...details });
 				return String(events.length);
 			},
@@ -608,7 +612,7 @@ describe("workflow preparation", () => {
 		const baseSha = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], {
 			encoding: "utf8",
 		}).trim();
-		const cases: Array<{ name: string; overrides: Record<string, unknown> }> = [
+		const cases: Array<{ name: string; overrides: any }> = [
 			{ name: "short base SHA", overrides: { baseSha: baseSha.slice(0, -1) } },
 			{ name: "empty sources", overrides: { sources: [] } },
 			{ name: "too many agents", overrides: { maxAgents: 9 } },
@@ -936,7 +940,7 @@ return { status: reviews.every((review) => review.ok) ? "complete" : "incomplete
 		const result = await executeWorkflow(candidate, {
 			deadlineMs: 1_000,
 			onAgent: (prompt, options): any => {
-				if ((options as { role: string }).role === "synthesizer") {
+				if (options.role === "synthesizer") {
 					assert.match(prompt, /"code":"child_error"/);
 					return { ok: true, value: "incomplete evidence" };
 				}
@@ -1448,8 +1452,10 @@ return { shouldNot: "complete" };
 				await new Promise((resolve) => setTimeout(resolve, 10));
 				owner = subagentTest.getActiveWorkflow();
 			}
-			assert.ok(owner?.checkout, "reader checkout must exist before cancel");
-			const checkoutPath = owner.checkout as string;
+			if (!owner?.checkout) {
+				throw new Error("reader checkout must exist before cancel");
+			}
+			const checkoutPath = owner.checkout;
 			owner.children.set("synthetic-survivor", {
 				controller: new AbortController(),
 				surface: "survivor-pane",
@@ -1580,7 +1586,7 @@ return { shouldNot: "complete" };
 				waitExit: async () => [],
 			},
 			journalType: "cancel_process_info_failed",
-			assertJournal: (events: Array<Record<string, unknown>>) => {
+			assertJournal: (events: Array<Record<string, JsonValue>>) => {
 				assert.ok(
 					events.some(
 						(event) =>
@@ -1605,7 +1611,7 @@ return { shouldNot: "complete" };
 				waitExit: async () => [],
 			},
 			journalType: "cancel_process_info",
-			assertJournal: (events: Array<Record<string, unknown>>) => {
+			assertJournal: (events: Array<Record<string, JsonValue>>) => {
 				assert.ok(
 					events.some(
 						(event) =>
@@ -1711,8 +1717,10 @@ return { shouldNot: "complete" };
 					await new Promise((resolve) => setTimeout(resolve, 10));
 					owner = subagentTest.getActiveWorkflow();
 				}
-				assert.ok(owner?.checkout, "reader checkout must exist before cancel");
-				const checkoutPath = owner.checkout as string;
+				if (!owner?.checkout) {
+					throw new Error("reader checkout must exist before cancel");
+				}
+				const checkoutPath = owner.checkout;
 				owner.children.set(`synthetic-${scenario.runId}`, {
 					controller: new AbortController(),
 					surface: `${scenario.runId}-pane`,

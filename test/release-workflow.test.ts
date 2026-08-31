@@ -37,9 +37,17 @@ function readOutputs(path: string): Record<string, string> {
           .trim()
           .split("\n")
           .filter(Boolean)
-          .map((line) => line.split("=", 2) as [string, string]),
+          .map((line) => {
+            const [key, value] = line.split("=", 2);
+            return [key, value];
+          }),
       )
     : {};
+}
+
+interface ScriptRunResult {
+  error?: unknown;
+  outputs: Record<string, string>;
 }
 
 function runDetect(
@@ -51,7 +59,7 @@ function runDetect(
     currentVersion?: string;
     beforeSha?: string;
   },
-): { error?: unknown; outputs: Record<string, string> } {
+): ScriptRunResult {
   const dir = mkdtempSync(join(tmpdir(), "pi-herdr-release-"));
   const output = join(dir, "github-output");
   let beforeSha = options.beforeSha ?? "0".repeat(40);
@@ -127,7 +135,7 @@ function runRegistryVerification(
     | "wrong-version"
     | "exact-commit"
     | "foreign-commit",
-): { error?: unknown; outputs: Record<string, string> } {
+): ScriptRunResult {
   const dir = mkdtempSync(join(tmpdir(), "pi-herdr-registry-check-"));
   const output = join(dir, "github-output");
   const fetchStub = join(dir, "fetch-stub.mjs");
@@ -221,11 +229,7 @@ globalThis.fetch = async (_url, options) => {
 
 test("release workflow uses package.json identity and trusted publishing", async () => {
   const workflow = await readFile(".github/workflows/publish.yml", "utf8");
-  const pkg = JSON.parse(await readFile("package.json", "utf8")) as {
-    name: string;
-    scripts: Record<string, string>;
-    version: string;
-  };
+  const pkg = JSON.parse(await readFile("package.json", "utf8"));
 
   assert.equal(pkg.name, "pi-herdr-agents");
   assert.match(pkg.version, /^\d+\.\d+\.\d+$/);

@@ -7,15 +7,21 @@ if (!port) throw new Error("workflow worker requires a parent port");
 const pendingAgents = new Map();
 let nextAgentId = 0;
 
+function isString(value) {
+	return Object.prototype.toString.call(value) === "[object String]";
+}
+
+function isPlainObject(value) {
+	return value !== null && Object.prototype.toString.call(value) === "[object Object]";
+}
+
 function agent(prompt, options) {
 	if (
-		typeof prompt !== "string" ||
-		!options ||
-		typeof options !== "object" ||
-		Array.isArray(options) ||
+		!isString(prompt) ||
+		!isPlainObject(options) ||
 		Object.keys(options).length !== 2 ||
 		options.kind !== "review" ||
-		(typeof options.node !== "string" && typeof options.role !== "string")
+		(!isString(options.node) && !isString(options.role))
 	) {
 		throw new Error("Workflow agent requires a prompt and { kind: 'review', node } options");
 	}
