@@ -392,9 +392,14 @@ for (const backend of backends) {
 					/"type":"agent_started"[\s\S]*"role":"skeptic"/,
 				);
 				const reviewEvents = reviewJournal.trim().split("\n").map((line) => JSON.parse(line));
+				// Reviewers launch concurrently and agent_started is journaled after
+				// each pane's shell becomes ready, so start order is not deterministic.
 				assert.deepEqual(
-					reviewEvents.filter((event) => event.type === "agent_started").map((event) => event.role),
-					["architecture", "standards", "skeptic"],
+					reviewEvents
+						.filter((event) => event.type === "agent_started")
+						.map((event) => event.role)
+						.sort(),
+					["architecture", "skeptic", "standards"],
 				);
 				assert.equal(
 					reviewEvents.some((event) => event.type === "agent_result"),
