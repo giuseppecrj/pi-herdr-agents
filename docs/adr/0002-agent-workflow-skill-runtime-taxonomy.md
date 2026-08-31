@@ -194,7 +194,8 @@ project authors can still add their own namespaced fields.
   `chrome-cdp` dependency declared through canonical `skills` metadata.
 - `claude-reviewer` — Removed. Use the generic `reviewer` role with an
   authenticated Claude model through Pi provider/model routing.
-- `adversarial-reviewer` — Transitional workflow implementation. It applies
+- `adversarial-reviewer` — Transitional workflow implementation (now shipped
+  and documented as a coordinator agent role). It applies
   project review constraints, selects three distinct eligible exact
   authenticated Pi model IDs, and launches generic `reviewer` children followed
   by fresh reviewer synthesis. Do not clone this pattern for new outcomes;

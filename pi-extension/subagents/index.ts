@@ -860,7 +860,7 @@ const BUNDLED_WORKTREE_WARNINGS = {
 		"Use an ordinary pane instead; to review an existing worker result, start it in the retained worktree path. " +
 		"Herdr worktree workspaces persist until explicitly removed.",
 	"adversarial-reviewer":
-		"The bundled adversarial-reviewer coordinates read-only reviewers and writes review artifacts. " +
+		"The bundled adversarial-reviewer coordinates read-only reviewers and does not write artifacts in the reviewed checkout. " +
 		"It normally uses an ordinary pane, not a new worktree. " +
 		"Herdr worktree workspaces persist until explicitly removed.",
 } satisfies Readonly<Record<string, string>>;
