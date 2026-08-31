@@ -21,6 +21,7 @@ Automated release gates (run by the workflow and required locally):
 
 ```bash
 npm ci
+npm run format:check
 npm run lint
 npm test
 npm pack --dry-run

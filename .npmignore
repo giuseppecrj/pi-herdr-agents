@@ -9,6 +9,7 @@ prototypes/
 sessions/
 run.jsonl
 .reviews/
+biome.json
 oxlint.config.ts
 tools/
 *.tgz

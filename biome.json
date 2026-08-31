@@ -1,0 +1,14 @@
+{
+  "files": {
+    "includes": ["pi-extension/**", "test/**", "!**/*.md"]
+  },
+  "formatter": {
+    "enabled": true
+  },
+  "linter": {
+    "enabled": false
+  },
+  "assist": {
+    "enabled": false
+  }
+}

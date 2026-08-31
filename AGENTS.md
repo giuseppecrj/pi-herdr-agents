@@ -84,6 +84,7 @@ For normal changes:
 
 ```bash
 npm test
+npm run format:check
 npm run lint
 npm pack --dry-run
 git diff --check
