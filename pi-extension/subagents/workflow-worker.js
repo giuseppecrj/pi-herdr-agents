@@ -12,7 +12,10 @@ function isString(value) {
 }
 
 function isPlainObject(value) {
-	return value !== null && Object.prototype.toString.call(value) === "[object Object]";
+	return (
+		value !== null &&
+		Object.prototype.toString.call(value) === "[object Object]"
+	);
 }
 
 function agent(prompt, options) {
@@ -23,11 +26,15 @@ function agent(prompt, options) {
 		options.kind !== "review" ||
 		(!isString(options.node) && !isString(options.role))
 	) {
-		throw new Error("Workflow agent requires a prompt and { kind: 'review', node } options");
+		throw new Error(
+			"Workflow agent requires a prompt and { kind: 'review', node } options",
+		);
 	}
 	const id = String(++nextAgentId);
 	port.postMessage({ type: "agent", id, prompt, options });
-	return new Promise((resolve, reject) => pendingAgents.set(id, { resolve, reject }));
+	return new Promise((resolve, reject) =>
+		pendingAgents.set(id, { resolve, reject }),
+	);
 }
 
 function log(message) {
@@ -44,7 +51,11 @@ port.on("message", (message) => {
 
 (async () => {
 	try {
-		const sandbox = Object.freeze({ agent: Object.freeze(agent), log: Object.freeze(log), console: undefined });
+		const sandbox = Object.freeze({
+			agent: Object.freeze(agent),
+			log: Object.freeze(log),
+			console: undefined,
+		});
 		const context = vm.createContext(sandbox, {
 			codeGeneration: { strings: false, wasm: false },
 		});

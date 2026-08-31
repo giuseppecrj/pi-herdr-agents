@@ -23,7 +23,11 @@ export interface MessageEntry extends SessionEntry {
 	type: "message";
 	message: {
 		role: "user" | "assistant" | "toolResult";
-		content: Array<{ type: string; text?: string; [key: string]: JsonValue | undefined }>;
+		content: Array<{
+			type: string;
+			text?: string;
+			[key: string]: JsonValue | undefined;
+		}>;
 		stopReason?: string;
 		errorMessage?: string;
 	};

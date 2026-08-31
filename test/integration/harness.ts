@@ -10,46 +10,49 @@
  */
 import { execFileSync } from "node:child_process";
 import {
-  mkdtempSync,
-  mkdirSync,
-  readdirSync,
-  rmSync,
-  existsSync,
-  readFileSync,
-  writeFileSync,
-  unlinkSync,
+	mkdtempSync,
+	mkdirSync,
+	readdirSync,
+	rmSync,
+	existsSync,
+	readFileSync,
+	writeFileSync,
+	unlinkSync,
 } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
-import { TEST_MODEL as FIXTURE_MODEL, TEST_PROVIDER_URL } from "./fake-provider.ts";
+import {
+	TEST_MODEL as FIXTURE_MODEL,
+	TEST_PROVIDER_URL,
+} from "./fake-provider.ts";
 import { isNonEmptyString } from "../../pi-extension/subagents/type-guards.ts";
 import {
-  isTerminalAvailable,
-  createSubagentPane,
-  createSubagentWorktree,
-  runInPane,
-  runScriptInPane,
-  readPane,
-  readPaneAsync,
-  closePane,
-  interruptPane,
-  shellQuote,
+	isTerminalAvailable,
+	createSubagentPane,
+	createSubagentWorktree,
+	runInPane,
+	runScriptInPane,
+	readPane,
+	readPaneAsync,
+	closePane,
+	interruptPane,
+	shellQuote,
 } from "../../pi-extension/subagents/terminal.ts";
 
 type MuxBackend = "herdr";
 
 // Re-export mux primitives for tests
 export {
-  createSubagentPane,
-  createSubagentWorktree,
-  runInPane,
-  runScriptInPane,
-  readPane,
-  readPaneAsync,
-  closePane,
-  interruptPane,
-  shellQuote,
+	createSubagentPane,
+	createSubagentWorktree,
+	runInPane,
+	runScriptInPane,
+	readPane,
+	readPaneAsync,
+	closePane,
+	interruptPane,
+	shellQuote,
 };
 export type { MuxBackend };
 
@@ -70,7 +73,12 @@ const TEST_AGENTS_SRC = join(HARNESS_DIR, "agents");
  * edits are always the code under test, regardless of what pi-packages are
  * installed on the host.
  */
-const EXTENSION_SOURCE = join(PROJECT_ROOT, "pi-extension", "subagents", "index.ts");
+const EXTENSION_SOURCE = join(
+	PROJECT_ROOT,
+	"pi-extension",
+	"subagents",
+	"index.ts",
+);
 
 // ── Configuration ──
 
@@ -79,8 +87,8 @@ export const USE_TEST_PROVIDER = process.env.PI_TEST_LIVE !== "1";
 
 /** Model used for integration tests. */
 export const TEST_MODEL = USE_TEST_PROVIDER
-  ? FIXTURE_MODEL
-  : process.env.PI_TEST_MODEL ?? "openai-codex/gpt-5.6-luna";
+	? FIXTURE_MODEL
+	: (process.env.PI_TEST_MODEL ?? "openai-codex/gpt-5.6-luna");
 
 /** Per-test timeout in ms. Override with PI_TEST_TIMEOUT env var. */
 export const PI_TIMEOUT = Number(process.env.PI_TEST_TIMEOUT ?? "120000");
@@ -89,110 +97,141 @@ export const PI_TIMEOUT = Number(process.env.PI_TEST_TIMEOUT ?? "120000");
 
 /** Detect whether the required herdr backend is available. */
 export function getAvailableBackends(): MuxBackend[] {
-  return isTerminalAvailable() ? ["herdr"] : [];
+	return isTerminalAvailable() ? ["herdr"] : [];
 }
 
 export function setBackend(_backend: MuxBackend): undefined {
-  return undefined;
+	return undefined;
 }
 
 export function restoreBackend(_prev: string | undefined): void {}
 
 export function focusSurface(_backend: MuxBackend, surface: string): void {
-  // Focus the tab containing the pane — herdr has no direct "focus pane X"
-  // CLI, but focusing the tab brings it to the foreground.
-  const info = execFileSync("herdr", ["pane", "get", surface], { encoding: "utf8" });
-  const tabId = JSON.parse(info)?.result?.pane?.tab_id;
-  if (tabId) execFileSync("herdr", ["tab", "focus", tabId], { encoding: "utf8" });
+	// Focus the tab containing the pane — herdr has no direct "focus pane X"
+	// CLI, but focusing the tab brings it to the foreground.
+	const info = execFileSync("herdr", ["pane", "get", surface], {
+		encoding: "utf8",
+	});
+	const tabId = JSON.parse(info)?.result?.pane?.tab_id;
+	if (tabId)
+		execFileSync("herdr", ["tab", "focus", tabId], { encoding: "utf8" });
 }
 
 export function getFocusedSurface(_backend: MuxBackend): string | null {
-  try {
-    const info = execFileSync("herdr", ["pane", "current"], { encoding: "utf8" });
-    return JSON.parse(info)?.result?.pane?.pane_id ?? null;
-  } catch {
-    return null;
-  }
+	try {
+		const info = execFileSync("herdr", ["pane", "current"], {
+			encoding: "utf8",
+		});
+		return JSON.parse(info)?.result?.pane?.pane_id ?? null;
+	} catch {
+		return null;
+	}
 }
 
-export function getSurfacePane(_backend: MuxBackend, surface: string): string | null {
-  return surface;
+export function getSurfacePane(
+	_backend: MuxBackend,
+	surface: string,
+): string | null {
+	return surface;
 }
 
 export async function waitForFocusedSurface(
-  backend: MuxBackend,
-  surface: string,
-  timeout: number = PI_TIMEOUT,
+	backend: MuxBackend,
+	surface: string,
+	timeout: number = PI_TIMEOUT,
 ): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    if (getFocusedSurface(backend) === surface) return;
-    await sleep(200);
-  }
+	const start = Date.now();
+	while (Date.now() - start < timeout) {
+		if (getFocusedSurface(backend) === surface) return;
+		await sleep(200);
+	}
 
-  throw new Error(
-    `Timeout (${timeout}ms) waiting for focused ${backend} surface ${surface}; ` +
-      `current focus is ${getFocusedSurface(backend) ?? "unknown"}`,
-  );
+	throw new Error(
+		`Timeout (${timeout}ms) waiting for focused ${backend} surface ${surface}; ` +
+			`current focus is ${getFocusedSurface(backend) ?? "unknown"}`,
+	);
 }
 
 // ── Test environment ──
 
 export interface TestEnv {
-  /** Temp directory serving as the test project root */
-  dir: string;
-  /** Active mux backend for this test run */
-  backend: MuxBackend;
-  /** Dedicated workspace owned by this test environment. */
-  workspaceId: string;
-  /** Parent workspace restored after cleanup. */
-  previousWorkspaceId: string | undefined;
-  /** Agent configuration restored after cleanup. */
-  previousAgentDir: string | undefined;
-  /** Surfaces created directly by the harness. */
-  surfaces: string[];
-  /** Temp files to clean up */
-  tempFiles: string[];
+	/** Temp directory serving as the test project root */
+	dir: string;
+	/** Active mux backend for this test run */
+	backend: MuxBackend;
+	/** Dedicated workspace owned by this test environment. */
+	workspaceId: string;
+	/** Parent workspace restored after cleanup. */
+	previousWorkspaceId: string | undefined;
+	/** Agent configuration restored after cleanup. */
+	previousAgentDir: string | undefined;
+	/** Surfaces created directly by the harness. */
+	surfaces: string[];
+	/** Temp files to clean up */
+	tempFiles: string[];
 }
 
 function writeTestProviderConfig(agentDir: string): void {
-  writeFileSync(join(agentDir, "models.json"), JSON.stringify({
-    providers: {
-      "pi-integration": {
-        baseUrl: TEST_PROVIDER_URL,
-        api: "openai-completions",
-        apiKey: "test",
-        compat: {
-          supportsDeveloperRole: false,
-          supportsReasoningEffort: false,
-          supportsUsageInStreaming: false,
-        },
-        models: ["test", "fallback-primary", "fallback-secondary", "fallback-fail"].map((id) => ({
-          id,
-          name: "Deterministic integration test model", 
-          reasoning: true,
-          input: ["text"],
-          contextWindow: 128_000,
-          maxTokens: 4_096,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        })), 
-      },
-    },
-  }, null, 2), "utf8");
+	writeFileSync(
+		join(agentDir, "models.json"),
+		JSON.stringify(
+			{
+				providers: {
+					"pi-integration": {
+						baseUrl: TEST_PROVIDER_URL,
+						api: "openai-completions",
+						apiKey: "test",
+						compat: {
+							supportsDeveloperRole: false,
+							supportsReasoningEffort: false,
+							supportsUsageInStreaming: false,
+						},
+						models: [
+							"test",
+							"fallback-primary",
+							"fallback-secondary",
+							"fallback-fail",
+						].map((id) => ({
+							id,
+							name: "Deterministic integration test model",
+							reasoning: true,
+							input: ["text"],
+							contextWindow: 128_000,
+							maxTokens: 4_096,
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+						})),
+					},
+				},
+			},
+			null,
+			2,
+		),
+		"utf8",
+	);
 }
 
 function createTestWorkspace(cwd: string): string {
-  const output = execFileSync(
-    "herdr",
-    ["workspace", "create", "--cwd", cwd, "--label", `pi-integ-${Date.now()}`, "--no-focus"],
-    { encoding: "utf8" },
-  );
-  const parsed = JSON.parse(output);
-  const workspaceId = parsed.result?.workspace?.workspace_id;
-  if (!isNonEmptyString(workspaceId)) {
-    throw new Error(`Unexpected herdr workspace create output: ${output.trim() || "(empty)"}`);
-  }
-  return workspaceId;
+	const output = execFileSync(
+		"herdr",
+		[
+			"workspace",
+			"create",
+			"--cwd",
+			cwd,
+			"--label",
+			`pi-integ-${Date.now()}`,
+			"--no-focus",
+		],
+		{ encoding: "utf8" },
+	);
+	const parsed = JSON.parse(output);
+	const workspaceId = parsed.result?.workspace?.workspace_id;
+	if (!isNonEmptyString(workspaceId)) {
+		throw new Error(
+			`Unexpected herdr workspace create output: ${output.trim() || "(empty)"}`,
+		);
+	}
+	return workspaceId;
 }
 
 /**
@@ -200,111 +239,119 @@ function createTestWorkspace(cwd: string): string {
  * The temp dir has `.pi/agents/` containing copies of all test agents.
  */
 export function createTestEnv(backend: MuxBackend): TestEnv {
-  const dir = mkdtempSync(join(tmpdir(), "pi-integ-"));
-  const agentsDir = join(dir, ".pi", "agents");
-  const agentDir = join(dir, ".pi", "agent");
-  const previousWorkspaceId = process.env.HERDR_WORKSPACE_ID;
-  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-  if (!previousWorkspaceId) throw new Error("HERDR_WORKSPACE_ID is required for integration tests");
-  const workspaceId = createTestWorkspace(dir);
-  // Herdr creates subagent tabs in the workspace identified by this env var.
-  // Point the harness at its dedicated workspace without changing the parent's pane.
-  process.env.HERDR_WORKSPACE_ID = workspaceId;
-  mkdirSync(agentsDir, { recursive: true });
-  if (USE_TEST_PROVIDER) {
-    mkdirSync(agentDir, { recursive: true });
-    writeTestProviderConfig(agentDir);
-    process.env.PI_CODING_AGENT_DIR = agentDir;
-  }
+	const dir = mkdtempSync(join(tmpdir(), "pi-integ-"));
+	const agentsDir = join(dir, ".pi", "agents");
+	const agentDir = join(dir, ".pi", "agent");
+	const previousWorkspaceId = process.env.HERDR_WORKSPACE_ID;
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	if (!previousWorkspaceId)
+		throw new Error("HERDR_WORKSPACE_ID is required for integration tests");
+	const workspaceId = createTestWorkspace(dir);
+	// Herdr creates subagent tabs in the workspace identified by this env var.
+	// Point the harness at its dedicated workspace without changing the parent's pane.
+	process.env.HERDR_WORKSPACE_ID = workspaceId;
+	mkdirSync(agentsDir, { recursive: true });
+	if (USE_TEST_PROVIDER) {
+		mkdirSync(agentDir, { recursive: true });
+		writeTestProviderConfig(agentDir);
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+	}
 
-  // Copy test agent definitions into the project-local agents dir and pin
-  // every child subagent to the same model selected for the outer Pi sessions.
-  // Without this rewrite, fixture frontmatter can silently bypass PI_TEST_MODEL.
-  if (existsSync(TEST_AGENTS_SRC)) {
-    for (const file of readdirSync(TEST_AGENTS_SRC)) {
-      if (file.endsWith(".md")) {
-        const source = readFileSync(join(TEST_AGENTS_SRC, file), "utf8");
-        const configured = /^model:\s*.*$/m.test(source)
-          ? source.replace(/^model:\s*.*$/m, `model: ${TEST_MODEL}`)
-          : source.replace(/^---\n/, `---\nmodel: ${TEST_MODEL}\n`);
-        writeFileSync(join(agentsDir, file), configured, "utf8");
-      }
-    }
-  }
+	// Copy test agent definitions into the project-local agents dir and pin
+	// every child subagent to the same model selected for the outer Pi sessions.
+	// Without this rewrite, fixture frontmatter can silently bypass PI_TEST_MODEL.
+	if (existsSync(TEST_AGENTS_SRC)) {
+		for (const file of readdirSync(TEST_AGENTS_SRC)) {
+			if (file.endsWith(".md")) {
+				const source = readFileSync(join(TEST_AGENTS_SRC, file), "utf8");
+				const configured = /^model:\s*.*$/m.test(source)
+					? source.replace(/^model:\s*.*$/m, `model: ${TEST_MODEL}`)
+					: source.replace(/^---\n/, `---\nmodel: ${TEST_MODEL}\n`);
+				writeFileSync(join(agentsDir, file), configured, "utf8");
+			}
+		}
+	}
 
-  return {
-    dir,
-    backend,
-    workspaceId,
-    previousWorkspaceId,
-    previousAgentDir,
-    surfaces: [],
-    tempFiles: [],
-  };
+	return {
+		dir,
+		backend,
+		workspaceId,
+		previousWorkspaceId,
+		previousAgentDir,
+		surfaces: [],
+		tempFiles: [],
+	};
 }
 
 /**
  * Clean up all resources created during the test.
  */
 export function cleanupTestEnv(env: TestEnv): void {
-  // Close only surfaces explicitly owned by the harness. The dedicated
-  // workspace is then closed as a final safety net for extension-created panes.
-  for (const surface of env.surfaces) {
-    try {
-      closePane(surface);
-    } catch {}
-  }
-  try {
-    execFileSync("herdr", ["workspace", "close", env.workspaceId], { encoding: "utf8" });
-  } catch {}
-  if (env.previousWorkspaceId) {
-    process.env.HERDR_WORKSPACE_ID = env.previousWorkspaceId;
-  } else {
-    delete process.env.HERDR_WORKSPACE_ID;
-  }
-  if (env.previousAgentDir) {
-    process.env.PI_CODING_AGENT_DIR = env.previousAgentDir;
-  } else {
-    delete process.env.PI_CODING_AGENT_DIR;
-  }
-  for (const file of env.tempFiles) {
-    try {
-      unlinkSync(file);
-    } catch {}
-  }
-  try {
-    rmSync(env.dir, { recursive: true, force: true });
-  } catch {}
+	// Close only surfaces explicitly owned by the harness. The dedicated
+	// workspace is then closed as a final safety net for extension-created panes.
+	for (const surface of env.surfaces) {
+		try {
+			closePane(surface);
+		} catch {}
+	}
+	try {
+		execFileSync("herdr", ["workspace", "close", env.workspaceId], {
+			encoding: "utf8",
+		});
+	} catch {}
+	if (env.previousWorkspaceId) {
+		process.env.HERDR_WORKSPACE_ID = env.previousWorkspaceId;
+	} else {
+		delete process.env.HERDR_WORKSPACE_ID;
+	}
+	if (env.previousAgentDir) {
+		process.env.PI_CODING_AGENT_DIR = env.previousAgentDir;
+	} else {
+		delete process.env.PI_CODING_AGENT_DIR;
+	}
+	for (const file of env.tempFiles) {
+		try {
+			unlinkSync(file);
+		} catch {}
+	}
+	try {
+		rmSync(env.dir, { recursive: true, force: true });
+	} catch {}
 }
 
 /**
  * Create a surface and register it for automatic cleanup.
  */
 export function createTrackedSurface(env: TestEnv, name: string): string {
-  const surface = createSubagentPane(name);
-  env.surfaces.push(surface);
-  return surface;
+	const surface = createSubagentPane(name);
+	env.surfaces.push(surface);
+	return surface;
 }
 
 /** Wait until a newly created pane accepts and displays a shell command. */
-export async function waitForPaneReady(surface: string, timeout: number = PI_TIMEOUT): Promise<void> {
-  const marker = `__PI_INTEG_READY_${uniqueId()}__`;
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeout) {
-    try {
-      runInPane(surface, `printf '${marker}\\n'`);
-      if ((await readPaneAsync(surface, 50)).includes(marker)) return;
-    } catch {}
-    await sleep(200);
-  }
-  throw new Error(`Timeout (${timeout}ms) waiting for shell in pane ${surface}`);
+export async function waitForPaneReady(
+	surface: string,
+	timeout: number = PI_TIMEOUT,
+): Promise<void> {
+	const marker = `__PI_INTEG_READY_${uniqueId()}__`;
+	const startedAt = Date.now();
+	while (Date.now() - startedAt < timeout) {
+		try {
+			runInPane(surface, `printf '${marker}\\n'`);
+			if ((await readPaneAsync(surface, 50)).includes(marker)) return;
+		} catch {}
+		await sleep(200);
+	}
+	throw new Error(
+		`Timeout (${timeout}ms) waiting for shell in pane ${surface}`,
+	);
 }
 
 /**
  * Remove a surface from tracking (after manual close).
  */
 export function untrackSurface(env: TestEnv, surface: string): void {
-  env.surfaces = env.surfaces.filter((s) => s !== surface);
+	env.surfaces = env.surfaces.filter((s) => s !== surface);
 }
 
 // ── Pi session management ──
@@ -317,35 +364,35 @@ export function untrackSurface(env: TestEnv, surface: string): void {
  *   `pi ...; echo '__TEST_DONE_'$?'__'`
  */
 export function startPi(
-  surface: string,
-  testDir: string,
-  task: string,
-  opts?: { model?: string; extraArgs?: string },
+	surface: string,
+	testDir: string,
+	task: string,
+	opts?: { model?: string; extraArgs?: string },
 ): void {
-  const model = opts?.model ?? TEST_MODEL;
-  const extra = opts?.extraArgs ?? "";
-  const agentDir = USE_TEST_PROVIDER ? join(testDir, ".pi", "agent") : "";
+	const model = opts?.model ?? TEST_MODEL;
+	const extra = opts?.extraArgs ?? "";
+	const agentDir = USE_TEST_PROVIDER ? join(testDir, ".pi", "agent") : "";
 
-  // Force pi to load the working-tree extension (not an installed pi-package
-  // snapshot). `-ne` disables extension auto-discovery, `-e <path>` loads the
-  // current branch's source directly. Without this, the tests silently run
-  // against whatever version is checked out under `~/.pi/agent/git/...`.
-  const cmd = [
-    `cd ${shellQuote(testDir)} &&`,
-    agentDir ? `PI_CODING_AGENT_DIR=${shellQuote(agentDir)}` : "",
-    `pi`,
-    `-ne`,
-    `-e ${shellQuote(EXTENSION_SOURCE)}`,
-    `--model ${shellQuote(model)}`,
-    extra,
-    shellQuote(task),
-  ]
-    .filter(Boolean)
-    .join(" ");
+	// Force pi to load the working-tree extension (not an installed pi-package
+	// snapshot). `-ne` disables extension auto-discovery, `-e <path>` loads the
+	// current branch's source directly. Without this, the tests silently run
+	// against whatever version is checked out under `~/.pi/agent/git/...`.
+	const cmd = [
+		`cd ${shellQuote(testDir)} &&`,
+		agentDir ? `PI_CODING_AGENT_DIR=${shellQuote(agentDir)}` : "",
+		`pi`,
+		`-ne`,
+		`-e ${shellQuote(EXTENSION_SOURCE)}`,
+		`--model ${shellQuote(model)}`,
+		extra,
+		shellQuote(task),
+	]
+		.filter(Boolean)
+		.join(" ");
 
-  runScriptInPane(surface, `${cmd}; echo '__TEST_DONE_'$?'__'`, {
-    scriptPath: join(testDir, `test-launch-${Date.now()}.sh`),
-  });
+	runScriptInPane(surface, `${cmd}; echo '__TEST_DONE_'$?'__'`, {
+		scriptPath: join(testDir, `test-launch-${Date.now()}.sh`),
+	});
 }
 
 // ── Polling helpers ──
@@ -355,27 +402,27 @@ export function startPi(
  * Throws on timeout with the last screen contents for debugging.
  */
 export async function waitForScreen(
-  surface: string,
-  pattern: RegExp,
-  timeout: number = PI_TIMEOUT,
-  lines: number = 200,
+	surface: string,
+	pattern: RegExp,
+	timeout: number = PI_TIMEOUT,
+	lines: number = 200,
 ): Promise<string> {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    try {
-      const screen = await readPaneAsync(surface, lines);
-      if (pattern.test(screen)) return screen;
-    } catch {}
-    await sleep(2000);
-  }
+	const start = Date.now();
+	while (Date.now() - start < timeout) {
+		try {
+			const screen = await readPaneAsync(surface, lines);
+			if (pattern.test(screen)) return screen;
+		} catch {}
+		await sleep(2000);
+	}
 
-  let finalScreen = "";
-  try {
-    finalScreen = readPane(surface, lines);
-  } catch {}
-  throw new Error(
-    `Timeout (${timeout}ms) waiting for pattern ${pattern}.\nLast screen:\n${finalScreen.slice(-1000)}`,
-  );
+	let finalScreen = "";
+	try {
+		finalScreen = readPane(surface, lines);
+	} catch {}
+	throw new Error(
+		`Timeout (${timeout}ms) waiting for pattern ${pattern}.\nLast screen:\n${finalScreen.slice(-1000)}`,
+	);
 }
 
 /**
@@ -383,22 +430,22 @@ export async function waitForScreen(
  * Returns the file content on success.
  */
 export async function waitForFile(
-  path: string,
-  timeout: number = PI_TIMEOUT,
-  contentPattern?: RegExp,
+	path: string,
+	timeout: number = PI_TIMEOUT,
+	contentPattern?: RegExp,
 ): Promise<string> {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    if (existsSync(path)) {
-      const content = readFileSync(path, "utf8");
-      if (!contentPattern || contentPattern.test(content)) return content;
-    }
-    await sleep(2000);
-  }
-  throw new Error(
-    `Timeout (${timeout}ms) waiting for file: ${path}` +
-      (contentPattern ? ` matching ${contentPattern}` : ""),
-  );
+	const start = Date.now();
+	while (Date.now() - start < timeout) {
+		if (existsSync(path)) {
+			const content = readFileSync(path, "utf8");
+			if (!contentPattern || contentPattern.test(content)) return content;
+		}
+		await sleep(2000);
+	}
+	throw new Error(
+		`Timeout (${timeout}ms) waiting for file: ${path}` +
+			(contentPattern ? ` matching ${contentPattern}` : ""),
+	);
 }
 
 /**
@@ -406,27 +453,27 @@ export async function waitForFile(
  * Returns the exit code.
  */
 export async function waitForPiExit(
-  surface: string,
-  timeout: number = PI_TIMEOUT,
+	surface: string,
+	timeout: number = PI_TIMEOUT,
 ): Promise<number> {
-  const screen = await waitForScreen(surface, /__TEST_DONE_(\d+)__/, timeout);
-  const match = screen.match(/__TEST_DONE_(\d+)__/);
-  return match ? parseInt(match[1], 10) : -1;
+	const screen = await waitForScreen(surface, /__TEST_DONE_(\d+)__/, timeout);
+	const match = screen.match(/__TEST_DONE_(\d+)__/);
+	return match ? parseInt(match[1], 10) : -1;
 }
 
 // ── Utilities ──
 
 export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function uniqueId(): string {
-  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+	return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
 /**
  * Register a temp file for cleanup.
  */
 export function trackTempFile(env: TestEnv, path: string): void {
-  env.tempFiles.push(path);
+	env.tempFiles.push(path);
 }

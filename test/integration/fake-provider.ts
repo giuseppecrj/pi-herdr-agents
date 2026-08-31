@@ -6,7 +6,10 @@ import {
 import { once } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { isPlainObject, isString } from "../../pi-extension/subagents/type-guards.ts";
+import {
+	isPlainObject,
+	isString,
+} from "../../pi-extension/subagents/type-guards.ts";
 
 interface ChatMessage {
 	role?: string;
@@ -96,9 +99,7 @@ function lastUserText(request: ChatRequest): string {
 
 function toolNames(request: ChatRequest): Set<string> {
 	return new Set(
-		(request.tools ?? [])
-			.map((tool) => tool.function?.name)
-			.filter(isString),
+		(request.tools ?? []).map((tool) => tool.function?.name).filter(isString),
 	);
 }
 
@@ -179,7 +180,8 @@ async function waitForIntegrationGate(source: string): Promise<void> {
 	while (!existsSync(path) && Date.now() < deadline) {
 		await new Promise((resolve) => setTimeout(resolve, 25));
 	}
-	if (!existsSync(path)) throw new Error(`Integration gate was not opened: ${path}`);
+	if (!existsSync(path))
+		throw new Error(`Integration gate was not opened: ${path}`);
 }
 
 function btwText(source: string): string | undefined {
@@ -310,7 +312,11 @@ async function planResponse(request: ChatRequest): Promise<ResponsePlan> {
 	}
 
 	if (names.has("subagent")) {
-		if (/Sub-agent "[^"]+" launched and is now running in the background/.test(source)) {
+		if (
+			/Sub-agent "[^"]+" launched and is now running in the background/.test(
+				source,
+			)
+		) {
 			const continuation = source.match(
 				/\b(?:say|respond with)\s+([A-Z][A-Za-z0-9_]*)/,
 			)?.[1];
@@ -422,10 +428,17 @@ const server = createServer(async (request, response) => {
 	}
 	try {
 		const chatRequest = await readJson(request);
-		if (chatRequest.model === "fallback-primary" || chatRequest.model === "fallback-fail") {
+		if (
+			chatRequest.model === "fallback-primary" ||
+			chatRequest.model === "fallback-fail"
+		) {
 			providerRequests.push({ model: chatRequest.model, status: 503 });
 			response.writeHead(503, { "content-type": "application/json" });
-			response.end(JSON.stringify({ error: { message: "deterministic fallback provider failure" } }));
+			response.end(
+				JSON.stringify({
+					error: { message: "deterministic fallback provider failure" },
+				}),
+			);
 			return;
 		}
 		providerRequests.push({ model: chatRequest.model, status: 200 });

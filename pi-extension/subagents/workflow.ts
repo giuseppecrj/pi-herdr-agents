@@ -20,7 +20,12 @@ import {
 	type ModelRegistryAdapter,
 	type ThinkingLevel,
 } from "./runtime-routing.ts";
-import { isBoolean, isPlainObject, isString, type JsonValue } from "./type-guards.ts";
+import {
+	isBoolean,
+	isPlainObject,
+	isString,
+	type JsonValue,
+} from "./type-guards.ts";
 
 export type { JsonValue };
 
@@ -419,24 +424,24 @@ function resolveRolePolicies(
 		const promptHash = hash(role.body ?? "");
 		const fingerprint = hash(
 			JSON.stringify({
-			role: {
-				name: role.name,
-				source: role.source,
-				path: role.path,
-				body: role.body ?? "",
-				model: role.model,
-				thinking: role.thinking,
-				tools: role.tools,
-				skills: role.skills,
-				denyTools: role.denyTools,
-				spawning: role.spawning,
-				autoExit: role.autoExit,
-				interactive: role.interactive,
-				sessionMode: role.sessionMode,
-				cwd: role.cwd,
-			},
-			runtime: { model: declared.model, thinking: declared.thinking },
-			tools,
+				role: {
+					name: role.name,
+					source: role.source,
+					path: role.path,
+					body: role.body ?? "",
+					model: role.model,
+					thinking: role.thinking,
+					tools: role.tools,
+					skills: role.skills,
+					denyTools: role.denyTools,
+					spawning: role.spawning,
+					autoExit: role.autoExit,
+					interactive: role.interactive,
+					sessionMode: role.sessionMode,
+					cwd: role.cwd,
+				},
+				runtime: { model: declared.model, thinking: declared.thinking },
+				tools,
 			}),
 		);
 		return {
@@ -572,18 +577,18 @@ export function sameWorkflowCandidate(
 ): boolean {
 	return (
 		JSON.stringify({
-		scriptHash: left.scriptHash,
-		repository: left.repository,
-		baseSha: left.baseSha,
-		sources: left.sources,
-		rolePolicies: left.rolePolicies,
+			scriptHash: left.scriptHash,
+			repository: left.repository,
+			baseSha: left.baseSha,
+			sources: left.sources,
+			rolePolicies: left.rolePolicies,
 		}) ===
 		JSON.stringify({
-		scriptHash: right.scriptHash,
-		repository: right.repository,
-		baseSha: right.baseSha,
-		sources: right.sources,
-		rolePolicies: right.rolePolicies,
+			scriptHash: right.scriptHash,
+			repository: right.repository,
+			baseSha: right.baseSha,
+			sources: right.sources,
+			rolePolicies: right.rolePolicies,
 		})
 	);
 }
@@ -607,7 +612,9 @@ export interface WorkflowStartupRecord {
 	interrupted: boolean;
 }
 
-function readLastValidWorkflowEvent(path: string): Record<string, JsonValue> | undefined {
+function readLastValidWorkflowEvent(
+	path: string,
+): Record<string, JsonValue> | undefined {
 	let lines: string[];
 	try {
 		lines = readFileSync(path, "utf8").split("\n");
@@ -701,8 +708,13 @@ export function recoverWorkflowStartup(
 		};
 		try {
 			const journal = readFileSync(journalPath, "utf8");
-			const separator = journal.length > 0 && !journal.endsWith("\n") ? "\n" : "";
-			appendFileSync(journalPath, `${separator}${JSON.stringify(event)}\n`, "utf8");
+			const separator =
+				journal.length > 0 && !journal.endsWith("\n") ? "\n" : "";
+			appendFileSync(
+				journalPath,
+				`${separator}${JSON.stringify(event)}\n`,
+				"utf8",
+			);
 			record.lastEvent = event;
 			record.interrupted = true;
 		} catch {
@@ -733,16 +745,16 @@ export function createWorkflowJournal(
 		writeSync(
 			fd,
 			`${JSON.stringify({
-			id: randomUUID(),
-			type: "approved",
-			at: new Date().toISOString(),
-			scriptHash: candidate.scriptHash,
-			repository: candidate.repository,
-			baseSha: candidate.baseSha,
-			preparingSession: candidate.parentSession,
-			approvingUserEntryId: approval.entryId,
-			sources: candidate.sources,
-			rolePolicies: candidate.rolePolicies,
+				id: randomUUID(),
+				type: "approved",
+				at: new Date().toISOString(),
+				scriptHash: candidate.scriptHash,
+				repository: candidate.repository,
+				baseSha: candidate.baseSha,
+				preparingSession: candidate.parentSession,
+				approvingUserEntryId: approval.entryId,
+				sources: candidate.sources,
+				rolePolicies: candidate.rolePolicies,
 			})}\n`,
 		);
 	} catch (error) {
@@ -774,8 +786,8 @@ export function createWorkflowReaderCheckout(
 			"git",
 			["worktree", "add", "--detach", path, candidate.baseSha],
 			{
-			cwd: candidate.repository.root,
-			stdio: "pipe",
+				cwd: candidate.repository.root,
+				stdio: "pipe",
 			},
 		);
 		created = true;
@@ -812,8 +824,8 @@ export function disposeWorkflowReaderCheckout(
 			"git",
 			["status", "--porcelain=v1", "--untracked-files=all"],
 			{
-			cwd: path,
-			encoding: "utf8",
+				cwd: path,
+				encoding: "utf8",
 			},
 		);
 		if (status) {
@@ -943,7 +955,10 @@ export function cancelTerminationResult(
 	};
 }
 
-function validateJson(value: any, seen = new Set<object>()): value is JsonValue {
+function validateJson(
+	value: any,
+	seen = new Set<object>(),
+): value is JsonValue {
 	if (value === null || isBoolean(value) || isString(value)) return true;
 	if (Object.prototype.toString.call(value) === "[object Number]") {
 		return Number.isFinite(value);
@@ -959,7 +974,7 @@ function validateJson(value: any, seen = new Set<object>()): value is JsonValue 
 		? Array.from(
 				{ length: value.length },
 				(_, index) =>
-				Object.hasOwn(value, index) && validateJson(value[index], seen),
+					Object.hasOwn(value, index) && validateJson(value[index], seen),
 			).every(Boolean) &&
 			Reflect.ownKeys(value).every(
 				(key) =>
@@ -968,11 +983,11 @@ function validateJson(value: any, seen = new Set<object>()): value is JsonValue 
 						(/^(0|[1-9]\d*)$/.test(key) && Number(key) < value.length)),
 			)
 		: Reflect.ownKeys(value).every(
-			(key) =>
-				isString(key) &&
-				Object.prototype.propertyIsEnumerable.call(value, key) &&
-				validateJson(value[key], seen),
-		);
+				(key) =>
+					isString(key) &&
+					Object.prototype.propertyIsEnumerable.call(value, key) &&
+					validateJson(value[key], seen),
+			);
 	seen.delete(value);
 	return valid;
 }
@@ -984,17 +999,14 @@ export async function executeWorkflow(
 		signal?: AbortSignal;
 		onLog?: (message: string) => void;
 		onWorker?: (worker: Worker) => void;
-		onAgent?: (
-			prompt: string,
-			options: any,
-		) => JsonValue | Promise<JsonValue>;
+		onAgent?: (prompt: string, options: any) => JsonValue | Promise<JsonValue>;
 	} = {},
 ): Promise<WorkflowExecutionResult> {
 	return new Promise((resolve) => {
 		const worker = new Worker(
 			new URL("./workflow-worker.js", import.meta.url),
 			{
-			workerData: { source: candidate.bytes, filename: candidate.path },
+				workerData: { source: candidate.bytes, filename: candidate.path },
 			},
 		);
 		options.onWorker?.(worker);
@@ -1018,40 +1030,40 @@ export async function executeWorkflow(
 						resolveAgent(CANCELLED_AGENT_RESULT);
 						return;
 					}
-				activeAgents += 1;
+					activeAgents += 1;
 					void (async () => {
-				try {
-					const result = await options.onAgent?.(prompt, agentOptions);
+						try {
+							const result = await options.onAgent?.(prompt, agentOptions);
 							resolveAgent(
 								result ?? {
-						ok: false,
-						code: "agent_unavailable",
+									ok: false,
+									code: "agent_unavailable",
 									message:
 										"Workflow agent execution is not available in this slice",
-						retryable: false,
+									retryable: false,
 								},
 							);
-				} catch (error) {
+						} catch (error) {
 							resolveAgent({
-						ok: false,
-						code: "workflow_agent_error",
-						message: error instanceof Error ? error.message : String(error),
-						retryable: false,
-					});
-				} finally {
-					activeAgents -= 1;
+								ok: false,
+								code: "workflow_agent_error",
+								message: error instanceof Error ? error.message : String(error),
+								retryable: false,
+							});
+						} finally {
+							activeAgents -= 1;
 							const next = agentQueue.shift();
 							if (next) next();
-				}
+						}
 					})();
-			};
+				};
 				if (options.signal?.aborted) {
 					resolveAgent(CANCELLED_AGENT_RESULT);
 					return;
 				}
 				if (activeAgents < candidate.metadata.maxConcurrency) start();
 				else agentQueue.push(start);
-		});
+			});
 		const finish = (result: WorkflowExecutionResult) => {
 			if (settled) return;
 			settled = true;

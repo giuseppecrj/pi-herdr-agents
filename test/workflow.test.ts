@@ -238,7 +238,10 @@ describe("workflow preparation", () => {
 		};
 		try {
 			const checkout = createWorkflowReaderCheckout(candidate, journal);
-			assert.equal(readFileSync(join(checkout, "README.md"), "utf8"), "# test\n");
+			assert.equal(
+				readFileSync(join(checkout, "README.md"), "utf8"),
+				"# test\n",
+			);
 			assert.equal(existsSync(join(checkout, "parent-only.txt")), false);
 			assert.deepEqual(
 				disposeWorkflowReaderCheckout(candidate, checkout, journal),
@@ -287,7 +290,9 @@ describe("workflow preparation", () => {
 		try {
 			const parent = createExtensionApi();
 			subagentsExtension(parent.api);
-			const control = parent.tools.find((tool) => tool.name === "herdr_workflow");
+			const control = parent.tools.find(
+				(tool) => tool.name === "herdr_workflow",
+			);
 			assert.ok(control);
 			const result = await control.execute(
 				"test",
@@ -539,7 +544,11 @@ describe("workflow preparation", () => {
 			{
 				name: "source path escape",
 				setup: (run) =>
-					writeWorkflow(root, workflow(baseSha, { sources: ["../outside"] }), run),
+					writeWorkflow(
+						root,
+						workflow(baseSha, { sources: ["../outside"] }),
+						run,
+					),
 			},
 			{
 				name: "unknown role",
@@ -1070,7 +1079,8 @@ return results;
 		);
 		assert.equal(interrupted.endsWith("\n"), true);
 		assert.equal(
-			readFileSync(join(nestedDir, "run.jsonl"), "utf8").trim().split("\n").length,
+			readFileSync(join(nestedDir, "run.jsonl"), "utf8").trim().split("\n")
+				.length,
 			1,
 		);
 		assert.equal(
@@ -1125,7 +1135,8 @@ return results;
 				state: "failed",
 				error: {
 					code: "cancel_termination_failed",
-					message: "Workflow cancellation could not confirm process exit for: 4242",
+					message:
+						"Workflow cancellation could not confirm process exit for: 4242",
 				},
 			},
 			checkout: {
@@ -1227,7 +1238,9 @@ return { shouldNot: "complete" };
 		try {
 			const parent = createExtensionApi();
 			subagentsExtension(parent.api);
-			const control = parent.tools.find((tool) => tool.name === "herdr_workflow");
+			const control = parent.tools.find(
+				(tool) => tool.name === "herdr_workflow",
+			);
 			assert.ok(control);
 			const prepared = await control.execute(
 				"prep",
@@ -1318,7 +1331,10 @@ return { shouldNot: "complete" };
 					},
 				},
 			);
-			assert.match(again.content[0].text, /already ended as cancelled|cancelled/);
+			assert.match(
+				again.content[0].text,
+				/already ended as cancelled|cancelled/,
+			);
 			const delivered = await parent.nextMessage;
 			assert.equal(delivered.message.customType, "herdr_workflow_result");
 			assert.equal(delivered.message.details.state, "cancelled");
@@ -1330,11 +1346,16 @@ return { shouldNot: "complete" };
 				.split("\n")
 				.map((line) => JSON.parse(line));
 			const terminals = events.filter((event) =>
-				["completed", "failed", "cancelled", "interrupted"].includes(event.type),
+				["completed", "failed", "cancelled", "interrupted"].includes(
+					event.type,
+				),
 			);
 			assert.equal(terminals.length, 1);
 			assert.equal(terminals[0].type, "cancelled");
-			assert.equal(events.filter((event) => event.type === "delivery").length, 1);
+			assert.equal(
+				events.filter((event) => event.type === "delivery").length,
+				1,
+			);
 			assert.equal("envelope" in events.at(-1), false);
 		} finally {
 			process.chdir(previousCwd);
@@ -1392,7 +1413,9 @@ return { shouldNot: "complete" };
 		try {
 			const parent = createExtensionApi();
 			subagentsExtension(parent.api);
-			const control = parent.tools.find((tool) => tool.name === "herdr_workflow");
+			const control = parent.tools.find(
+				(tool) => tool.name === "herdr_workflow",
+			);
 			assert.ok(control);
 			const prepared = await control.execute(
 				"prep",
@@ -1536,12 +1559,20 @@ return { shouldNot: "complete" };
 				.split("\n")
 				.map((line) => JSON.parse(line));
 			const terminals = events.filter((event) =>
-				["completed", "failed", "cancelled", "interrupted"].includes(event.type),
+				["completed", "failed", "cancelled", "interrupted"].includes(
+					event.type,
+				),
 			);
 			assert.equal(terminals.length, 1);
 			assert.equal(terminals[0].type, "failed");
-			assert.equal(terminals[0].envelope.error.code, "cancel_termination_failed");
-			assert.equal(events.filter((event) => event.type === "delivery").length, 1);
+			assert.equal(
+				terminals[0].envelope.error.code,
+				"cancel_termination_failed",
+			);
+			assert.equal(
+				events.filter((event) => event.type === "delivery").length,
+				1,
+			);
 			assert.ok(
 				events.some(
 					(event) =>
@@ -1658,7 +1689,9 @@ return { shouldNot: "complete" };
 			try {
 				const parent = createExtensionApi();
 				subagentsExtension(parent.api);
-				const control = parent.tools.find((tool) => tool.name === "herdr_workflow");
+				const control = parent.tools.find(
+					(tool) => tool.name === "herdr_workflow",
+				);
 				assert.ok(control);
 				const prepared = await control.execute(
 					"prep",
@@ -1668,7 +1701,8 @@ return { shouldNot: "complete" };
 					{
 						cwd: root,
 						sessionManager: {
-							getSessionFile: () => join(root, `parent-${scenario.runId}.jsonl`),
+							getSessionFile: () =>
+								join(root, `parent-${scenario.runId}.jsonl`),
 							getSessionId: () => `session-${scenario.runId}`,
 							getLeafId: () => `leaf-${scenario.runId}`,
 						},
@@ -1688,7 +1722,8 @@ return { shouldNot: "complete" };
 					{
 						cwd: root,
 						sessionManager: {
-							getSessionFile: () => join(root, `parent-${scenario.runId}.jsonl`),
+							getSessionFile: () =>
+								join(root, `parent-${scenario.runId}.jsonl`),
 							getSessionId: () => `session-${scenario.runId}`,
 							getLeafId: () => `approval-${scenario.runId}`,
 							getBranch: () => [
@@ -1734,7 +1769,8 @@ return { shouldNot: "complete" };
 					{
 						cwd: root,
 						sessionManager: {
-							getSessionFile: () => join(root, `parent-${scenario.runId}.jsonl`),
+							getSessionFile: () =>
+								join(root, `parent-${scenario.runId}.jsonl`),
 							getSessionId: () => `session-${scenario.runId}`,
 							getLeafId: () => `approval-${scenario.runId}`,
 						},
@@ -1763,7 +1799,8 @@ return { shouldNot: "complete" };
 					{
 						cwd: root,
 						sessionManager: {
-							getSessionFile: () => join(root, `parent-${scenario.runId}.jsonl`),
+							getSessionFile: () =>
+								join(root, `parent-${scenario.runId}.jsonl`),
 							getSessionId: () => `session-${scenario.runId}`,
 							getLeafId: () => `approval-${scenario.runId}`,
 						},
@@ -1801,12 +1838,20 @@ return { shouldNot: "complete" };
 					.split("\n")
 					.map((line) => JSON.parse(line));
 				const terminals = events.filter((event) =>
-					["completed", "failed", "cancelled", "interrupted"].includes(event.type),
+					["completed", "failed", "cancelled", "interrupted"].includes(
+						event.type,
+					),
 				);
 				assert.equal(terminals.length, 1);
 				assert.equal(terminals[0].type, "failed");
-				assert.equal(terminals[0].envelope.error.code, "cancel_termination_failed");
-				assert.equal(events.filter((event) => event.type === "delivery").length, 1);
+				assert.equal(
+					terminals[0].envelope.error.code,
+					"cancel_termination_failed",
+				);
+				assert.equal(
+					events.filter((event) => event.type === "delivery").length,
+					1,
+				);
 				assert.ok(
 					events.some(
 						(event) =>

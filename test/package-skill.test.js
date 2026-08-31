@@ -67,7 +67,11 @@ describe("bundled orchestration skill", () => {
 			"pi-extension/subagents/plan-skill.md",
 			"pi-extension/subagents/workflow-worker.js",
 		]) {
-			assert.equal(packageFiles.has(path), true, `missing package file: ${path}`);
+			assert.equal(
+				packageFiles.has(path),
+				true,
+				`missing package file: ${path}`,
+			);
 		}
 		for (const path of packageFiles) {
 			assert.doesNotMatch(path, /(^|\/)(?:claude\.ts|plugin)(?:\/|$)/);

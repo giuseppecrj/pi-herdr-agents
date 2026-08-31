@@ -322,7 +322,8 @@ for (const backend of backends) {
 			assert.equal(continued, true, readPane(surface, 300));
 			const customResults = entries.filter(
 				(entry) =>
-					entry.type === "custom_message" && entry.customType === "subagent_result",
+					entry.type === "custom_message" &&
+					entry.customType === "subagent_result",
 			);
 			assert.equal(customResults.length, 1);
 			assert.match(customResults[0].content, new RegExp(childMarker));
@@ -339,7 +340,8 @@ for (const backend of backends) {
 				entries
 					.slice(customIndex + 1)
 					.some(
-						(entry) => entry.type === "message" && entry.message?.role === "user",
+						(entry) =>
+							entry.type === "message" && entry.message?.role === "user",
 					),
 				false,
 			);
@@ -602,8 +604,14 @@ for (const backend of backends) {
 				waitForFile(fileB, PI_TIMEOUT, /DONE_B/),
 			]);
 
-			assert.ok(contentA.includes(`DONE_A_${id}`), `File A should contain marker`);
-			assert.ok(contentB.includes(`DONE_B_${id}`), `File B should contain marker`);
+			assert.ok(
+				contentA.includes(`DONE_A_${id}`),
+				`File A should contain marker`,
+			);
+			assert.ok(
+				contentB.includes(`DONE_B_${id}`),
+				`File B should contain marker`,
+			);
 		});
 
 		// ── Fork mode ──
@@ -847,7 +855,8 @@ for (const backend of backends) {
 				.map((line) => JSON.parse(line))
 				.find(
 					(entry) =>
-						entry.type === "custom_message" && entry.customType === "subagent_result",
+						entry.type === "custom_message" &&
+						entry.customType === "subagent_result",
 				);
 			assert.deepEqual(result.details.fallbackAttempts, [
 				"pi-integration/fallback-primary",
@@ -886,7 +895,8 @@ for (const backend of backends) {
 				.map((line) => JSON.parse(line))
 				.find(
 					(entry) =>
-						entry.type === "custom_message" && entry.customType === "subagent_result",
+						entry.type === "custom_message" &&
+						entry.customType === "subagent_result",
 				);
 			assert.deepEqual(result.details.fallbackAttempts, [
 				"pi-integration/fallback-primary",

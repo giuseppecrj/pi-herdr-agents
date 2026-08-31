@@ -239,8 +239,16 @@ async function withIsolatedAgentEnv(
 		rmSync(root, { recursive: true, force: true });
 	}
 }
-const SESSION_HEADER: SessionEntry = { type: "session", id: "sess-001", version: 3 };
-const MODEL_CHANGE: SessionEntry = { type: "model_change", id: "mc-001", parentId: null };
+const SESSION_HEADER: SessionEntry = {
+	type: "session",
+	id: "sess-001",
+	version: 3,
+};
+const MODEL_CHANGE: SessionEntry = {
+	type: "model_change",
+	id: "mc-001",
+	parentId: null,
+};
 const USER_MSG: SessionEntry = {
 	type: "message",
 	id: "user-001",
@@ -433,10 +441,7 @@ describe("session.ts", () => {
 					errorMessage: "stream interrupted",
 				},
 			};
-			assert.equal(
-				findLastAssistantMessage([msg]),
-				"Here is partial output.",
-			);
+			assert.equal(findLastAssistantMessage([msg]), "Here is partial output.");
 		});
 
 		it("does not invent a summary for a stop=error message with no errorMessage", () => {
@@ -1747,10 +1752,7 @@ describe("subagent discovery", () => {
 		);
 		assert.match(instructions, /project'?s review constraints/i);
 		assert.match(instructions, /prefer different\s+providers/i);
-		assert.match(
-			instructions,
-			/reuse the three selected model IDs/i,
-		);
+		assert.match(instructions, /reuse the three selected model IDs/i);
 		assert.match(instructions, /fresh `reviewer` synthesis pass/i);
 		assert.match(
 			instructions,
@@ -1855,7 +1857,10 @@ describe("subagent discovery", () => {
 
 	it("buildSubagentToolAllowlist omits explicit completion for auto-exit children", () => {
 		assert.equal(
-			testApi.buildSubagentToolAllowlist("read,bash,web_search,subagent_done", true),
+			testApi.buildSubagentToolAllowlist(
+				"read,bash,web_search,subagent_done",
+				true,
+			),
 			"read,bash,web_search,caller_ping",
 		);
 	});
@@ -2362,8 +2367,14 @@ describe("subagent-done.ts", () => {
 		try {
 			const { api, registeredTools } = createMockExtensionApi();
 			subagentDoneExtension(api);
-			assert.equal(registeredTools.some((tool) => tool.name === "caller_ping"), true);
-			assert.equal(registeredTools.some((tool) => tool.name === "subagent_done"), false);
+			assert.equal(
+				registeredTools.some((tool) => tool.name === "caller_ping"),
+				true,
+			);
+			assert.equal(
+				registeredTools.some((tool) => tool.name === "subagent_done"),
+				false,
+			);
 		} finally {
 			restoreEnvVar("PI_SUBAGENT_AUTO_EXIT", previousAutoExit);
 		}
@@ -2375,7 +2386,10 @@ describe("subagent-done.ts", () => {
 		try {
 			const { api, registeredTools } = createMockExtensionApi();
 			subagentDoneExtension(api);
-			assert.equal(registeredTools.some((tool) => tool.name === "subagent_done"), true);
+			assert.equal(
+				registeredTools.some((tool) => tool.name === "subagent_done"),
+				true,
+			);
 		} finally {
 			restoreEnvVar("PI_SUBAGENT_AUTO_EXIT", previousAutoExit);
 		}

@@ -279,7 +279,9 @@ for (const backend of backends) {
 				assert.equal(
 					results.every(
 						(result) =>
-							result.ok && isString(result.value) && result.value.includes(marker),
+							result.ok &&
+							isString(result.value) &&
+							result.value.includes(marker),
 					),
 					true,
 					`unexpected agent results: ${JSON.stringify(results)}`,
@@ -290,7 +292,10 @@ for (const backend of backends) {
 					"child sessions must remain available",
 				);
 				assert.equal(events.at(-2).envelope.result.ok, true);
-				assert.equal(events.at(-2).envelope.result.value.includes(marker), true);
+				assert.equal(
+					events.at(-2).envelope.result.value.includes(marker),
+					true,
+				);
 				assert.equal(events.at(-1).status, "sent");
 				assert.equal(
 					existsSync(join(root, ".pi", "plans", runId, "reader-checkout")),
@@ -338,7 +343,9 @@ for (const backend of backends) {
 				);
 				await waitForScreen(surface, /Prepared workflow/, PI_TIMEOUT);
 				runInPane(surface, approval);
-				const events = (await waitForFile(journal, PI_TIMEOUT, /"type":"delivery"/))
+				const events = (
+					await waitForFile(journal, PI_TIMEOUT, /"type":"delivery"/)
+				)
 					.trim()
 					.split("\n")
 					.map((line) => JSON.parse(line));
@@ -347,7 +354,8 @@ for (const backend of backends) {
 					.map((event) => event.result);
 				assert.equal(
 					results.every(
-						(result) => result.ok === false && result.code === "empty_completion",
+						(result) =>
+							result.ok === false && result.code === "empty_completion",
 					),
 					true,
 				);
@@ -450,13 +458,15 @@ for (const backend of backends) {
 					.split("\n")
 					.map((line) => JSON.parse(line));
 				assert.equal(
-					synthesisEvents.filter((event) => event.type === "agent_result").length,
+					synthesisEvents.filter((event) => event.type === "agent_result")
+						.length,
 					3,
 					"all review work continued after the first reload",
 				);
 				assert.equal(
 					synthesisEvents.some(
-						(event) => event.type === "agent_result" && event.role === "synthesizer",
+						(event) =>
+							event.type === "agent_result" && event.role === "synthesizer",
 					),
 					false,
 					"synthesis gate keeps synthesis active before reload",
@@ -475,11 +485,16 @@ for (const backend of backends) {
 					.map((line) => JSON.parse(line));
 				assert.equal(
 					events.filter((event) =>
-						["completed", "failed", "cancelled", "interrupted"].includes(event.type),
+						["completed", "failed", "cancelled", "interrupted"].includes(
+							event.type,
+						),
 					).length,
 					1,
 				);
-				assert.equal(events.filter((event) => event.type === "delivery").length, 1);
+				assert.equal(
+					events.filter((event) => event.type === "delivery").length,
+					1,
+				);
 				assert.equal(events.at(-1).status, "sent");
 				assert.equal(events.at(-2).envelope.state, "completed");
 			} finally {
@@ -500,9 +515,13 @@ for (const backend of backends) {
 				const journal = join(runDir, "run.jsonl");
 				writeFileSync(journal, '{"id":"started","type":"started"}\n');
 				checkout = join(runDir, "reader-checkout");
-				execFileSync("git", ["worktree", "add", "--detach", checkout, baseSha], {
-					cwd: root,
-				});
+				execFileSync(
+					"git",
+					["worktree", "add", "--detach", checkout, baseSha],
+					{
+						cwd: root,
+					},
+				);
 				const surface = createTrackedSurface(env, `workflow-restart-${id}`);
 				await waitForPaneReady(surface);
 				startPi(surface, root, "Start Pi and wait.", { model: TEST_MODEL });
@@ -528,7 +547,9 @@ for (const backend of backends) {
 			} finally {
 				if (checkout && existsSync(checkout)) {
 					try {
-						execFileSync("git", ["worktree", "remove", checkout], { cwd: env.dir });
+						execFileSync("git", ["worktree", "remove", checkout], {
+							cwd: env.dir,
+						});
 					} catch {
 						// The fixture owns cleanup even when the assertion fails.
 					}
@@ -544,7 +565,11 @@ for (const backend of backends) {
 				const runId = `cancel-${id}`;
 				const marker = `WORKFLOW_CANCEL_${id}`;
 				const root = realpathSync(env.dir);
-				const baseSha = initFixture(root, ["architecture", "standards", "skeptic"]);
+				const baseSha = initFixture(root, [
+					"architecture",
+					"standards",
+					"skeptic",
+				]);
 				const workflowPath = writeCancelWorkflow(root, runId, baseSha, marker);
 				const approval = `APPROVE ${createHash("sha256").update(readFileSync(workflowPath)).digest("hex").slice(0, 8)}`;
 				const journal = join(root, ".pi", "plans", runId, "run.jsonl");
@@ -590,7 +615,9 @@ for (const backend of backends) {
 					"synthesis must not start after cancel",
 				);
 				const terminals = events.filter((event) =>
-					["completed", "failed", "cancelled", "interrupted"].includes(event.type),
+					["completed", "failed", "cancelled", "interrupted"].includes(
+						event.type,
+					),
 				);
 				assert.equal(
 					terminals.length,
@@ -602,7 +629,10 @@ for (const backend of backends) {
 					`expected cancelled or fail-closed failed, got ${terminals[0].type}`,
 				);
 				assert.equal(terminals[0].envelope.state, terminals[0].type);
-				assert.equal(events.filter((event) => event.type === "delivery").length, 1);
+				assert.equal(
+					events.filter((event) => event.type === "delivery").length,
+					1,
+				);
 				assert.equal(events.at(-1).type, "delivery");
 				assert.equal(events.at(-1).state, terminals[0].type);
 				assert.equal(events.at(-1).status, "sent");

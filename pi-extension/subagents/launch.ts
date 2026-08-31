@@ -597,9 +597,7 @@ function buildPiCommand(
 		env.push(`PI_SUBAGENT_NAME=${shellQuote(request.name)}`);
 		if (request.agent)
 			env.push(`PI_SUBAGENT_AGENT=${shellQuote(request.agent)}`);
-		env.push(
-			`PI_SUBAGENT_AUTO_EXIT=${request.behavior.autoExit ? "1" : "0"}`,
-		);
+		env.push(`PI_SUBAGENT_AUTO_EXIT=${request.behavior.autoExit ? "1" : "0"}`);
 		env.push(`PI_SUBAGENT_SESSION=${shellQuote(artifacts.sessionFile)}`);
 		env.push(`PI_SUBAGENT_ID=${shellQuote(resolved.id)}`);
 		env.push(`PI_SUBAGENT_ACTIVITY_FILE=${shellQuote(artifacts.activityFile)}`);
@@ -814,10 +812,7 @@ function resolveGitCommit(cwd: string, ref: string): string {
 	}).trim();
 }
 
-export function writeWorktreeManifest(
-	path: string,
-	value: JsonObject,
-): void {
+export function writeWorktreeManifest(path: string, value: JsonObject): void {
 	mkdirSync(dirname(path), { recursive: true });
 	let existing: JsonObject = {};
 	if (existsSync(path)) {

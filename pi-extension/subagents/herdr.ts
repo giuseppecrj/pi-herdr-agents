@@ -142,7 +142,11 @@ function getHerdrCurrentPaneInfo(): HerdrCurrentPaneInfo {
 		const output = herdrExec(buildCurrentPaneArgs());
 		const parsed = parseHerdrJson(output);
 		const pane = parsed?.result?.pane;
-		if (!isString(pane?.pane_id) || !isString(pane?.tab_id) || !isString(pane?.workspace_id)) {
+		if (
+			!isString(pane?.pane_id) ||
+			!isString(pane?.tab_id) ||
+			!isString(pane?.workspace_id)
+		) {
 			throw new Error(
 				`Unexpected herdr pane current output: ${output.trim() || "(empty)"}`,
 			);
@@ -257,7 +261,8 @@ export function parseHerdrWorktreeList(output: string): HerdrWorktreeInfo[] {
 			isLinkedWorktree: worktree.is_linked_worktree === true,
 		};
 		if (isString(worktree.label)) info.label = worktree.label;
-		if (isString(worktree.open_workspace_id)) info.workspaceId = worktree.open_workspace_id;
+		if (isString(worktree.open_workspace_id))
+			info.workspaceId = worktree.open_workspace_id;
 		return info;
 	});
 }
@@ -414,7 +419,9 @@ function parsePaneGetOutput(
 	if (record.pane_id !== surface)
 		return { kind: "unavailable", error: "pane id mismatch" };
 	const agent = isString(record.agent) ? record.agent : undefined;
-	const rawStatus = isString(record.agent_status) ? record.agent_status : "unknown";
+	const rawStatus = isString(record.agent_status)
+		? record.agent_status
+		: "unknown";
 	const agentStatus =
 		rawStatus === "idle" ||
 		rawStatus === "working" ||
@@ -526,7 +533,11 @@ export function parsePaneProcessInfo(
 			foregroundProcesses.push(entry);
 		}
 	}
-	const result: HerdrPaneProcessInfo = { paneId, pids: [...pids], foregroundProcesses };
+	const result: HerdrPaneProcessInfo = {
+		paneId,
+		pids: [...pids],
+		foregroundProcesses,
+	};
 	if (isFiniteNumber(info.shell_pid)) result.shellPid = info.shell_pid;
 	if (isFiniteNumber(info.foreground_process_group_id)) {
 		result.foregroundProcessGroupId = info.foreground_process_group_id;
