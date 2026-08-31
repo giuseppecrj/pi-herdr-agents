@@ -26,7 +26,7 @@ function extractStepRun(workflow: string, stepName: string): string {
   );
   return lines
     .slice(run + 1, end === -1 ? undefined : end)
-    .map((line) => line.replace(/^          /, ""))
+    .map((line) => line.replace(/^ {10}/, ""))
     .join("\n");
 }
 
@@ -63,14 +63,20 @@ function runDetect(
     execFileSync("git", ["config", "user.email", "release-test@example.com"], {
       cwd: dir,
     });
+    execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd: dir });
 
     if (options.previousVersion) {
       writeFileSync(
         join(dir, "package.json"),
-        JSON.stringify({ name: "pi-herdr-agents", version: options.previousVersion }),
+        JSON.stringify({
+          name: "pi-herdr-agents",
+          version: options.previousVersion,
+        }),
       );
       execFileSync("git", ["add", "package.json"], { cwd: dir });
-      execFileSync("git", ["commit", "--quiet", "-m", "previous"], { cwd: dir });
+      execFileSync("git", ["commit", "--quiet", "-m", "previous"], {
+        cwd: dir,
+      });
       beforeSha = execFileSync("git", ["rev-parse", "HEAD"], {
         cwd: dir,
         encoding: "utf8",
@@ -233,8 +239,14 @@ test("release workflow uses package.json identity and trusted publishing", async
   assert.match(workflow, /node-version:\s*26\.3\.0/);
   assert.doesNotMatch(workflow, /npm install -g/);
   assert.doesNotMatch(workflow, /uses:\s+[^\s@]+@v\d/);
-  assert.match(workflow, /actions\/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09/);
-  assert.match(workflow, /actions\/setup-node@a0853c24544627f65ddf259abe73b1d18a591444/);
+  assert.match(
+    workflow,
+    /actions\/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09/,
+  );
+  assert.match(
+    workflow,
+    /actions\/setup-node@a0853c24544627f65ddf259abe73b1d18a591444/,
+  );
   assert.match(workflow, /package-manager-cache:\s*false/);
   assert.doesNotMatch(workflow, /cache:\s*npm/);
   assert.equal(
@@ -257,7 +269,10 @@ test("release workflow uses package.json identity and trusted publishing", async
   const publish = workflow.indexOf("- name: Publish package to npm");
   const tag = workflow.indexOf("- name: Create and push tag");
   const release = workflow.indexOf("- name: Create GitHub release");
-  assert.ok(publish !== -1 && publish < tag, "npm publish must precede tagging");
+  assert.ok(
+    publish !== -1 && publish < tag,
+    "npm publish must precede tagging",
+  );
   assert.ok(tag < release, "tagging must precede the GitHub Release");
   assert.doesNotMatch(workflow, /pi-herdr-subagents/);
 });
@@ -327,7 +342,10 @@ test("release detection executes the guarded push and dispatch branches", async 
 
 test("npm registry responses are structured and fail closed", async () => {
   const workflow = await readFile(".github/workflows/publish.yml", "utf8");
-  const verify = extractStepRun(workflow, "Verify package version is unpublished");
+  const verify = extractStepRun(
+    workflow,
+    "Verify package version is unpublished",
+  );
 
   const missing = runRegistryVerification(verify, "not-found");
   assert.equal(missing.error, undefined);
