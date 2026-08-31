@@ -76,7 +76,7 @@ subagent({ name: "DB scout", agent: "scout", model: "<provider>/<fast-tier-id>",
 // Both return immediately; each result comes back independently.
 ```
 
-Use ordinary panes for read-only agents. A single or sequential writer can work in the parent checkout; give each parallel independent writing agent a unique managed worktree. See [Worktree subagents](docs/worktree-subagents.md).
+Use ordinary panes for read-only agents. A single or sequential writer can work in the parent checkout; give each parallel independent writing agent a unique managed worktree. The parent acts as coordinator: decompose work, give each child one bounded outcome with its goal, allowed files, verification, and commit instruction, and keep dependent writes sequential. Children are leaves by default; the parent owns integration and final verification. See [Worktree subagents](docs/worktree-subagents.md).
 
 ## How it works
 
@@ -162,12 +162,12 @@ The current workflow inventory is:
 
 | Workflow | Entry point | Composition, artifacts, and runtime |
 | -------- | ----------- | ----------------------------------- |
-| Planning | `/plan` | Scout → interactive planner → workers → reviewer; writes `.pi/plans/...` artifacts; runs on Pi. |
+| Planning | `/plan` | Autonomous scout → interactive planner → workers → reviewer; writes `.pi/plans/...` artifacts; runs on Pi. |
 | Iteration | `/iterate` | Opens one interactive full-context Pi fork and returns its completion summary. |
 | Side question | `/btw`, `/btw-close` | Opens one replaceable interactive Pi side session; its answer stays outside the parent transcript. |
 | Worktree handoff | `/worktree <name> [task]`, `/worktree list` | Forks the active conversation into a long-lived interactive Pi process in a new worktree created from committed `HEAD`; retains the parent session. |
 | Approved review runner | `herdr_workflow` (low-level control tool) | Validates and runs exact approved project-local JavaScript with bounded read-only Pi reviewers. The bundled `orchestrate` skill authors this first-flow topology. |
-| Adversarial review | `adversarial-reviewer` | Transitional workflow implementation that selects eligible authenticated Pi runtimes for generic reviewer passes, verifies findings, and uses a fresh reviewer synthesis pass. It does not write artifacts in the reviewed checkout. |
+| Adversarial review | `adversarial-reviewer` | Directly runnable coordinator role that selects eligible authenticated Pi runtimes, launches leaf `reviewer` children in ordinary panes for generic review passes, and uses a fresh reviewer synthesis pass. It does not write artifacts in the reviewed checkout. |
 
 ### Bundled visible definitions
 
@@ -179,7 +179,7 @@ The current workflow inventory is:
 | **reviewer** | Leaf agent role | Config, then parent | Reviews changes for correctness, security, and maintainability. |
 | **visual-tester** | Leaf agent role | Config, then parent | Performs visual QA through the `chrome-cdp` skill. |
 | **poteto** | Coordinator agent role | Config, then parent | Autonomously investigates, edits minimally, delegates independent work, and verifies. |
-| **adversarial-reviewer** | Transitional workflow implementation | Three distinct eligible authenticated Pi model IDs, preferring provider diversity | Runs evidence-backed Optimizer and Skeptic passes through generic `reviewer` children, then a fresh reviewer synthesis pass. |
+| **adversarial-reviewer** | Coordinator agent role | Three distinct eligible authenticated Pi model IDs, preferring provider diversity | Runs evidence-backed Optimizer and Skeptic passes through leaf `reviewer` children in ordinary panes, then a fresh reviewer synthesis pass. |
 
 All subagents execute through Pi. Claude models remain available through normal
 Pi provider/model routing. Legacy role definitions that contain `cli` fail before
@@ -423,6 +423,8 @@ subagent_interrupt({ name: "Scout" });
 
 This sends Escape to the child pane, cancelling the in-progress model turn. The subagent session stays alive — the pane, session file, and background polling all remain intact. After the interrupt, the widget immediately labels the child as `interrupted` (counted as **open**, not active processing). Stale pre-interrupt activity snapshots are ignored so a lagging Herdr/`active` reading cannot overwrite the interrupt. The process elapsed timer keeps running because the pane is still open; only the interrupted-state duration freezes relative to the interrupt request. If the child starts work later, newer observations return it to `active`; completion, failure, and `caller_ping` still flow through normally.
 
+`id` and `name` are each optional, but execution requires one usable target: an exact running ID or an exact, unambiguous display name. When both are supplied, `id` is used. Duplicate names are rejected.
+
 This is a turn-level interrupt, not a method for forcibly terminating a subagent session.
 
 ---
@@ -437,11 +439,17 @@ herdr_workflow({ action: "start", runId: "run-1" }); // after APPROVE <hash pref
 herdr_workflow({ action: "cancel", runId: "run-1" });
 ```
 
+Parameters:
+
+- `action` (required): `prepare`, `start`, or `cancel`.
+- `path` (required for `prepare`): Path to the workflow script.
+- `runId` (required for `cancel` and `start`): For `start`, it must match the pending run.
+
 ### Prepare and start contract
 
 - The script must be `<project>/.pi/plans/<run>/workflow.js` in a trusted Git repository with no existing adjacent `run.jsonl`.
-- Its first comment contains strict version-1 JSON metadata that binds the exact committed base, source provenance, distinct review-node IDs and their roles, authenticated `provider/model` references, thinking levels, and per-run caps that cannot exceed the fixed limits.
-- Fixed workflow caps: 256 KiB source, 8 agents, concurrency 4, 30-minute deadline, 100,000-character prompts, 100 logs × 4,000 characters, and 64 KiB serialized task result. Metadata may only lower caps.
+- Its first comment contains strict version-1 JSON metadata that binds the exact committed base, source provenance, distinct review-node IDs and their roles, authenticated `provider/model` references, thinking levels, and the configurable `maxAgents` and `maxConcurrency` caps.
+- Fixed workflow caps: 256 KiB source, 8 agents, concurrency 4, 30-minute deadline, 100,000-character prompts, 100 logs × 4,000 characters, and 64 KiB serialized task result. Metadata may lower only `maxAgents` and `maxConcurrency`.
 - Preparation validates and compiles without evaluating JavaScript, creating a journal or checkout, or launching a child. It returns the exact approval packet and keeps one pending candidate in process memory.
 - Start requires the latest real user message in the same parent session to be exactly `APPROVE <8 lowercase hex characters>`. It revalidates the complete candidate, consumes approval once, creates the append-only journal, and runs in the background.
 - Review children are fresh Pi sessions with derived read-only tools in one detached checkout pinned to the approved base. Parent uncommitted files are absent, intermediate child results stay inside the workflow, and operational failures remain explicit non-retryable evidence for parent-guided recovery.
@@ -514,11 +522,11 @@ The `/plan` command orchestrates a full planning-to-implementation pipeline.
 ```
 
 ```
-Phase 1: Investigation    → Quick codebase scan
+Phase 1: Investigation    → Autonomous scout maps the codebase
 Phase 2: Planning         → Interactive planner subagent (user collaborates)
 Phase 3: Review Plan      → Confirm ordered tasks, adjust if needed
-Phase 4: Execute          → Sequential workers, or isolated parallel workers for independent tasks
-Phase 5: Integrate        → Parent reviews and integrates worktree branches one at a time
+Phase 4: Execute          → Shared-checkout sequential workers by default; isolated parallel workers for independent tasks
+Phase 5: Integrate        → Parent reviews and integrates worktree branches one at a time, only when worktrees are used
 Phase 6: Review           → Reviewer subagent checks the integrated changes
 ```
 
@@ -727,7 +735,7 @@ and verify them with `/subagent list` plus a smoke launch.
 | `session-mode` | string | Default child-session mode: `standalone`, `lineage-only`, or `fork` |
 | `spawning`    | boolean | Set `false` to deny all subagent-spawning tools                                                                                                                                                                                                                             |
 | `deny-tools`  | string  | Comma-separated `pi-herdr-agents` tool names to suppress; this is not a universal cross-extension deny list                                                                                                                                                                  |
-| `auto-exit`   | boolean | Auto-shutdown when the agent finishes its turn — no `subagent_done` call needed. If the user sends any input, auto-exit is permanently disabled and the user takes over the session. Recommended for autonomous agents (scout, worker); not for interactive ones (planner). Also determines the default value of `interactive` (see below). |
+| `auto-exit`   | boolean | Auto-shutdown when the latest assistant turn does not end with `stopReason: "aborted"` — no `subagent_done` call needed. User input does not permanently disable auto-exit. Recommended for autonomous agents (scout, worker); not for interactive ones (planner). Also determines the default value of `interactive` (see below). |
 | `interactive` | boolean | Override whether stall/recovery transitions wake the parent session. Defaults to the inverse of `auto-exit`: autonomous agents (`auto-exit: true`) are non-interactive and get stall pings; agents without `auto-exit` are interactive and stay quiet. Explicit values take precedence. |
 | `cwd`         | string  | Default working directory. Absolute paths are unambiguous; relative agent-frontmatter paths resolve from Pi's agent config directory (`PI_CODING_AGENT_DIR` or `~/.pi/agent`), not the project root                                                                                                                                                                                                            |
 | `disable-model-invocation` | boolean | Hide a role from discovery surfaces like `subagents_list`. The definition remains directly invocable by exact name via `subagent({ agent: "name", ... })`. |
@@ -757,12 +765,12 @@ session-mode: lineage-only
 
 ### `auto-exit`
 
-When set to `true`, the agent session shuts down automatically as soon as the agent finishes its turn — no explicit `subagent_done` call is needed.
+When set to `true`, the agent session shuts down on `agent_end` unless the latest assistant message has `stopReason: "aborted"` — no explicit `subagent_done` call is needed.
 
 **Behavior:**
 
-- The session closes after the agent's final message (on the `agent_end` event)
-- If the user sends **any input** before the agent finishes, auto-exit is permanently disabled for that session — the user takes over interactively
+- The session closes on `agent_end` when the latest assistant turn does not have `stopReason: "aborted"`; a normal or error stop exits, while an aborted stop stays open.
+- User input does not permanently disable auto-exit; the latest assistant stop reason determines whether the session exits.
 - The modeHint injected into the agent's task is adjusted accordingly: autonomous agents see "Complete your task autonomously." rather than instructions to call `subagent_done`
 
 **When to use:**
@@ -833,12 +841,15 @@ deny-tools: subagent
 
 ### Recommended Configuration
 
-| Agent      | `spawning`  | Rationale                                    |
-| ---------- | ----------- | -------------------------------------------- |
-| planner    | *(default)* | Legitimately spawns scouts for investigation |
-| worker     | `false`     | Should implement tasks, not delegate         |
-| reviewer   | `false`     | Should review, not spawn                     |
-| scout      | `false`     | Should gather context, not spawn             |
+| Agent | `spawning` | Rationale |
+| --- | --- | --- |
+| planner | *(default)* | Can spawn scouts for investigation. |
+| poteto | `true` | Delegates independent work. |
+| adversarial-reviewer | `true` | Launches leaf reviewer passes and synthesis. |
+| worker | `false` | Implements bounded tasks. |
+| reviewer | `false` | Reviews without delegation. |
+| scout | `false` | Gathers context without delegation. |
+| visual-tester | `false` | Performs visual QA without delegation. |
 
 ---
 
