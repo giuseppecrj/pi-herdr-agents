@@ -105,7 +105,7 @@ Use `PI_TEST_MODEL="openai-codex/gpt-5.6-luna" PI_TEST_TIMEOUT=180000 npm run te
 Before committing:
 
 - inspect `git status` and the final diff;
-- confirm the package preview includes `CHANGELOG.md`, `skills/orchestrate/SKILL.md`, and `pi-extension/subagents/workflow-worker.js`, while excluding plans, journals, sessions, prototypes, generated evidence, and local config;
+- confirm the package preview includes `CHANGELOG.md`, `skills/orchestrate/SKILL.md`, `skills/orchestrate/adversarial-review.md`, `skills/orchestrate/adversarial-review-example.js`, and `pi-extension/subagents/workflow-worker.js`, while excluding plans, journals, sessions, prototypes, generated evidence, and local config;
 - run `npm pack --dry-run` when package contents or documentation paths changed;
 - confirm that no generated plans, journals, sessions, provider configuration, test scripts, or review artifacts are staged; and
 - confirm that no accidental empty directory exists at the repository root:

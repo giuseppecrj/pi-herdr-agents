@@ -122,8 +122,8 @@ do not poll, sleep, tail live sessions, or call a status tool.
 3. **Synthesis:** Launch the conventionally named fresh reviewer carrying alias
    `S1` only after all prior launched names are terminal. Retain every original
    envelope in the coordinator conversation and audit map. Give synthesis a
-   lossless review-content and outcome projection under anonymous aliases: full
-   successful report content; for failure, its code, retryable flag, and bounded
+   canonical validated review fields and outcome projection under anonymous aliases;
+   retain original envelopes separately for audit. For failure, include its code, retryable flag, and bounded
    error evidence scrubbed of known identity tokens. Omit child names, session
    paths, runtime IDs, provider names, and the alias mapping from the synthesis
    prompt. Do not hide a failure. Ask

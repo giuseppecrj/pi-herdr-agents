@@ -127,7 +127,7 @@ A task-specific bounded record with a stable ID, claimed P0–P3 severity, nulla
 _Avoid_: Confidence gate, silent candidate downgrade, provenance-as-severity, universal runtime schema
 
 **Synthesis projection**:
-The identity-stripped view of every agent result given to fresh synthesis: lossless validated report content for success, or failure code, retryable flag, and bounded error evidence scrubbed of known identity tokens. Original envelopes remain in script state; journal/session evidence retains their audit references. Session paths, child/runtime/provider names, and the separate audit mapping stay outside the synthesis prompt. Anonymization is presentation hygiene, not a sandbox or proof against bias.
+The identity-stripped view of every agent result given to fresh synthesis: canonical validated report fields for success, or failure code, retryable flag, and bounded error evidence scrubbed of known identity tokens. Original envelopes remain in script state; journal/session evidence retains their audit references. Session paths, child/runtime/provider names, and the separate audit mapping stay outside the synthesis prompt. Anonymization is presentation hygiene, not a sandbox or proof against bias.
 _Avoid_: Filtered result, raw identity-bearing envelope, security claim
 
 **Review-policy boundary**:

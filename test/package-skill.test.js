@@ -20,6 +20,10 @@ const adversarialExample = readFileSync(
 	join(root, "skills", "orchestrate", "adversarial-review-example.js"),
 	"utf8",
 );
+const planSkill = readFileSync(
+	join(root, "pi-extension", "subagents", "plan-skill.md"),
+	"utf8",
+);
 const packageFiles = new Set(
 	JSON.parse(
 		execFileSync("npm", ["pack", "--dry-run", "--json"], {
@@ -194,7 +198,22 @@ describe("bundled orchestration skill", () => {
 		);
 		assert.match(adversarialExample, /function validateReviewReport/);
 		assert.match(adversarialExample, /function parseReviewResult/);
+		assert.match(adversarialExample, /sourceReviewerId/);
+		assert.match(adversarialExample, /synthesis_prompt_bound/);
 		assert.doesNotMatch(adversarialReview, /subagent\s*\(\s*\{/);
 		assert.doesNotMatch(adversarialReview, /confidence\s*[><=]/i);
+	});
+
+	it("pins the Phase 7 reviewer evidence before launch", () => {
+		for (const phrase of [
+			"canonical repository root",
+			"exact comparison base and head SHAs",
+			"Dirty-state inventory and fingerprint",
+			"Complete diff and deleted/base-only evidence",
+			'cwd: "<canonical repository root>"',
+			"untrusted review data",
+		]) {
+			assert.ok(planSkill.includes(phrase), `missing review input: ${phrase}`);
+		}
 	});
 });

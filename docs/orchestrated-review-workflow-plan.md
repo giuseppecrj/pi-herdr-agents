@@ -192,8 +192,8 @@ Metadata is an approved capability envelope, not a promise of the exact future n
 The bundled `orchestrate` skill must author the first flow as independent
 reviewers followed by one fresh synthesizer. Every original success or failure
 envelope remains in script state and runner journal evidence. Synthesis receives
-every outcome through an identity-stripped projection: lossless validated report
-content for success, or failure code, retryable flag, and bounded error evidence
+every outcome through an identity-stripped projection: canonical validated report
+fields for success, or failure code, retryable flag, and bounded error evidence
 scrubbed of known identity tokens. Session paths and child/runtime/provider
 identity stay in separate audit provenance. This anonymization is presentation
 hygiene, not a security boundary

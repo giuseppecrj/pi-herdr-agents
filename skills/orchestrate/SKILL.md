@@ -152,7 +152,7 @@ replacement have settled. Retain every original result envelope unchanged in
 script state. Retain each full child session through the runner's journal/session
 references and return bounded audit provenance with the task result. Give
 synthesis an identity-stripped projection of every result: exact source evidence
-and lossless successful review content, or failure code, retryable flag, and
+and canonical validated successful-review fields, or failure code, retryable flag, and
 bounded error evidence for launch, provider, protocol, nonzero-exit, missing-
 report, and bound failures. Scrub known session, child, runtime, and provider/model
 identity tokens from that error evidence. Omit session paths, child names, runtimes, providers,
