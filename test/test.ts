@@ -53,6 +53,10 @@ import {
 	resolveModelDefault,
 } from "../pi-extension/subagents/model-config.ts";
 import {
+	loadRoleConfig,
+	parseRoleConfig,
+} from "../pi-extension/subagents/role-config.ts";
+import {
 	advanceStatusState,
 	capStatusLines,
 	classifyStatus,
@@ -1452,8 +1456,148 @@ describe("model configuration", () => {
 	});
 });
 
+describe("role configuration", () => {
+	it("defaults bundled roles to enabled when omitted", () => {
+		assert.deepEqual(parseRoleConfig({}), { bundled: true });
+		assert.deepEqual(parseRoleConfig({ roles: {} }), { bundled: true });
+	});
+
+	it("rejects explicit null and non-object role settings", () => {
+		for (const roles of [null, [], "roles"]) {
+			assert.throws(
+				() => parseRoleConfig({ roles }),
+				/roles must be an object/,
+			);
+		}
+		for (const bundled of [null, "false", []]) {
+			assert.throws(
+				() => parseRoleConfig({ roles: { bundled } }),
+				/roles\.bundled must be a boolean/,
+			);
+		}
+	});
+
+	it("loads the shared example when local config is absent", () => {
+		withTempDir((dir) => {
+			const examplePath = join(dir, "config.json.example");
+			writeFileSync(examplePath, JSON.stringify({ roles: { bundled: false } }));
+
+			assert.deepEqual(loadRoleConfig(join(dir, "config.json"), examplePath), {
+				bundled: false,
+			});
+		});
+	});
+
+	it("rejects malformed bundled-role settings without falling back", () => {
+		assert.throws(
+			() => parseRoleConfig({ roles: { bundled: "false" } }),
+			/roles\.bundled must be a boolean/,
+		);
+		withTempDir((dir) => {
+			const configPath = join(dir, "config.json");
+			const examplePath = join(dir, "config.json.example");
+			writeFileSync(
+				configPath,
+				JSON.stringify({ roles: { bundled: "false" } }),
+			);
+			writeFileSync(examplePath, JSON.stringify({ roles: { bundled: false } }));
+
+			assert.throws(
+				() => loadRoleConfig(configPath, examplePath),
+				/roles\.bundled must be a boolean/,
+			);
+		});
+	});
+});
+
 describe("subagent discovery", () => {
 	const testApi = subagentsModule.__test__;
+
+	it("excludes bundled roles while retaining role-pack and override roles", async () => {
+		await withIsolatedAgentEnv(
+			async ({ projectDir, projectAgentsDir, globalAgentsDir }) => {
+				const rolesDir = join(projectDir, "scout-pack", "roles");
+				mkdirSync(rolesDir, { recursive: true });
+				writeFileSync(
+					join(rolesDir, "..", "package.json"),
+					JSON.stringify({ name: "@acme/scout-pack", version: "1.0.0" }),
+				);
+				writeAgentFile(
+					rolesDir,
+					"scout",
+					"description: Role-pack scout enabled without bundled roles",
+				);
+
+				const disabled = { bundled: false };
+				const emptyCatalog = testApi.discoverAgentCatalog(undefined, disabled);
+				assert.equal(
+					emptyCatalog.agents.some((agent) => agent.name === "scout"),
+					false,
+					"listing excludes bundled scouts when disabled",
+				);
+				assert.equal(
+					testApi.loadAgentDefaults("scout", undefined, disabled),
+					null,
+					"exact-name lookup cannot launch an omitted bundled scout",
+				);
+
+				const { api } = createMockExtensionApi();
+				api.events.on(
+					"pi-herdr-subagents:roles:discover:v1",
+					(request: { register(path: string): void }) =>
+						request.register(rolesDir),
+				);
+				const catalog = testApi.discoverAgentCatalog(api, disabled);
+				assert.equal(
+					catalog.agents.find((agent) => agent.name === "scout")?.provider,
+					"@acme/scout-pack",
+					"a role pack may supply a name that no enabled bundled role owns",
+				);
+				assert.equal(
+					catalog.diagnostics.some(
+						(diagnostic) => diagnostic.code === "bundled-role-collision",
+					),
+					false,
+				);
+				assert.equal(
+					testApi.loadAgentDefaults("worker", api, disabled),
+					null,
+					"exact-name lookup cannot launch an omitted bundled role",
+				);
+
+				writeAgentFile(
+					globalAgentsDir,
+					"global-scout",
+					"description: Global scout",
+				);
+				assert.equal(
+					testApi.loadAgentDefaults("global-scout", api, disabled)?.source,
+					"global",
+				);
+
+				writeAgentFile(
+					globalAgentsDir,
+					"scout",
+					"description: Global scout override",
+				);
+				assert.equal(
+					testApi.loadAgentDefaults("scout", api, disabled)?.source,
+					"global",
+					"a global definition can supply a disabled bundled name",
+				);
+				writeAgentFile(
+					projectAgentsDir,
+					"scout",
+					"description: Project scout override",
+				);
+				assert.equal(
+					testApi.loadAgentDefaults("scout", api, disabled)?.source,
+					"project",
+					"a project definition retains precedence over a global definition",
+				);
+			},
+		);
+	});
 
 	it("loads session-mode from frontmatter", async () => {
 		await withIsolatedAgentEnv(async ({ projectAgentsDir }) => {

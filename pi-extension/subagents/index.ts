@@ -52,6 +52,7 @@ import {
 	type ThinkingLevel,
 } from "./runtime-routing.ts";
 import { loadModelConfig, resolveModelDefault } from "./model-config.ts";
+import { loadRoleConfig, type RoleConfig } from "./role-config.ts";
 import {
 	beginWorkflowCancellation,
 	cancelTerminationResult,
@@ -546,7 +547,10 @@ function discoverRolePackPaths(
 	return { paths: [...paths], diagnostics };
 }
 
-function discoverAgentCatalog(pi?: Pick<ExtensionAPI, "events">): AgentCatalog {
+function discoverAgentCatalog(
+	pi?: Pick<ExtensionAPI, "events">,
+	roleConfig: RoleConfig = bundledRoleConfig,
+): AgentCatalog {
 	const agents = new Map<string, ListedAgentDefinition>();
 	const diagnostics: AgentDiagnostic[] = [];
 
@@ -571,7 +575,7 @@ function discoverAgentCatalog(pi?: Pick<ExtensionAPI, "events">): AgentCatalog {
 		}
 	};
 
-	addDirectory(getBundledAgentsDir(), "package");
+	if (roleConfig.bundled) addDirectory(getBundledAgentsDir(), "package");
 
 	const discovered = discoverRolePackPaths(pi);
 	diagnostics.push(...discovered.diagnostics);
@@ -823,10 +827,12 @@ function resolveEffectiveInteractive(
 function loadAgentDefaults(
 	agentName: string,
 	pi?: Pick<ExtensionAPI, "events">,
+	roleConfig?: RoleConfig,
 ): ListedAgentDefinition | null {
 	return (
-		discoverAgentCatalog(pi).agents.find((agent) => agent.name === agentName) ??
-		null
+		discoverAgentCatalog(pi, roleConfig).agents.find(
+			(agent) => agent.name === agentName,
+		) ?? null
 	);
 }
 
@@ -926,6 +932,7 @@ function finalizeSubagentSurface(
 
 const statusConfig = loadStatusConfig();
 const modelConfig = loadModelConfig();
+const bundledRoleConfig = loadRoleConfig();
 
 const MAX_RESULT_PRESENTATION_CHARS = 16_000;
 const MAX_SESSION_REFERENCE_CHARS = 10_000;
@@ -1895,6 +1902,7 @@ export const __test__ = {
 	renderSubagentWidgetLines,
 	loadAgentDefaults,
 	discoverAgentDefinitions,
+	discoverAgentCatalog,
 	resolveEffectiveSessionMode,
 	resolveLaunchBehavior,
 	resolveEffectiveAutoExit,

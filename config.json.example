@@ -4,5 +4,8 @@
   },
   "models": {
     "agents": {}
+  },
+  "roles": {
+    "bundled": true
   }
 }

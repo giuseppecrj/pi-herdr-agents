@@ -298,11 +298,14 @@ cp config.json.example config.json
   },
   "models": {
     "agents": {}
+  },
+  "roles": {
+    "bundled": true
   }
 }
 ```
 
-If `config.json` is absent, status settings fall back to `config.json.example`.
+If `config.json` is absent, status and role settings fall back to `config.json.example`.
 Model routing does not read the example: no model overrides apply until a real
 `config.json` exists.
 
@@ -321,6 +324,8 @@ exact IDs from your authenticated model catalog:
   }
 }
 ```
+
+Set `roles.bundled` to `false` to exclude this package's bundled role definitions from listing and exact-name launch. It defaults to `true`. Registered role packs remain available, and global and project definitions keep their existing precedence. A role-pack name collides with a bundled role only while that bundled layer is enabled; when it is disabled, the role pack can supply that name. Run `/reload` after changing this setting.
 
 `models.default` sets the model for subagents that do not specify a model.
 `models.agents` sets per-agent defaults, keyed by the agent name passed to
@@ -705,9 +710,9 @@ the files, derives package name/version from the nearest `package.json`, and
 reports invalid paths, missing descriptions, filename/name mismatches, and
 package-layer collisions in the listing surfaces.
 
-Role packs cannot replace bundled roles, and duplicate role names from multiple
-role packs are disabled rather than resolved by extension load order. Use a
-global or project definition for an intentional override.
+Role packs cannot replace an enabled bundled role, and duplicate role names
+from multiple role packs are disabled rather than resolved by extension load
+order. Use a global or project definition for an intentional override.
 
 See [ADR-0003](docs/adr/0003-installable-role-packs.md) for the registration seam,
 collision rules, and rejected alternatives.

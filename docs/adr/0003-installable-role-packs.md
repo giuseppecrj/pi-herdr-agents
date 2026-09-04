@@ -55,7 +55,7 @@ leaving stale roles.
 
 Listing and exact-name launch use one resolved catalog. Collection order is:
 
-1. bundled package roles;
+1. enabled bundled package roles;
 2. registered role-pack definitions;
 3. global definitions;
 4. project definitions.
@@ -72,8 +72,9 @@ override them.
 
 Within the package layer:
 
-- bundled roles are protected fallbacks;
-- a role pack colliding with a bundled name is rejected;
+- bundled roles are protected fallbacks while enabled;
+- a role pack colliding with an enabled bundled name is rejected;
+- copying `config.json.example` to package-local `config.json` and setting `roles.bundled` to `false` removes only the bundled layer; registered role packs remain package roles and may supply those names;
 - a name contributed by multiple role packs is disabled;
 - collisions never resolve through incidental extension load order.
 
@@ -84,8 +85,9 @@ instead of treating an invalid contribution as a bare agent.
 ## Reload and security
 
 Role files are read on each list or launch, so editing Markdown does not require
-`/reload`. Installing, removing, updating, or changing a role-pack extension
-uses Pi's normal reload flow. Contributor `session_shutdown` cleanup removes the
+`/reload`. Changing package-local role configuration, installing, removing,
+updating, or changing a role-pack extension uses Pi's normal reload flow.
+Contributor `session_shutdown` cleanup removes the
 old event listener before replacement extensions register. Already-running
 children retain their resolved role and lifecycle.
 
