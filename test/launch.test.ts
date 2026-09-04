@@ -213,6 +213,49 @@ describe("Pi launch", () => {
 		});
 	});
 
+	it("keeps an autonomous multi-wave coordinator open for completion steers", async () => {
+		await withFixture(async ({ request }) => {
+			let command = "";
+			const running = await launchPiSubagent(
+				{
+					...request,
+					name: "Adversarial review",
+					agent: "adversarial-reviewer",
+					behavior: {
+						...request.behavior,
+						tools: "read,bash,grep,find,ls",
+						autoExit: false,
+						interactive: false,
+					},
+				},
+				{
+					createPane: () => "pane-coordinator",
+					createWorktree: () => {
+						throw new Error("unexpected worktree creation");
+					},
+					waitForShellReady: async () => {},
+					runScript: (_surface, value, options) => {
+						command = value;
+						return options.scriptPath;
+					},
+				},
+			);
+
+			assert.equal(running.interactive, false);
+			assert.match(command, /PI_SUBAGENT_AUTO_EXIT=0/);
+			assert.match(
+				command,
+				/--tools 'read,bash,grep,find,ls,caller_ping,subagent_done'/,
+			);
+			const taskPath = command.match(/'@([^']+\.md)'/)?.[1];
+			assert.ok(taskPath, "expected artifact-backed coordinator task");
+			assert.match(
+				readFileSync(taskPath, "utf8"),
+				/call the subagent_done tool/i,
+			);
+		});
+	});
+
 	it("resumes a session through the launch transaction", async () => {
 		await withFixture(async ({ root, sessionDir }) => {
 			const sessionFile = join(root, "child.jsonl");

@@ -47,7 +47,10 @@ import {
 const backends = getAvailableBackends();
 
 function getWorkspaceActiveTab(workspaceId: string): string | null {
-	const workspaces = JSON.parse(
+	const workspaces: Array<{
+		workspace_id: string;
+		active_tab_id?: string;
+	}> = JSON.parse(
 		execFileSync("herdr", ["workspace", "list"], { encoding: "utf8" }),
 	).result.workspaces;
 	return (
@@ -67,7 +70,7 @@ function getPaneTab(paneId: string): string | null {
 }
 
 function listBtwPanes(workspaceId: string): string[] {
-	const tabs = JSON.parse(
+	const tabs: Array<{ label: string; tab_id: string }> = JSON.parse(
 		execFileSync("herdr", ["tab", "list", "--workspace", workspaceId], {
 			encoding: "utf8",
 		}),
@@ -75,7 +78,7 @@ function listBtwPanes(workspaceId: string): string[] {
 	const btwTabIds = new Set(
 		tabs.filter((tab) => tab.label === "BTW").map((tab) => tab.tab_id),
 	);
-	const panes = JSON.parse(
+	const panes: Array<{ pane_id: string; tab_id: string }> = JSON.parse(
 		execFileSync("herdr", ["pane", "list", "--workspace", workspaceId], {
 			encoding: "utf8",
 		}),
@@ -344,6 +347,92 @@ for (const backend of backends) {
 							entry.type === "message" && entry.message?.role === "user",
 					),
 				false,
+			);
+		});
+
+		it("runs a non-auto-exit coordinator through discovery and synthesis waves", async () => {
+			const id = uniqueId();
+			const coordinatorName = `nested-${id}`;
+			const marker = `INTEGRATION_MULTI_WAVE_COORDINATOR:${id}`;
+			const parentSession = join(env.dir, `multi-wave-parent-${id}.jsonl`);
+			const surface = createTrackedSurface(env, `multi-wave-${id}`);
+			await waitForPaneReady(surface);
+
+			startPi(
+				surface,
+				env.dir,
+				[
+					"Call the subagent tool with these EXACT parameters:",
+					`  name: "${coordinatorName}"`,
+					'  agent: "adversarial-reviewer"',
+					`  task: "${marker}"`,
+					"Do not do anything else. Just call the subagent tool once.",
+					`After completion, say PARENT_MULTI_WAVE_${id}.`,
+				].join("\n"),
+				{ extraArgs: `--session ${shellQuote(parentSession)}` },
+			);
+
+			let entries: any[] = [];
+			let completion: any;
+			const deadline = Date.now() + Math.min(PI_TIMEOUT, 60_000);
+			while (!completion && Date.now() < deadline) {
+				if (existsSync(parentSession)) {
+					entries = readFileSync(parentSession, "utf8")
+						.trim()
+						.split("\n")
+						.filter(Boolean)
+						.map((line) => JSON.parse(line));
+					completion = entries.find(
+						(entry) =>
+							entry.type === "custom_message" &&
+							entry.customType === "subagent_result" &&
+							entry.details?.name === coordinatorName,
+					);
+				}
+				if (!completion) await sleep(50);
+			}
+
+			assert.ok(completion, readPane(surface, 300));
+			assert.match(completion.details.resultContent, /completed/i);
+			assert.match(
+				completion.details.resultContent,
+				new RegExp(`FINAL_MULTI_WAVE_${id}`),
+			);
+			assert.equal(
+				entries.filter(
+					(entry) =>
+						entry.type === "custom_message" &&
+						entry.customType === "subagent_result" &&
+						entry.details?.name === coordinatorName,
+				).length,
+				1,
+				"coordinator must deliver exactly one final parent result",
+			);
+
+			const coordinatorSession = completion.details.sessionFile;
+			assert.ok(coordinatorSession, "coordinator session must be retained");
+			assert.equal(existsSync(coordinatorSession), true);
+			const coordinatorEntries = readFileSync(coordinatorSession, "utf8")
+				.trim()
+				.split("\n")
+				.filter(Boolean)
+				.map((line) => JSON.parse(line));
+			const transcript = JSON.stringify(coordinatorEntries);
+			assert.match(transcript, new RegExp(`DISCOVERY_RESULT_${id}`));
+			assert.match(transcript, new RegExp(`SYNTHESIS_RESULT_${id}`));
+			assert.equal(
+				coordinatorEntries.some((entry) => {
+					if (entry.type !== "message" || entry.message?.role !== "assistant") {
+						return false;
+					}
+					const turn = JSON.stringify(entry.message.content);
+					return (
+						turn.includes(`FINAL_MULTI_WAVE_${id}`) &&
+						turn.includes("subagent_done")
+					);
+				}),
+				true,
+				"final report text and subagent_done must occur in the same coordinator turn",
 			);
 		});
 

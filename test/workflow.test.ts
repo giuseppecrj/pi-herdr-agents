@@ -14,7 +14,8 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createEventBus } from "@earendil-works/pi-coding-agent";
 import subagentsExtension, {
 	__test__ as subagentTest,
@@ -83,6 +84,8 @@ ${JSON.stringify(
 // Workflow body.
 `;
 }
+
+const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const roles: WorkflowRole[] = [
 	{
@@ -163,6 +166,239 @@ describe("workflow preparation", () => {
 		root = createRepository();
 	});
 	after(() => rmSync(root, { recursive: true, force: true }));
+
+	it("derives the intended workflow tools from the real bundled reviewer", () => {
+		const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+		const previousCwd = process.cwd();
+		const isolatedAgentDir = mkdtempSync(join(tmpdir(), "workflow-agent-dir-"));
+		let bundledReviewer: ReturnType<typeof subagentTest.loadAgentDefaults>;
+		try {
+			process.env.PI_CODING_AGENT_DIR = isolatedAgentDir;
+			process.chdir(packageRoot);
+			bundledReviewer = subagentTest.loadAgentDefaults("reviewer");
+		} finally {
+			process.chdir(previousCwd);
+			if (previousAgentDir === undefined)
+				delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+			rmSync(isolatedAgentDir, { recursive: true, force: true });
+		}
+		assert.ok(bundledReviewer);
+		assert.equal(bundledReviewer.source, "package");
+		assert.equal(bundledReviewer.sessionMode, undefined);
+		assert.equal(bundledReviewer.tools, "read, bash, grep, find, ls");
+
+		const baseSha = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], {
+			encoding: "utf8",
+		}).trim();
+		const candidate = prepare(
+			root,
+			writeWorkflow(root, workflow(baseSha), "bundled-reviewer-tools"),
+			[bundledReviewer],
+		);
+		assert.deepEqual(candidate.rolePolicies[0].tools, [
+			"read",
+			"grep",
+			"find",
+			"ls",
+		]);
+	});
+
+	it("executes the documented adversarial data flow in the workflow worker", async () => {
+		const baseSha = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], {
+			encoding: "utf8",
+		}).trim();
+		const source = readFileSync(
+			join(
+				packageRoot,
+				"skills",
+				"orchestrate",
+				"adversarial-review-example.js",
+			),
+			"utf8",
+		);
+		const reviewRoles = ["R1", "V1", "S1"].map((id) => ({
+			id,
+			role: "reviewer",
+			kind: "review",
+			model: "test/model",
+			thinking: "low",
+		}));
+		const input = {
+			evidence: { diff: "diff --git a/src/auth.ts b/src/auth.ts" },
+			discoveryRequests: [
+				{ alias: "R1", node: "R1", prompt: "Discover security defects." },
+			],
+			verificationRequests: [
+				{
+					alias: "V1",
+					node: "V1",
+					prompt: "Verify serious candidates.",
+					candidateIds: ["R1-F001"],
+				},
+			],
+			synthesisRequest: {
+				alias: "S1",
+				node: "S1",
+				prompt: "Synthesize the verified review.",
+			},
+			reviewerProvenance: [{ alias: "R1", family: "family-a" }],
+			catalogSource: "test catalog",
+			omittedModelIds: [],
+			runtimeReuse: [],
+			identityTokens: ["provider/model-secret"],
+		};
+		const path = writeWorkflow(
+			root,
+			workflow(baseSha, { roles: reviewRoles, maxAgents: 3 }) +
+				source +
+				`\nreturn await runAdversarialReview({ agent, ...${JSON.stringify(input)} });\n`,
+			"adversarial-example",
+		);
+		const candidate = prepare(root, path, roles);
+		const finding = {
+			id: "R1-F001",
+			claimedSeverity: "P1",
+			confirmedSeverity: null,
+			resolution: "candidate",
+			location: "src/auth.ts:10",
+			provenance: ["diff-hunk-1"],
+			evidenceStatus: "unverified",
+			preconditions: ["attacker controls redirect"],
+			reproductionOrTrace: ["request to redirect handler"],
+			expected: "reject untrusted origin",
+			actual: "redirects to supplied origin",
+			impact: "potential credential disclosure",
+			minimalFix: "allowlist redirect origins",
+		};
+		const report = (reviewerId: string, findings: unknown[], extras = {}) => ({
+			reviewerId,
+			status: "COMPLETE",
+			findings,
+			coverageGaps: [],
+			...extras,
+		});
+		const calls: string[] = [];
+		const executed = await executeWorkflow(candidate, {
+			deadlineMs: 2_000,
+			onAgent: async (prompt, options) => {
+				calls.push(String(options.node));
+				if (options.node === "R1") {
+					return {
+						ok: true,
+						value: `\`\`\`json\n${JSON.stringify(
+							report(
+								"R1",
+								[
+									{
+										...finding,
+										impact: "provider/model-secret claimed this impact",
+										notes: "provider/model-secret",
+									},
+								],
+								{
+									model: "provider/model-secret",
+									session: "/secret/R1.jsonl",
+								},
+							),
+						)}\n\`\`\``,
+						sessionFile: "/sessions/R1.jsonl",
+					};
+				}
+				if (options.node === "V1") {
+					assert.doesNotMatch(
+						prompt,
+						/provider\/model-secret|\/secret\/R1\.jsonl/,
+					);
+					return {
+						ok: true,
+						value: JSON.stringify(
+							report("V1", [
+								{
+									...finding,
+									resolution: "rejected",
+									evidenceStatus: "trace-backed",
+									reproductionOrTrace: [
+										"trace shows the origin guard rejects the request",
+									],
+									actual: "the origin guard rejects the supplied origin",
+									impact: "the claimed redirect is not reachable",
+									minimalFix: "none",
+									extraVerifierNote: "must not reach synthesis",
+								},
+							]),
+						),
+						sessionFile: "/sessions/V1.jsonl",
+					};
+				}
+				assert.equal(options.node, "S1");
+				assert.match(prompt, /"rejectedCandidateIds":\["R1-F001"\]/);
+				assert.doesNotMatch(
+					prompt,
+					/provider\/model-secret|\/secret\/R1\.jsonl|extraVerifierNote/,
+				);
+				return {
+					ok: true,
+					value: '```json\n{"reviewerId":"S1"}\n```',
+					sessionFile: "/sessions/S1.jsonl",
+				};
+			},
+		});
+		assert.equal(executed.state, "completed");
+		const result = JSON.parse(JSON.stringify(executed.result));
+		assert.deepEqual(calls, ["R1", "V1", "S1"]);
+		assert.equal(result.status, "INCOMPLETE");
+		assert.equal(result.synthesis, null);
+		assert.deepEqual(result.references.candidateIds, ["R1-F001"]);
+		assert.deepEqual(result.references.rejectedCandidateIds, ["R1-F001"]);
+		assert.deepEqual(result.references.unresolvedCandidateIds, []);
+		assert.equal(result.outcomes.discovery[0].outcome, "success");
+		assert.equal(
+			result.outcomes.verification[0].report.findings[0].resolution,
+			"rejected",
+		);
+		assert.equal(result.outcomes.synthesis.code, "invalid_report");
+		assert.equal(result.references.audit[0].sessionFile, "/sessions/R1.jsonl");
+		assert.doesNotMatch(
+			JSON.stringify(result.outcomes),
+			/provider\/model-secret|\/secret\/R1\.jsonl|extraVerifierNote|"notes"/,
+		);
+
+		const unresolvedPath = writeWorkflow(
+			root,
+			workflow(baseSha, {
+				roles: reviewRoles.filter(({ id }) => id !== "V1"),
+				maxAgents: 2,
+			}) +
+				source +
+				`\nreturn await runAdversarialReview({ agent, ...${JSON.stringify({
+					...input,
+					verificationRequests: [],
+				})} });\n`,
+			"adversarial-unresolved",
+		);
+		const unresolvedCandidate = prepare(root, unresolvedPath, roles);
+		const unresolved = await executeWorkflow(unresolvedCandidate, {
+			deadlineMs: 2_000,
+			onAgent: async (_prompt, options) =>
+				options.node === "R1"
+					? { ok: true, value: JSON.stringify(report("R1", [finding])) }
+					: {
+							ok: true,
+							value: JSON.stringify({
+								...report("S1", [finding]),
+								status: "INCOMPLETE",
+								coverageGaps: ["R1-F001 was not independently verified"],
+							}),
+						},
+		});
+		assert.equal(unresolved.state, "completed");
+		const unresolvedResult = JSON.parse(JSON.stringify(unresolved.result));
+		assert.equal(unresolvedResult.status, "INCOMPLETE");
+		assert.deepEqual(unresolvedResult.references.unresolvedCandidateIds, [
+			"R1-F001",
+		]);
+	});
 
 	it("builds a fresh isolated Pi child command with only approved read tools", () => {
 		const command = subagentTest.buildWorkflowChildCommand({

@@ -268,9 +268,15 @@ for (const backend of backends) {
 					.filter((event) => event.type === "agent_result")
 					.map((event) => event.result);
 				assert.deepEqual(
-					starts.map((event) => event.role),
-					["architecture", "standards", "skeptic", "synthesizer"],
+					starts
+						.slice(0, 3)
+						.map((event) => event.role)
+						.sort(),
+					["architecture", "skeptic", "standards"],
+					"parallel reviewers may start in any order",
 				);
+				assert.equal(starts.length, 4);
+				assert.equal(starts[3].role, "synthesizer");
 				assert.equal(
 					events.findIndex((event) => event.type === "agent_completed"),
 					6,

@@ -104,16 +104,17 @@ An orchestration agent remains a compatibility implementation detail—not a
 general pattern for new roles. Do not add more user-outcome orchestration
 prompts to `agents/` just because `subagent` is an available launcher.
 
-The next user-facing review surface should be a workflow named for the outcome,
-not a child implementation:
+User-facing review surfaces are workflows named for their outcome, not child
+implementations:
 
 - **Review** — one or more evidence-backed review passes against a supplied
   base/ref and rubric.
-- **Adversarial review** — independent multi-runtime passes followed by
-  verification of proposed findings.
+- **Adversarial review** — the preferred branch of `/skill:orchestrate`, with
+  independent discovery, candidate-dependent verification, and fresh synthesis.
 
-Whether these become commands, Pi skills, or a parent prompt is a separate UX
-decision. The workflow contract should be settled before adding a new command.
+The legacy coordinator remains a compatibility surface. New review outcomes use
+the existing skill and approved runner rather than adding another coordinator
+role or command.
 
 ### 3. Skills remain outside this package's taxonomy
 
@@ -148,11 +149,15 @@ Apply these rules:
 5. Reject legacy role definitions that contain `cli` before Herdr resource
    creation; do not reinterpret them as Pi roles.
 
-This preserves the useful multi-model review behavior without baking a
-particular vendor choice into the generic `reviewer` role. Adversarial review
-first applies project review constraints, then selects three distinct eligible
-exact authenticated Pi model IDs, prefers provider diversity, and launches
-generic `reviewer` children followed by fresh reviewer synthesis.
+This preserves useful multi-model review behavior without baking a particular
+vendor choice into the generic `reviewer` role. The preferred adversarial review
+is now a procedure in the existing `orchestrate` skill: it applies project
+constraints, requires known author model families or confirmed human-only
+origin, uses two distinct eligible exact model IDs for routine risk or three
+distinct lenses for concrete high-risk surfaces, conditionally verifies serious
+candidates cross-family, and ends in fresh synthesis. Same-family IDs are not
+called independent solely because their IDs differ. Every node still uses the
+generic `reviewer` role and an exact authenticated Pi runtime.
 
 ### 5. Subagent execution is Pi-only
 
@@ -185,7 +190,9 @@ project authors can still add their own namespaced fields.
 
 - `scout` — Leaf agent role. Keep.
 - `worker` — Leaf agent role. Keep.
-- `reviewer` — Leaf agent role. Keep as the model-neutral review pass.
+- `reviewer` — Leaf agent role. Keep as the model-neutral review pass. Its
+  public allowlist includes inspection tools plus Bash; the approved workflow
+  runner intersects that list with its read-only maximum and deny rules.
 - `planner` — Coordinator agent role. Keep; `/plan` remains the workflow that
   invokes it.
 - `poteto` — Coordinator agent role. Keep only if its distinct autonomous
@@ -194,16 +201,18 @@ project authors can still add their own namespaced fields.
   `chrome-cdp` dependency declared through canonical `skills` metadata.
 - `claude-reviewer` — Removed. Use the generic `reviewer` role with an
   authenticated Claude model through Pi provider/model routing.
-- `adversarial-reviewer` — Transitional workflow implementation (now shipped
-  and documented as a coordinator agent role). It applies
-  project review constraints, selects three distinct eligible exact
-  authenticated Pi model IDs, and launches generic `reviewer` children followed
-  by fresh reviewer synthesis. Do not clone this pattern for new outcomes;
-  migrate its user contract to an adversarial-review workflow.
+- `adversarial-reviewer` — Compatibility coordinator role. It remains directly
+  runnable for public asynchronous children, stays open across automatic result
+  steers, and uses risk-based discovery, conditional verification, and fresh
+  synthesis. Its public Bash access is behavioral, not an enforced read-only
+  boundary. It uses conventional child pane names while keeping anonymous
+  report aliases and audit provenance separate. Do not clone this pattern for
+  new outcomes.
 - `plan-skill.md` — Planning workflow instruction. Document by workflow purpose,
   not agent type.
 - `skills/orchestrate/SKILL.md` — Bundled native authoring skill for the first
-  review workflow; exposed with the package through Pi skills metadata.
+  review workflow and the preferred adversarial-review procedure; exposed with
+  the package through Pi skills metadata.
 
 ## Small migration plan
 
@@ -219,9 +228,10 @@ not a general workflow registry.
    `scout`'s `output` metadata and `visual-tester`'s compatibility `skill` key.
 4. Document every current workflow—planning, iteration, side questions, and
    adversarial review—with its roles, artifacts, prerequisites, and runtime
-   policy in one place. Adversarial review applies project constraints, selects
-   three distinct eligible exact authenticated Pi model IDs, prefers provider
-   diversity, and uses generic `reviewer` children with fresh synthesis.
+   policy in one place. Adversarial review applies project constraints and uses
+   generic `reviewer` children with risk-based discovery, request-local evidence
+   validation, candidate-dependent cross-family verification, identity-stripped
+   synthesis projections, and fresh synthesis.
 5. Remove bundled `claude-reviewer`; callers use the generic `reviewer` role
    with Pi provider/model routing.
 

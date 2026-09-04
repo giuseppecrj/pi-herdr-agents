@@ -1732,31 +1732,81 @@ describe("subagent discovery", () => {
 		);
 
 		assert.equal(adversarial.spawning, true);
-		assert.ok(
-			new Set(
-				(adversarial.tools ?? "").split(",").map((tool: string) => tool.trim()),
-			).has("subagent"),
-			"adversarial reviewer must expose the subagent tool used by its workflow",
+		assert.equal(
+			adversarial.autoExit,
+			false,
+			"multi-wave coordinator must remain open after each child-result steer",
+		);
+		assert.equal(
+			adversarial.interactive,
+			false,
+			"automatic completion steers must wake the multi-wave coordinator",
+		);
+		assert.equal(
+			testApi.resolveEffectiveAutoExit(
+				{ name: "Adversarial review", task: "Review" },
+				adversarial,
+			),
+			false,
+		);
+		assert.equal(
+			testApi.resolveEffectiveInteractive(
+				{ name: "Adversarial review", task: "Review" },
+				adversarial,
+			),
+			false,
+		);
+		const adversarialTools = new Set(
+			(adversarial.tools ?? "").split(",").map((tool: string) => tool.trim()),
+		);
+		assert.equal(adversarialTools.has("subagent"), true);
+		for (const tool of ["read", "bash", "grep", "find", "ls"]) {
+			assert.equal(
+				adversarialTools.has(tool),
+				true,
+				`adversarial reviewer must expose ${tool}`,
+			);
+		}
+		assert.equal(
+			testApi.resolveEffectiveSessionMode(
+				{ name: "Adversarial review", task: "Review", fork: false },
+				adversarial,
+			),
+			"standalone",
 		);
 
 		const instructions = adversarial.body ?? "";
-		assert.match(instructions, /live authenticated model catalog/i);
+		assert.match(instructions, /model-catalog source/i);
+		assert.match(instructions, /how authentication was\s+confirmed/i);
 		assert.doesNotMatch(
 			instructions,
 			/model:\s*["'][^"']+\/[^"']+["']/,
 			"adversarial reviewer must not hard-code provider model IDs",
 		);
+		assert.match(instructions, /project review rules/i);
 		assert.match(
 			instructions,
-			/select three distinct exact\s+authenticated model IDs/i,
+			/Routine\s+risk uses two distinct eligible\s+exact model IDs/i,
 		);
-		assert.match(instructions, /project'?s review constraints/i);
-		assert.match(instructions, /prefer different\s+providers/i);
-		assert.match(instructions, /reuse the three selected model IDs/i);
-		assert.match(instructions, /fresh `reviewer` synthesis pass/i);
 		assert.match(
 			instructions,
-			/Do not\s+create artifacts in the reviewed checkout/i,
+			/High risk uses three distinct eligible IDs with lenses/i,
+		);
+		assert.match(instructions, /candidate-dependent/i);
+		assert.match(instructions, /different provider\/model family/i);
+		assert.match(instructions, /fresh reviewer carrying alias\s+`S1`/i);
+		assert.match(instructions, /subagent_ping.*not a review report/is);
+		assert.match(instructions, /nonzero exit, provider error, launch error/i);
+		assert.match(instructions, /Never silently replace a\s+runtime/i);
+		assert.match(instructions, /16,000 characters/i);
+		assert.match(instructions, /call\s+`subagent_done`/i);
+		assert.match(
+			instructions,
+			/Never call it[\s\S]*lacks a terminal envelope/i,
+		);
+		assert.match(
+			instructions,
+			/Do not run verification that can generate\s+artifacts/i,
 		);
 		assert.doesNotMatch(instructions, /tools:\s*["']read,bash,write["']/);
 	});
@@ -1797,6 +1847,14 @@ describe("subagent discovery", () => {
 				{ sessionMode: "lineage-only" },
 			),
 			"fork",
+		);
+		assert.equal(
+			testApi.resolveEffectiveSessionMode(
+				{ name: "A", task: "T", fork: false },
+				{ sessionMode: "fork" },
+			),
+			"fork",
+			"fork: false must not override an inherited fork session mode",
 		);
 	});
 

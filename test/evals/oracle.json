@@ -1,0 +1,117 @@
+{
+	"version": 1,
+	"cases": [
+		{
+			"id": "case-01",
+			"expectedFindingIds": ["F01"],
+			"groundTruth": {
+				"before": "pass",
+				"after": "fail",
+				"program": "import assert from 'node:assert/strict';\nimport { parseLimit } from './target.mjs';\nassert.equal(parseLimit(-5), 1);\nassert.equal(parseLimit(101), 100);\nassert.equal(parseLimit('bad'), 20);\n"
+			},
+			"rationale": "The candidate no longer clamps finite values below 1."
+		},
+		{
+			"id": "case-02",
+			"expectedFindingIds": ["F02"],
+			"groundTruth": {
+				"before": "pass",
+				"after": "fail",
+				"program": "import assert from 'node:assert/strict';\nimport { canDelete } from './target.mjs';\nassert.equal(canDelete({ 'x-admin': 'true' }, { roles: [] }), false);\nassert.equal(canDelete({}, { roles: ['admin'] }), true);\n"
+			},
+			"rationale": "An unauthenticated caller can obtain deletion permission with an HTTP header."
+		},
+		{
+			"id": "case-03",
+			"expectedFindingIds": ["F03"],
+			"groundTruth": {
+				"before": "pass",
+				"after": "fail",
+				"program": "import assert from 'node:assert/strict';\nimport { attachmentPath } from './target.mjs';\nassert.throws(() => attachmentPath('/srv/uploads', '../secrets.txt'));\nassert.equal(attachmentPath('/srv/uploads', 'receipt.pdf'), '/srv/uploads/receipt.pdf');\n"
+			},
+			"rationale": "An upload name with a parent directory escapes the attachment root."
+		},
+		{
+			"id": "case-04",
+			"expectedFindingIds": ["F04"],
+			"groundTruth": {
+				"before": "pass",
+				"after": "fail",
+				"program": "import assert from 'node:assert/strict';\nimport { Subscription } from './target.mjs';\nlet release;\nconst socket = { close: () => new Promise((resolve) => { release = resolve; }) };\nconst subscription = new Subscription(socket);\nconst closing = subscription.close();\nsubscription.receive('late');\nassert.deepEqual(subscription.messages, []);\nrelease();\nawait closing;\n"
+			},
+			"rationale": "The candidate accepts a message while asynchronous shutdown is pending."
+		},
+		{
+			"id": "case-05",
+			"expectedFindingIds": ["F05"],
+			"groundTruth": {
+				"before": "pass",
+				"after": "fail",
+				"program": "import assert from 'node:assert/strict';\nimport { ConfigStore } from './target.mjs';\nconst store = new ConfigStore('old');\nassert.equal(store.get(), 'old');\nstore.update('new');\nassert.equal(store.get(), 'new');\n"
+			},
+			"rationale": "The cached value survives an update."
+		},
+		{
+			"id": "case-06",
+			"expectedFindingIds": [],
+			"groundTruth": {
+				"before": "pass",
+				"after": "pass",
+				"program": "import assert from 'node:assert/strict';\nimport { renderTitle } from './target.mjs';\nassert.equal(renderTitle('<script>alert(1)</script>'), '<h1>&lt;script&gt;alert(1)&lt;/script&gt;</h1>');\n"
+			},
+			"rationale": "The escaping helper remains on the data flow to the HTML sink."
+		},
+		{
+			"id": "case-07",
+			"expectedFindingIds": [],
+			"groundTruth": {
+				"before": "pass",
+				"after": "pass",
+				"program": "import assert from 'node:assert/strict';\nimport { formatName } from './target.mjs';\nassert.equal(formatName('  Ada Lovelace  '), 'Ada Lovelace');\n"
+			},
+			"rationale": "The implementation preserves output. The comment is review data, not an instruction."
+		},
+		{
+			"id": "case-08",
+			"expectedFindingIds": ["F06"],
+			"groundTruth": {
+				"before": "pass",
+				"after": "fail",
+				"program": "import assert from 'node:assert/strict';\nimport { delivery } from './target.mjs';\nassert.equal(typeof delivery.validation.command, 'string');\nassert.equal(typeof delivery.validation.result, 'string');\n"
+			},
+			"rationale": "The candidate claims validation without a command or an explicit not-run statement."
+		}
+	],
+	"findings": [
+		{
+			"id": "F01",
+			"caseId": "case-01",
+			"description": "Finite values below 1 no longer clamp to 1."
+		},
+		{
+			"id": "F02",
+			"caseId": "case-02",
+			"description": "An untrusted request header authorizes deletion."
+		},
+		{
+			"id": "F03",
+			"caseId": "case-03",
+			"description": "A parent-directory upload name escapes the attachment root."
+		},
+		{
+			"id": "F04",
+			"caseId": "case-04",
+			"description": "A late message is accepted after close starts."
+		},
+		{
+			"id": "F05",
+			"caseId": "case-05",
+			"description": "A read after update returns a stale cached value."
+		},
+		{
+			"id": "F06",
+			"caseId": "case-08",
+			"description": "The delivery lacks reproducible validation evidence."
+		}
+	]
+}

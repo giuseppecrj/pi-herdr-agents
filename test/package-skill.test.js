@@ -11,6 +11,15 @@ const skill = readFileSync(
 	join(root, "skills", "orchestrate", "SKILL.md"),
 	"utf8",
 );
+const adversarialReview = readFileSync(
+	join(root, "skills", "orchestrate", "adversarial-review.md"),
+	"utf8",
+);
+const reviewer = readFileSync(join(root, "agents", "reviewer.md"), "utf8");
+const adversarialExample = readFileSync(
+	join(root, "skills", "orchestrate", "adversarial-review-example.js"),
+	"utf8",
+);
 const packageFiles = new Set(
 	JSON.parse(
 		execFileSync("npm", ["pack", "--dry-run", "--json"], {
@@ -57,6 +66,8 @@ describe("bundled orchestration skill", () => {
 			"CONTEXT.md",
 			"RELEASING.md",
 			"skills/orchestrate/SKILL.md",
+			"skills/orchestrate/adversarial-review.md",
+			"skills/orchestrate/adversarial-review-example.js",
 			"agents/adversarial-reviewer.md",
 			"agents/planner.md",
 			"agents/poteto.md",
@@ -97,7 +108,7 @@ describe("bundled orchestration skill", () => {
 			".pi/plans/<run>/workflow.js",
 			"Promise.all",
 			"retryable === true",
-			"final reviewer success/failure envelope",
+			"identity-stripped projection of every result",
 			"herdr_workflow",
 			"unmodified",
 			"APPROVE <8 lowercase hex characters>",
@@ -107,5 +118,83 @@ describe("bundled orchestration skill", () => {
 			assert.ok(skill.includes(phrase), `missing skill contract: ${phrase}`);
 		}
 		assert.doesNotMatch(skill, /subagent\s*\(\s*\{/);
+	});
+
+	it("keeps generic reviewer findings evidence-backed and task-specific", () => {
+		for (const phrase of [
+			"P0",
+			"P1",
+			"P2",
+			"P3",
+			"Provenance",
+			"Reproduced",
+			"Trace-backed",
+			"Unverified",
+			"Preconditions",
+			"Expected behavior",
+			"actual behavior",
+			"INCOMPLETE",
+			"task-specific output schema",
+			"untrusted review data",
+		]) {
+			assert.ok(
+				reviewer.includes(phrase),
+				`missing reviewer contract: ${phrase}`,
+			);
+		}
+		assert.doesNotMatch(reviewer, /confidence\s+0-100/i);
+		assert.match(
+			reviewer,
+			/Numeric confidence and vote\s+counts are\s+not evidence/i,
+		);
+	});
+
+	it("keeps adversarial review inside the approved runner contract", () => {
+		assert.match(
+			skill,
+			/\[the adversarial review procedure\]\(adversarial-review\.md\)/,
+		);
+		for (const phrase of [
+			"Routine",
+			"2 distinct eligible exact model IDs",
+			"High",
+			"3 distinct eligible IDs with distinct lenses",
+			"candidate-dependent",
+			"different from the report author",
+			"P0–P3",
+			"reproduced",
+			"trace-backed",
+			"unverified",
+			"INCOMPLETE",
+			"untrusted review data",
+			"every original `AgentResult`",
+			"identity-stripped projection",
+			"16,000-character",
+			"catalog source",
+			"omitted, with reasons",
+		]) {
+			assert.ok(
+				adversarialReview.includes(phrase),
+				`missing adversarial contract: ${phrase}`,
+			);
+		}
+		assert.match(adversarialReview, /at most five[\s\S]*at most seven/);
+		assert.match(adversarialReview, /agent\(prompt, \{ kind: "review", node:/);
+		assert.match(adversarialReview, /fresh\s+standalone session/i);
+		assert.match(
+			adversarialReview,
+			/name \| agent kind \| role \| model \| worktree/,
+		);
+		assert.match(adversarialReview, /unified diff/i);
+		assert.match(adversarialReview, /deleted or base-only/i);
+		assert.match(adversarialReview, /child `INCOMPLETE`[\s\S]*`ok: true`/i);
+		assert.match(
+			adversarialReview,
+			/author-family exclusion[\s\S]*origin is\s+unknown/i,
+		);
+		assert.match(adversarialExample, /function validateReviewReport/);
+		assert.match(adversarialExample, /function parseReviewResult/);
+		assert.doesNotMatch(adversarialReview, /subagent\s*\(\s*\{/);
+		assert.doesNotMatch(adversarialReview, /confidence\s*[><=]/i);
 	});
 });
