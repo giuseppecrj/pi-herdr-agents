@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -28,6 +29,30 @@ test("validates the checked-in corpus and exports label-free reviewer input", as
 		"source",
 		"spec",
 	]);
+});
+
+test("runs the documented validator command when default type stripping is disabled", () => {
+	const result = spawnSync(
+		process.execPath,
+		[
+			"--no-experimental-strip-types",
+			"--experimental-strip-types",
+			"test/evals/validate.mjs",
+		],
+		{ encoding: "utf8" },
+	);
+	assert.equal(result.status, 0, result.stderr);
+});
+
+test("validates a nested source path when its oracle imports that path", async () => {
+	const input = fixture();
+	input.corpus.cases[0].source.path = "src/target.mjs";
+	input.oracle.cases[0].groundTruth.program =
+		input.oracle.cases[0].groundTruth.program.replaceAll(
+			"./target.mjs",
+			"./src/target.mjs",
+		);
+	await validate(input.corpus, input.oracle);
 });
 
 test("rejects source that cannot load", async () => {

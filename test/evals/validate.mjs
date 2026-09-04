@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
 	isPlainObject,
@@ -244,7 +244,11 @@ async function verifyCase(entry, oracle) {
 			await writeFile(join(fixture, "package.json"), '{"type":"module"}\n');
 			await writeFile(join(fixture, entry.source.path), entry.source[version]);
 
-			const loaded = await runNode(fixture, "await import('./target.mjs');");
+			const sourceUrl = pathToFileURL(join(fixture, entry.source.path)).href;
+			const loaded = await runNode(
+				fixture,
+				`await import(${JSON.stringify(sourceUrl)});`,
+			);
 			if (!passed(loaded)) {
 				throw new Error(
 					`${entry.id} ${version} could not load: ${diagnostic(loaded)}`,

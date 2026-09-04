@@ -35,11 +35,12 @@ The legacy prompt fixture,
 is pinned text copied from `agents/adversarial-reviewer.md` when the corpus was
 added. Keep it unchanged for historical comparisons.
 
-Validate the corpus and run dependency-free self-tests:
+Validate the corpus and run dependency-free self-tests. These commands require
+Node.js 22.6.0 or later, which supports `--experimental-strip-types`:
 
 ```bash
-node test/evals/validate.mjs
-node --test test/evals/*.test.mjs
+node --experimental-strip-types test/evals/validate.mjs
+node --experimental-strip-types --test test/evals/*.test.mjs
 ```
 
 The validator imports each source version before it runs the ground-truth
@@ -105,7 +106,7 @@ provider did not supply a value; do not infer or manufacture telemetry.
 Run the scorer:
 
 ```bash
-node test/evals/score.mjs path/to/captured-results.json
+node --experimental-strip-types test/evals/score.mjs path/to/captured-results.json
 ```
 
 For each strategy, the score includes:
