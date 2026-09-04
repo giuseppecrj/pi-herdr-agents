@@ -164,6 +164,8 @@ export default function (pi: ExtensionAPI) {
 
 	let userTookOver = false;
 	let agentStarted = false;
+	let latestAgentMessages: any[] | undefined;
+	let completionFinalized = false;
 
 	// Show widget + status bar on session start
 	pi.on("session_start", (_event, ctx) => {
@@ -192,41 +194,50 @@ export default function (pi: ExtensionAPI) {
 		recorder.agentStart();
 	});
 
-	pi.on("agent_end", (event, ctx) => {
-		const messages = event.messages;
-		const shouldExit =
-			autoExit && shouldAutoExitOnAgentEnd(userTookOver, messages);
-
-		if (shouldExit) {
-			// Surface stopReason: "error" turns (auto-retry exhausted, provider
-			// overload, etc.) to the parent via the .exit sidecar so the watcher
-			// can report a clear failure with the underlying error message.
-			// Without this the parent would only see exit code 0 and a stale
-			// assistant message, mistaking the crash for a successful completion.
-			const sessionFile = process.env.PI_SUBAGENT_SESSION;
-			if (sessionFile) {
-				try {
-					writeFileSync(
-						`${sessionFile}.exit`,
-						JSON.stringify(buildCompletionSidecar(messages)),
-					);
-				} catch {
-					// Best effort — the watcher can still detect the terminal sentinel
-					// after shutdown if the completion sidecar cannot be written.
-				}
-			}
-
-			recorder.agentEndDone();
-			ctx.shutdown();
-			return;
-		}
-
+	pi.on("agent_end", (event) => {
+		latestAgentMessages = event.messages;
 		recorder.agentEndWaiting();
 		if (autoExit) {
 			// Reset any recorded manual input marker. Auto-exit is decided by whether
 			// the latest agent turn completed normally, not by who initiated it.
 			userTookOver = false;
 		}
+	});
+
+	pi.on("agent_settled", (_event, ctx) => {
+		if (!autoExit || completionFinalized) return;
+
+		let messages = latestAgentMessages;
+		try {
+			const branchMessages = ctx.sessionManager
+				.getBranch()
+				.flatMap((entry) => (entry.type === "message" ? [entry.message] : []));
+			if (branchMessages.length > 0) messages = branchMessages;
+		} catch {
+			// Fall back to the latest low-level run when session evidence is unavailable.
+		}
+
+		if (!shouldAutoExitOnAgentEnd(userTookOver, messages)) return;
+		completionFinalized = true;
+
+		// Surface a settled stopReason: "error" to the parent via the .exit
+		// sidecar. Transient errors followed by retry or compaction never reach
+		// this point as the latest assistant message.
+		const sessionFile = process.env.PI_SUBAGENT_SESSION;
+		if (sessionFile) {
+			try {
+				writeFileSync(
+					`${sessionFile}.exit`,
+					JSON.stringify(buildCompletionSidecar(messages)),
+				);
+			} catch {
+				// Best effort — the watcher can still detect the terminal sentinel
+				// after shutdown if the completion sidecar cannot be written.
+			}
+		}
+
+		recorder.agentEndDone();
+		ctx.shutdown();
 	});
 
 	pi.on("turn_start", (event) => {
@@ -308,6 +319,7 @@ export default function (pi: ExtensionAPI) {
 				message: params.message,
 			};
 			writeFileSync(`${sessionFile}.exit`, JSON.stringify(exitData));
+			completionFinalized = true;
 
 			ctx.shutdown();
 			return {
@@ -338,6 +350,7 @@ export default function (pi: ExtensionAPI) {
 			if (sessionFile) {
 				writeFileSync(`${sessionFile}.exit`, JSON.stringify({ type: "done" }));
 			}
+			completionFinalized = true;
 			ctx.shutdown();
 			return {
 				content: [{ type: "text", text: "Shutting down subagent session." }],

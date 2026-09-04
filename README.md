@@ -494,7 +494,7 @@ The `caller_ping` tool lets a Pi-backed subagent request help from its parent ag
 - `sessionPath` (required): Path to the child session `.jsonl` file
 - `name` (optional): Display name for the resumed pane (defaults to `Resume`)
 - `message` (optional): Follow-up prompt to send after resuming
-- `autoExit` (optional): Whether the resumed session should auto-exit after its next response. Defaults to `true` for autonomous follow-up work; set `false` when resuming for an interactive handoff.
+- `autoExit` (optional): Whether the resumed session should auto-exit after its next response fully settles. Defaults to `true` for autonomous follow-up work; set `false` when resuming for an interactive handoff.
 
 **Interaction flow:**
 
@@ -741,7 +741,7 @@ and verify them with `/subagent list` plus a smoke launch.
 | `session-mode` | string | Default child-session mode: `standalone`, `lineage-only`, or `fork` |
 | `spawning`    | boolean | Set `false` to deny all subagent-spawning tools                                                                                                                                                                                                                             |
 | `deny-tools`  | string  | Comma-separated `pi-herdr-agents` tool names to suppress; this is not a universal cross-extension deny list                                                                                                                                                                  |
-| `auto-exit`   | boolean | Auto-shutdown when the latest assistant turn does not end with `stopReason: "aborted"` — no `subagent_done` call needed. User input does not permanently disable auto-exit. Recommended for autonomous agents (scout, worker); not for interactive ones (planner). Also determines the default value of `interactive` (see below). |
+| `auto-exit`   | boolean | Auto-shutdown after Pi fully settles when the latest assistant turn does not end with `stopReason: "aborted"` — no `subagent_done` call needed. User input does not permanently disable auto-exit. Recommended for autonomous agents (scout, worker); not for interactive ones (planner). Also determines the default value of `interactive` (see below). |
 | `interactive` | boolean | Override whether stall/recovery transitions wake the parent session. Defaults to the inverse of `auto-exit`: autonomous agents (`auto-exit: true`) are non-interactive and get stall pings; agents without `auto-exit` are interactive and stay quiet. Explicit values take precedence. |
 | `cwd`         | string  | Default working directory. Absolute paths are unambiguous; relative agent-frontmatter paths resolve from Pi's agent config directory (`PI_CODING_AGENT_DIR` or `~/.pi/agent`), not the project root                                                                                                                                                                                                            |
 | `disable-model-invocation` | boolean | Hide a role from discovery surfaces like `subagents_list`. The definition remains directly invocable by exact name via `subagent({ agent: "name", ... })`. |
@@ -771,12 +771,13 @@ session-mode: lineage-only
 
 ### `auto-exit`
 
-When set to `true`, the agent session shuts down on `agent_end` unless the latest assistant message has `stopReason: "aborted"` — no explicit `subagent_done` call is needed.
+When set to `true`, the agent session shuts down on Pi's `agent_settled` event unless the latest assistant message has `stopReason: "aborted"` — no explicit `subagent_done` call is needed.
 
 **Behavior:**
 
-- The session closes on `agent_end` when the latest assistant turn does not have `stopReason: "aborted"`; a normal or error stop exits, while an aborted stop stays open.
-- User input does not permanently disable auto-exit; the latest assistant stop reason determines whether the session exits.
+- Low-level `agent_end` events do not close the session because Pi may still retry, compact and retry, or process a queued continuation.
+- After `agent_settled`, a normal or error stop exits, while an aborted stop stays open.
+- User input does not permanently disable auto-exit; the latest settled assistant stop reason determines whether the session exits.
 - The modeHint injected into the agent's task is adjusted accordingly: autonomous agents see "Complete your task autonomously." rather than instructions to call `subagent_done`
 
 **When to use:**
