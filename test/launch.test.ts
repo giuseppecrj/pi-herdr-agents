@@ -18,6 +18,7 @@ import {
 	type PiLaunchOperations,
 	type ResumePiLaunchRequest,
 } from "../pi-extension/subagents/launch.ts";
+import { createSubagentPaneFactory } from "../pi-extension/subagents/pane-config.ts";
 
 function fixture() {
 	const root = mkdtempSync(join(tmpdir(), "subagent-launch-test-"));
@@ -191,6 +192,46 @@ describe("Pi launch", () => {
 			});
 		}
 	}
+
+	it("closes an owned split child rather than its stable parent on launch failure", async () => {
+		await withFixture(async ({ request }) => {
+			const parentPane = "parent-pane";
+			const childPane = "split-child-pane";
+			const closed: string[] = [];
+			const operations: PiLaunchOperations = {
+				createPane: createSubagentPaneFactory(
+					{ mode: "split", direction: "down" },
+					() => {
+						throw new Error("must not create a tab");
+					},
+					(name, direction) => {
+						assert.equal(name, "Worker");
+						assert.equal(direction, "down");
+						return childPane;
+					},
+				),
+				createWorktree: () => {
+					throw new Error("unexpected worktree creation");
+				},
+				waitForShellReady: async () => {
+					throw new Error("split readiness failed");
+				},
+				runScript: () => {
+					throw new Error("must not run");
+				},
+				closePane(surface) {
+					closed.push(surface);
+				},
+			};
+
+			await assert.rejects(
+				launchPiSubagent(request, operations),
+				/split readiness failed/,
+			);
+			assert.deepEqual(closed, [childPane]);
+			assert.equal(closed.includes(parentPane), false);
+		});
+	});
 
 	it("closes its fresh pane when artifact preparation fails", async () => {
 		await withFixture(async ({ request, root }) => {

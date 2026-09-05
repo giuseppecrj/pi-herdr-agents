@@ -179,6 +179,23 @@ function buildTabCreateArgs(
 	];
 }
 
+function buildPaneSplitArgs(
+	parentPaneId: string,
+	direction: "right" | "down",
+	cwd: string,
+): string[] {
+	return [
+		"pane",
+		"split",
+		parentPaneId,
+		"--direction",
+		direction,
+		"--no-focus",
+		"--cwd",
+		cwd,
+	];
+}
+
 function buildWorktreeCreateArgs(
 	name: string,
 	cwd: string,
@@ -342,16 +359,9 @@ export function createHerdrSurfaceSplit(
 	direction: "right" | "down",
 ): string {
 	const parentPaneId = getHerdrParentPaneId();
-	const output = herdrExec([
-		"pane",
-		"split",
-		parentPaneId,
-		"--direction",
-		direction,
-		"--no-focus",
-		"--cwd",
-		process.cwd(),
-	]);
+	const output = herdrExec(
+		buildPaneSplitArgs(parentPaneId, direction, process.cwd()),
+	);
 	const paneId = extractHerdrPaneId(output, "pane split");
 	try {
 		herdrExec(["pane", "rename", paneId, name]);
@@ -731,6 +741,7 @@ export function focusHerdrWorkspace(workspaceId: string): void {
 export const __herdrTest__ = {
 	buildCurrentPaneArgs,
 	buildTabCreateArgs,
+	buildPaneSplitArgs,
 	buildWorktreeCreateArgs,
 	parseHerdrJson,
 	extractHerdrPaneId,

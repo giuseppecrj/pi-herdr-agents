@@ -57,6 +57,11 @@ import {
 	parseRoleConfig,
 } from "../pi-extension/subagents/role-config.ts";
 import {
+	createSubagentPaneFactory,
+	loadPaneConfig,
+	parsePaneConfig,
+} from "../pi-extension/subagents/pane-config.ts";
+import {
 	advanceStatusState,
 	capStatusLines,
 	classifyStatus,
@@ -1372,6 +1377,88 @@ describe("status.ts", () => {
 		assert.match(aggregate, /^Subagent status:/);
 		assert.match(aggregate, /\+2 more running\./);
 		assert.doesNotMatch(aggregate, /\/tmp|\.jsonl/);
+	});
+});
+
+describe("pane configuration", () => {
+	it("defaults to tabs and rightward splits when panes are absent", () => {
+		assert.deepEqual(parsePaneConfig({}), {
+			mode: "tab",
+			direction: "right",
+		});
+	});
+
+	it("parses split mode and direction", () => {
+		assert.deepEqual(
+			parsePaneConfig({ panes: { mode: "split", direction: "down" } }),
+			{ mode: "split", direction: "down" },
+		);
+	});
+
+	it("rejects invalid pane settings", () => {
+		for (const panes of [null, [], "split"]) {
+			assert.throws(
+				() => parsePaneConfig({ panes }),
+				/panes must be an object/,
+			);
+		}
+		assert.throws(
+			() => parsePaneConfig({ panes: { mode: "window" } }),
+			/panes\.mode must be "tab" or "split"/,
+		);
+		assert.throws(
+			() => parsePaneConfig({ panes: { direction: "left" } }),
+			/panes\.direction must be "right" or "down"/,
+		);
+		assert.throws(
+			() => parsePaneConfig({ panes: { mode: "tab", extra: true } }),
+			/panes has unsupported key\(s\): extra/,
+		);
+	});
+
+	it("loads the shared example when local config is absent", () => {
+		withTempDir((dir) => {
+			const examplePath = join(dir, "config.json.example");
+			writeFileSync(
+				examplePath,
+				JSON.stringify({ panes: { mode: "split", direction: "down" } }),
+			);
+
+			assert.deepEqual(loadPaneConfig(join(dir, "config.json"), examplePath), {
+				mode: "split",
+				direction: "down",
+			});
+		});
+	});
+
+	it("uses tabs unchanged and passes split direction to the split creator", () => {
+		const calls: string[] = [];
+		const createTab = (name: string) => {
+			calls.push(`tab:${name}`);
+			return "tab-pane";
+		};
+		const createSplit = (name: string, direction: "right" | "down") => {
+			calls.push(`split:${name}:${direction}`);
+			return "split-pane";
+		};
+
+		assert.equal(
+			createSubagentPaneFactory(
+				{ mode: "tab", direction: "down" },
+				createTab,
+				createSplit,
+			)("Scout"),
+			"tab-pane",
+		);
+		assert.equal(
+			createSubagentPaneFactory(
+				{ mode: "split", direction: "right" },
+				createTab,
+				createSplit,
+			)("Reviewer"),
+			"split-pane",
+		);
+		assert.deepEqual(calls, ["tab:Scout", "split:Reviewer:right"]);
 	});
 });
 
@@ -5549,6 +5636,22 @@ describe("herdr.ts", () => {
 				"current",
 				"--current",
 			]);
+		});
+
+		it("targets an explicit stable parent when splitting without focus", () => {
+			assert.deepEqual(
+				__herdrTest__.buildPaneSplitArgs("parent-pane", "down", "/repo"),
+				[
+					"pane",
+					"split",
+					"parent-pane",
+					"--direction",
+					"down",
+					"--no-focus",
+					"--cwd",
+					"/repo",
+				],
+			);
 		});
 
 		it("targets the current workspace when creating a subagent tab", () => {
