@@ -32,6 +32,7 @@ import {
 	trackTempFile,
 	waitForFile,
 	waitForScreen,
+	shellQuote,
 	type TestEnv,
 } from "./harness.ts";
 import {
@@ -167,18 +168,20 @@ for (const backend of backends) {
 				branch,
 				baseSha,
 			);
+			const cwdFile = `/tmp/pi-integ-worktree-cwd-${id}.txt`;
+			trackTempFile(env, cwdFile);
 			try {
 				assert.equal(worktree.branch, branch);
 				assert.ok(worktree.path !== env.dir);
 				assert.equal(getFocusedSurface(backend), focusedPane);
 
 				await waitForPaneReady(worktree.paneId);
-				runInPane(worktree.paneId, "pwd");
-				await waitForScreen(
-					worktree.paneId,
-					new RegExp(worktree.path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
-					20_000,
-					50,
+				runInPane(worktree.paneId, `pwd > ${shellQuote(cwdFile)}`);
+				const capturedCwd = await waitForFile(cwdFile, 20_000);
+				assert.equal(
+					capturedCwd.trim(),
+					worktree.path,
+					"The launched worktree shell must start at the returned worktree path",
 				);
 
 				const listed = JSON.parse(

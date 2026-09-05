@@ -18,7 +18,13 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { getProviderRequests, resetProviderRequests } from "./fake-provider.ts";
 import {
@@ -555,13 +561,43 @@ for (const backend of backends) {
 		});
 
 		it("delivers completion after the parent starts a new session", async () => {
+			type SessionEntry = {
+				type?: string;
+				customType?: string;
+				details?: {
+					name?: string;
+					exitCode?: number;
+					resultContent?: string;
+				};
+				message?: { role?: string };
+			};
+
 			const id = uniqueId();
 			const startFile = `/tmp/pi-integ-switch-start-${id}.txt`;
 			const markerFile = `/tmp/pi-integ-switch-done-${id}.txt`;
 			const childDir = join(env.dir, "sibling-project");
+			const sessionDir = join(env.dir, `switch-sessions-${id}`);
+			const originalSession = join(sessionDir, "original.jsonl");
 			mkdirSync(childDir);
+			mkdirSync(sessionDir);
 			trackTempFile(env, startFile);
 			trackTempFile(env, markerFile);
+
+			const readSession = (path: string): SessionEntry[] => {
+				try {
+					return readFileSync(path, "utf8")
+						.trim()
+						.split("\n")
+						.filter(Boolean)
+						.map((line) => JSON.parse(line));
+				} catch {
+					return [];
+				}
+			};
+			const isMatchingReceipt = (entry: SessionEntry): boolean =>
+				entry.type === "custom_message" &&
+				entry.customType === "subagent_result" &&
+				entry.details?.name === `Switch-${id}`;
 
 			const surface = createTrackedSurface(env, `switch-${id}`);
 			await waitForPaneReady(surface);
@@ -575,8 +611,14 @@ for (const backend of backends) {
 				`Do not do anything else. Just call the subagent tool once.`,
 			].join("\n");
 
-			startPi(surface, env.dir, task);
+			startPi(surface, env.dir, task, {
+				extraArgs: [
+					`--session ${shellQuote(originalSession)}`,
+					`--session-dir ${shellQuote(sessionDir)}`,
+				].join(" "),
+			});
 			await waitForFile(startFile, PI_TIMEOUT, /START_/);
+			assert.equal(existsSync(originalSession), true);
 
 			runInPane(surface, "/new");
 
@@ -586,13 +628,54 @@ for (const backend of backends) {
 				"Subagent should finish after the parent session switch",
 			);
 
-			const screen = await waitForScreen(
-				surface,
-				new RegExp(`Switch-${id}.*completed|Sub-agent.*Switch-${id}`, "i"),
-				PI_TIMEOUT,
-				300,
+			let replacementSession: string | undefined;
+			const deadline = Date.now() + PI_TIMEOUT;
+			while (!replacementSession && Date.now() < deadline) {
+				for (const file of readdirSync(sessionDir).filter((name) =>
+					name.endsWith(".jsonl"),
+				)) {
+					const path = join(sessionDir, file);
+					if (path === originalSession) continue;
+					const entries = readSession(path);
+					const receiptIndex = entries.findIndex(isMatchingReceipt);
+					const settled =
+						receiptIndex >= 0 &&
+						entries
+							.slice(receiptIndex + 1)
+							.some(
+								(entry) =>
+									entry.type === "message" &&
+									entry.message?.role === "assistant",
+							);
+					if (entries.filter(isMatchingReceipt).length === 1 && settled) {
+						replacementSession = path;
+						break;
+					}
+				}
+				if (!replacementSession) await sleep(50);
+			}
+
+			const replacementPath = replacementSession;
+			assert.ok(
+				replacementPath,
+				`Expected a settled replacement session receipt. Parent screen:\n${readPane(surface, 300)}`,
 			);
-			assert.match(screen, new RegExp(`Switch-${id}`, "i"));
+			assert.notEqual(replacementPath, originalSession);
+			const replacementResults =
+				readSession(replacementPath).filter(isMatchingReceipt);
+			assert.equal(replacementResults.length, 1);
+			const receipt = replacementResults[0];
+			assert.equal(receipt.type, "custom_message");
+			assert.equal(receipt.customType, "subagent_result");
+			assert.ok(receipt.details, "Receipt must include structured details");
+			assert.equal(receipt.details?.name, `Switch-${id}`);
+			assert.equal(receipt.details?.exitCode, 0);
+			assert.match(receipt.details?.resultContent ?? "", /.+/);
+			assert.equal(
+				readSession(originalSession).filter(isMatchingReceipt).length,
+				0,
+				"Completion must not be delivered into the original parent session",
+			);
 		});
 
 		// ── In-progress activity snapshots ──
