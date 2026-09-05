@@ -511,6 +511,8 @@ The `caller_ping` tool lets a Pi-backed subagent request help from its parent ag
 - `message` (optional): Follow-up prompt to send after resuming
 - `autoExit` (optional): Whether the resumed session should auto-exit after its next response fully settles. Defaults to `true` for autonomous follow-up work; set `false` when resuming for an interactive handoff.
 
+Each public child stores a session-adjacent versioned launch-policy sidecar. Public resume restores its resolved tool allowlist and denied subagent tools rather than looking up the current role, so later role changes cannot widen a child. An intentionally unrestricted launch remains unrestricted (no `--tools` argument); a restricted launch restores its exact allowlist. The `autoExit` override still controls whether `subagent_done` is available, while `caller_ping` remains available. Missing, malformed, or unsupported policy fails closed before a pane is created with recovery guidance. Public resume also rejects workflow-owned and managed-worktree child sessions; use their retained workflow evidence or workspace instead.
+
 **Interaction flow:**
 
 1. Child calls `caller_ping({ message: "Not sure which schema to use" })`

@@ -83,6 +83,7 @@ import {
 	findObservedSessionRuntime,
 	getNewEntries,
 	createBtwSessionSnapshot,
+	writeSubagentSessionPolicy,
 } from "./session.ts";
 import {
 	type SubagentStatusState,
@@ -2532,6 +2533,19 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			if (childController.signal.aborted)
 				return workflowFailure("cancelled", "Workflow cancelled.");
 			mkdirSync(dirname(sessionFile), { recursive: true });
+			writeSubagentSessionPolicy(sessionFile, {
+				owner: "workflow",
+				tools: policy.tools,
+				deniedTools: [
+					"caller_ping",
+					"subagent_done",
+					"subagent",
+					"subagent_interrupt",
+					"subagent_resume",
+					"subagents_list",
+					"herdr_workflow",
+				],
+			});
 			surface = createSubagentPane(`${candidate.runId}: ${nodeId}`);
 			owner.children.set(id, { controller: childController, surface });
 			await waitForShellReady(surface, { signal: childController.signal });

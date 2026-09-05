@@ -804,7 +804,7 @@ for (const backend of backends) {
 			);
 		});
 
-		it("resumes a Pi session and delivers its new result to the parent", async () => {
+		it("rejects public resume of a legacy Pi session without a saved policy", async () => {
 			const id = uniqueId();
 			const sessionFile = join(env.dir, `resume-child-${id}.jsonl`);
 			const seedSurface = createTrackedSurface(env, `resume-seed-${id}`);
@@ -816,9 +816,18 @@ for (const backend of backends) {
 			assert.equal(await waitForPiExit(seedSurface), 0);
 			assert.equal(existsSync(sessionFile), true);
 
-			const resultMarker = `RESUME_RESULT_${id}`;
+			const parentSession = join(env.dir, `resume-parent-${id}.jsonl`);
 			const parentSurface = createTrackedSurface(env, `resume-parent-${id}`);
 			await waitForPaneReady(parentSurface);
+			const panesBefore = JSON.parse(
+				execFileSync(
+					"herdr",
+					["pane", "list", "--workspace", env.workspaceId],
+					{ encoding: "utf8" },
+				),
+			)
+				.result.panes.map((pane: { pane_id: string }) => pane.pane_id)
+				.sort();
 			startPi(
 				parentSurface,
 				env.dir,
@@ -828,16 +837,79 @@ for (const backend of backends) {
 					`  name: "Resume-${id}"`,
 					`  message: "RESUME_FOLLOWUP_INPUT: ${id}"`,
 					"  autoExit: true",
-					"Call the tool once and wait for its asynchronous result.",
+					"Call the tool once and report its result.",
 				].join("\n"),
+				{ extraArgs: `--session ${shellQuote(parentSession)}` },
 			);
 
-			const screen = await waitForScreen(
-				parentSurface,
-				new RegExp(resultMarker),
+			const transcript = await waitForFile(
+				parentSession,
 				PI_TIMEOUT,
+				/saved launch policy is missing/,
 			);
-			assert.match(screen, new RegExp(resultMarker));
+			assert.match(transcript, /Cannot safely resume/);
+			const panesAfter = JSON.parse(
+				execFileSync(
+					"herdr",
+					["pane", "list", "--workspace", env.workspaceId],
+					{ encoding: "utf8" },
+				),
+			)
+				.result.panes.map((pane: { pane_id: string }) => pane.pane_id)
+				.sort();
+			assert.deepEqual(panesAfter, panesBefore);
+		});
+
+		it("preserves restricted child tools and spawning denial across public resume", async () => {
+			const id = uniqueId();
+			const parentSession = join(
+				env.dir,
+				`resume-restricted-parent-${id}.jsonl`,
+			);
+			const surface = createTrackedSurface(env, `resume-restricted-${id}`);
+			await waitForPaneReady(surface);
+			startPi(surface, env.dir, `INTEGRATION_RESUME_RESTRICTIONS:${id}`, {
+				extraArgs: `--session ${shellQuote(parentSession)}`,
+			});
+
+			await waitForFile(
+				parentSession,
+				PI_TIMEOUT,
+				new RegExp(`RESUME_RESTRICTIONS_COMPLETE_${id}`),
+			);
+			const deadline = Date.now() + PI_TIMEOUT;
+			let results: Array<{ content: string }> = [];
+			while (Date.now() < deadline) {
+				const entries = readFileSync(parentSession, "utf8")
+					.trim()
+					.split("\n")
+					.map((line) => JSON.parse(line));
+				results = entries.filter(
+					(entry) =>
+						entry.type === "custom_message" &&
+						entry.customType === "subagent_result",
+				);
+				if (results.length === 2) break;
+				await sleep(50);
+			}
+			assert.equal(results.length, 2, "each child run delivers one result");
+			assert.match(results[1].content, new RegExp(`RESTRICTED_RESUME_${id}`));
+			assert.doesNotMatch(
+				JSON.stringify(results),
+				new RegExp(`RESTRICTED_TOOL_LEAK_${id}`),
+			);
+			const restrictedRequests = getProviderRequests().filter(
+				(request) =>
+					request.tools?.includes("caller_ping") &&
+					request.tools.includes("read"),
+			);
+			assert.ok(
+				restrictedRequests.length >= 2,
+				"fresh and resumed children both reached the deterministic provider",
+			);
+			for (const request of restrictedRequests) {
+				assert.deepEqual(request.tools, ["caller_ping", "read"]);
+			}
 		});
 
 		// ── Agent discovery ──

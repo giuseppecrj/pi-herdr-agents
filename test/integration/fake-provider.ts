@@ -56,9 +56,12 @@ export const TEST_MODEL = "pi-integration/test";
 export interface ProviderRequest {
 	model?: string;
 	status: number;
+	tools?: string[];
+	lastUser?: string;
 }
 
 const providerRequests: ProviderRequest[] = [];
+const resumeRestrictionStates = new Map<string, "launched" | "resumed">();
 
 export function getProviderRequests(): readonly ProviderRequest[] {
 	return providerRequests;
@@ -66,6 +69,7 @@ export function getProviderRequests(): readonly ProviderRequest[] {
 
 export function resetProviderRequests(): void {
 	providerRequests.length = 0;
+	resumeRestrictionStates.clear();
 }
 
 async function readJson(request: IncomingMessage): Promise<ChatRequest> {
@@ -198,6 +202,64 @@ function btwText(source: string): string | undefined {
 	return undefined;
 }
 
+function resumeRestrictionResponse(request: ChatRequest): ResponsePlan | null {
+	const names = toolNames(request);
+	const source = requestText(request);
+	const user = lastUserText(request);
+	const id = source.match(
+		/INTEGRATION_RESUME_RESTRICTIONS:([A-Za-z0-9_-]+)/,
+	)?.[1];
+	if (!id) return null;
+
+	if (!names.has("subagent") && !names.has("subagent_resume")) {
+		if (user.includes(`RESUME_RESTRICTED_${id}`)) {
+			return names.has("read") &&
+				!names.has("subagent") &&
+				!names.has("subagent_resume")
+				? { text: `RESTRICTED_RESUME_${id}` }
+				: { text: `RESTRICTED_TOOL_LEAK_${id}` };
+		}
+		return { text: `RESTRICTED_FIRST_${id}` };
+	}
+
+	const state = resumeRestrictionStates.get(id);
+	if (state === "resumed") {
+		return { text: `RESUME_RESTRICTIONS_COMPLETE_${id}` };
+	}
+	if (state === "launched") {
+		const sessionPath = source.match(/Session:\s*(\S+\.jsonl)/)?.[1];
+		if (source.includes(`RESTRICTED_FIRST_${id}`) && sessionPath) {
+			resumeRestrictionStates.set(id, "resumed");
+			return {
+				toolCalls: [
+					{
+						name: "subagent_resume",
+						arguments: {
+							sessionPath,
+							name: `Restricted-${id}`,
+							message: `RESUME_RESTRICTED_${id}`,
+						},
+					},
+				],
+			};
+		}
+		return { text: `WAITING_FOR_RESTRICTED_RESULT_${id}` };
+	}
+	resumeRestrictionStates.set(id, "launched");
+	return {
+		toolCalls: [
+			{
+				name: "subagent",
+				arguments: {
+					name: `Restricted-${id}`,
+					agent: "test-restricted",
+					task: `INTEGRATION_RESUME_RESTRICTIONS:${id} Return exactly RESTRICTED_FIRST_${id}`,
+				},
+			},
+		],
+	};
+}
+
 function multiWaveCoordinatorResponse(
 	request: ChatRequest,
 ): ResponsePlan | null {
@@ -267,6 +329,9 @@ async function planResponse(request: ChatRequest): Promise<ResponsePlan> {
 	const source = requestText(request);
 	const user = lastUserText(request);
 	const lastRole = request.messages?.at(-1)?.role;
+
+	const resumeRestriction = resumeRestrictionResponse(request);
+	if (resumeRestriction) return resumeRestriction;
 
 	const multiWave = multiWaveCoordinatorResponse(request);
 	if (multiWave) return multiWave;
@@ -513,7 +578,12 @@ const server = createServer(async (request, response) => {
 			);
 			return;
 		}
-		providerRequests.push({ model: chatRequest.model, status: 200 });
+		providerRequests.push({
+			model: chatRequest.model,
+			status: 200,
+			tools: [...toolNames(chatRequest)].sort(),
+			lastUser: lastUserText(chatRequest),
+		});
 		writeResponse(response, chatRequest, await planResponse(chatRequest));
 	} catch (error) {
 		providerRequests.push({ status: 500 });

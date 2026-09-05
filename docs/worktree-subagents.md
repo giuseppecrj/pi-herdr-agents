@@ -190,11 +190,11 @@ The extension never pushes, creates a PR, merges, cherry-picks, or changes the p
 - **Creation failure:** the manifest is marked failed. If Herdr created the branch but returned an incomplete response, the extension reconciles a unique branch match through `/worktree list` and records any recovered workspace/path.
 - **Launch failure after creation:** the manifest is marked failed and the workspace, forked session, and path are retained. The destination is not focused unless Pi startup is confirmed.
 - **Worker failure:** summary and available Git state are returned; the workspace remains open. Auto-exit waits until Pi is fully settled, so a transient provider error followed by automatic compaction or retry does not end the worker early.
-- **`caller_ping`:** the child exits with `needs_help`; continue worktree-bound follow-up in the retained workspace rather than through `subagent_resume`.
+- **`caller_ping`:** the child exits with `needs_help`; continue worktree-bound follow-up in the retained workspace rather than through `subagent_resume`. Public `subagent_resume` rejects managed-worktree child sessions before creating a pane so it cannot silently lose worktree ownership or policy.
 - **Parent `/reload`, `/new`, `/resume`, or `/fork`:** active in-memory watchers transfer to the replacement parent session.
 - **Full process restart or crash:** the worktree remains, but v1 does not automatically rediscover and resume its watcher.
 
-`subagent_resume` resumes a session in a new ordinary Herdr pane. It does not reattach the managed worktree lifecycle or produce a new worktree handoff. For worktree follow-up, focus the retained workspace and resume manually from its shell:
+`subagent_resume` rejects managed-worktree sessions. It does not reattach the managed worktree lifecycle or produce a new worktree handoff. For worktree follow-up, focus the retained workspace and resume manually from its shell:
 
 ```bash
 herdr workspace focus <workspace-id>

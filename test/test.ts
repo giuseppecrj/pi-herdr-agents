@@ -39,6 +39,9 @@ import {
 	seedSubagentSessionFile,
 	createBtwSessionSnapshot,
 	createWorktreeSessionFork,
+	getSubagentSessionPolicyFile,
+	readSubagentSessionPolicy,
+	writeSubagentSessionPolicy,
 	type SessionEntry,
 } from "../pi-extension/subagents/session.ts";
 
@@ -103,6 +106,7 @@ import {
 	type SubagentLifecycle,
 } from "../pi-extension/subagents/lifecycle.ts";
 import type { PendingWorkflow } from "../pi-extension/subagents/workflow.ts";
+import { launchPiSubagent } from "../pi-extension/subagents/launch.ts";
 
 // Tool-registration behavior is environment-sensitive for child subagents.
 // Isolate the unit suite from inherited parent/child capability variables.
@@ -533,6 +537,61 @@ describe("session.ts", () => {
 		});
 	});
 
+	describe("subagent session policy", () => {
+		it("persists an explicit allowlist separately from unrestricted launches", () => {
+			const restricted = join(dir, "restricted-policy.jsonl");
+			const unrestricted = join(dir, "unrestricted-policy.jsonl");
+			writeSubagentSessionPolicy(restricted, {
+				owner: "public",
+				tools: "read, read, ",
+				deniedTools: ["subagent", "subagent"],
+			});
+			writeSubagentSessionPolicy(unrestricted, {
+				owner: "public",
+				deniedTools: [],
+			});
+
+			assert.deepEqual(readSubagentSessionPolicy(restricted), {
+				version: 1,
+				owner: "public",
+				tools: ["read"],
+				deniedTools: ["subagent"],
+			});
+			assert.equal(readSubagentSessionPolicy(unrestricted).tools, null);
+			assert.equal(existsSync(getSubagentSessionPolicyFile(restricted)), true);
+		});
+
+		it("fails closed for missing, malformed, and unsupported policies", () => {
+			const sessionFile = join(dir, "policy-errors.jsonl");
+			assert.throws(
+				() => readSubagentSessionPolicy(sessionFile),
+				/saved launch policy is missing/,
+			);
+
+			const policyFile = getSubagentSessionPolicyFile(sessionFile);
+			writeFileSync(policyFile, "not json", "utf8");
+			assert.throws(
+				() => readSubagentSessionPolicy(sessionFile),
+				/saved launch policy cannot be read/,
+			);
+
+			writeFileSync(
+				policyFile,
+				JSON.stringify({
+					version: 2,
+					owner: "public",
+					tools: null,
+					deniedTools: [],
+				}),
+				"utf8",
+			);
+			assert.throws(
+				() => readSubagentSessionPolicy(sessionFile),
+				/launch policy version is unsupported/,
+			);
+		});
+	});
+
 	describe("seedSubagentSessionFile", () => {
 		it("creates a lineage-only child session with parent linkage and no copied turns", () => {
 			const parentFile = createSessionFile(dir, [
@@ -899,6 +958,164 @@ describe("session.ts", () => {
 			const targetLines = readFileSync(targetFile, "utf8").trim().split("\n");
 			assert.equal(targetLines.length, 3);
 		});
+	});
+});
+
+describe("subagent resume launch policy", () => {
+	function runtimePlan() {
+		return {
+			provider: "test",
+			modelId: "model",
+			model: "test/model",
+			thinking: "low" as const,
+			modelSource: "request" as const,
+			thinkingSource: "request" as const,
+		};
+	}
+
+	function launchOperations(commands: string[], createPane = () => "pane") {
+		return {
+			createPane,
+			createWorktree() {
+				throw new Error("worktree creation is not expected");
+			},
+			async waitForShellReady() {},
+			runScript(_surface: string, command: string) {
+				commands.push(command);
+				return "/tmp/launch.sh";
+			},
+			closePane() {},
+		};
+	}
+
+	it("snapshots restricted tools and spawning denial for repeated public resumes", async () => {
+		const dir = createTestDir();
+		try {
+			const commands: string[] = [];
+			const parentSession = join(dir, "parent.jsonl");
+			writeFileSync(
+				parentSession,
+				`${JSON.stringify(SESSION_HEADER)}\n`,
+				"utf8",
+			);
+			const fresh = await launchPiSubagent(
+				{
+					kind: "fresh",
+					id: "fresh-id",
+					name: "Restricted",
+					task: "inspect",
+					parent: {
+						cwd: dir,
+						sessionFile: parentSession,
+						sessionId: "parent-id",
+						sessionDir: join(dir, "parent-sessions"),
+						agentDir: join(dir, "agent"),
+					},
+					runtimePlan: runtimePlan(),
+					behavior: {
+						tools: "read",
+						deniedTools: ["subagent", "subagent_resume"],
+						autoExit: true,
+						interactive: false,
+						sessionMode: "standalone",
+					},
+				},
+				launchOperations(commands),
+			);
+			assert.deepEqual(readSubagentSessionPolicy(fresh.sessionFile), {
+				version: 1,
+				owner: "public",
+				tools: ["read"],
+				deniedTools: ["subagent", "subagent_resume"],
+			});
+
+			await launchPiSubagent(
+				{
+					kind: "resume",
+					name: "Restricted",
+					sessionFile: fresh.sessionFile,
+					parent: {
+						sessionId: "parent-id",
+						sessionDir: join(dir, "parent-sessions"),
+					},
+					behavior: { autoExit: false },
+				},
+				launchOperations(commands),
+			);
+			await launchPiSubagent(
+				{
+					kind: "resume",
+					name: "Restricted again",
+					sessionFile: fresh.sessionFile,
+					parent: {
+						sessionId: "parent-id",
+						sessionDir: join(dir, "parent-sessions"),
+					},
+				},
+				launchOperations(commands),
+			);
+
+			assert.match(
+				commands[1],
+				/PI_DENY_TOOLS='subagent,subagent_resume'.*--tools 'read,caller_ping,subagent_done'/,
+			);
+			assert.match(
+				commands[2],
+				/PI_DENY_TOOLS='subagent,subagent_resume'.*--tools 'read,caller_ping'/,
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects absent, malformed, workflow, and worktree policies before pane creation", async () => {
+		const dir = createTestDir();
+		try {
+			const sessionFile = join(dir, "resume.jsonl");
+			let panes = 0;
+			const operations = launchOperations([], () => {
+				panes += 1;
+				return "unexpected-pane";
+			});
+			const resume = () =>
+				launchPiSubagent(
+					{
+						kind: "resume",
+						name: "Resume",
+						sessionFile,
+						parent: { sessionId: "parent-id", sessionDir: dir },
+					},
+					operations,
+				);
+
+			await assert.rejects(resume, /saved launch policy is missing/);
+			writeFileSync(getSubagentSessionPolicyFile(sessionFile), "{", "utf8");
+			await assert.rejects(resume, /saved launch policy cannot be read/);
+			for (const tools of [[], ["read,write"], [" read"]]) {
+				writeFileSync(
+					getSubagentSessionPolicyFile(sessionFile),
+					JSON.stringify({
+						version: 1,
+						owner: "public",
+						tools,
+						deniedTools: [],
+					}),
+					"utf8",
+				);
+				await assert.rejects(resume, /saved launch tool policy is malformed/);
+			}
+			for (const owner of ["workflow", "managed-worktree"] as const) {
+				writeSubagentSessionPolicy(sessionFile, {
+					owner,
+					tools: ["read"],
+					deniedTools: [],
+				});
+				await assert.rejects(resume, new RegExp(`Cannot resume ${owner}`));
+			}
+			assert.equal(panes, 0);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
 

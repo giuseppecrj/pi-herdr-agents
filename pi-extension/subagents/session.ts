@@ -10,7 +10,12 @@ import {
 } from "node:fs";
 import { randomBytes, randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
-import { isString, type JsonValue } from "./type-guards.ts";
+import {
+	isPlainObject,
+	isString,
+	type JsonObject,
+	type JsonValue,
+} from "./type-guards.ts";
 
 export interface SessionEntry {
 	type: string;
@@ -39,6 +44,152 @@ export interface WorktreeSessionFork {
 	sessionFile: string;
 	sourceSessionFile: string;
 	handoffMessage: string;
+}
+
+const SUBAGENT_POLICY_VERSION = 1;
+const SUBAGENT_POLICY_SUFFIX = ".pi-herdr-subagent-policy.json";
+
+export type SubagentSessionOwner = "public" | "managed-worktree" | "workflow";
+
+export interface SubagentSessionPolicy {
+	version: 1;
+	owner: SubagentSessionOwner;
+	/** null deliberately means Pi's unrestricted default tool selection. */
+	tools: string[] | null;
+	deniedTools: string[];
+}
+
+export function getSubagentSessionPolicyFile(sessionFile: string): string {
+	return `${sessionFile}${SUBAGENT_POLICY_SUFFIX}`;
+}
+
+function normalizePolicyToolNames(
+	tools: string | readonly string[] | undefined,
+): string[] | null {
+	const values = isString(tools)
+		? tools.split(",")
+		: tools === undefined
+			? []
+			: [...tools];
+	const normalized = [
+		...new Set(values.map((tool) => tool.trim()).filter(Boolean)),
+	];
+	return normalized.length > 0 ? normalized : null;
+}
+
+export function writeSubagentSessionPolicy(
+	sessionFile: string,
+	policy: Omit<SubagentSessionPolicy, "version" | "tools" | "deniedTools"> & {
+		tools?: string | readonly string[];
+		deniedTools: readonly string[];
+	},
+): void {
+	const value: SubagentSessionPolicy = {
+		version: SUBAGENT_POLICY_VERSION,
+		owner: policy.owner,
+		tools: normalizePolicyToolNames(policy.tools),
+		deniedTools: normalizePolicyToolNames(policy.deniedTools) ?? [],
+	};
+	writeFileSync(
+		getSubagentSessionPolicyFile(sessionFile),
+		`${JSON.stringify(value)}\n`,
+		"utf8",
+	);
+}
+
+function policyError(sessionFile: string, reason: string): Error {
+	return new Error(
+		`Cannot safely resume ${sessionFile}: ${reason}. ` +
+			"Start a new subagent with the required restrictions, or manually resume it only after choosing an explicit Pi tool policy.",
+	);
+}
+
+function isPolicyRecord(value: JsonValue): value is JsonObject {
+	return isPlainObject(value);
+}
+
+export function readSubagentSessionPolicy(
+	sessionFile: string,
+): SubagentSessionPolicy {
+	const path = getSubagentSessionPolicyFile(sessionFile);
+	let value: JsonValue;
+	try {
+		value = JSON.parse(readFileSync(path, "utf8"));
+	} catch (error) {
+		const reason =
+			error instanceof Error && "code" in error && error.code === "ENOENT"
+				? "the saved launch policy is missing"
+				: "the saved launch policy cannot be read";
+		throw policyError(sessionFile, reason);
+	}
+	if (!isPolicyRecord(value))
+		throw policyError(sessionFile, "the saved launch policy is malformed");
+	const expected = new Set(["version", "owner", "tools", "deniedTools"]);
+	if (Object.keys(value).some((key) => !expected.has(key))) {
+		throw policyError(
+			sessionFile,
+			"the saved launch policy has unsupported fields",
+		);
+	}
+	if (value.version !== SUBAGENT_POLICY_VERSION) {
+		throw policyError(
+			sessionFile,
+			"the saved launch policy version is unsupported",
+		);
+	}
+	const owner = value.owner;
+	if (
+		owner !== "public" &&
+		owner !== "managed-worktree" &&
+		owner !== "workflow"
+	) {
+		throw policyError(sessionFile, "the saved launch policy owner is invalid");
+	}
+	const validateTools = (
+		tools: JsonValue | undefined,
+		allowNull: boolean,
+		allowEmpty: boolean,
+	): string[] | null => {
+		if (tools === null) {
+			if (allowNull) return null;
+			throw policyError(
+				sessionFile,
+				"the saved denied-tool policy is malformed",
+			);
+		}
+		if (!Array.isArray(tools)) {
+			throw policyError(
+				sessionFile,
+				"the saved launch tool policy is malformed",
+			);
+		}
+		const names: string[] = [];
+		for (const tool of tools) {
+			if (!isString(tool) || tool === "" || /[,\s]/.test(tool)) {
+				throw policyError(
+					sessionFile,
+					"the saved launch tool policy is malformed",
+				);
+			}
+			names.push(tool);
+		}
+		if (
+			(!allowEmpty && names.length === 0) ||
+			new Set(names).size !== names.length
+		) {
+			throw policyError(
+				sessionFile,
+				"the saved launch tool policy is malformed",
+			);
+		}
+		return names;
+	};
+	const tools = validateTools(value.tools, true, false);
+	const deniedTools = validateTools(value.deniedTools, false, true);
+	if (deniedTools === null) {
+		throw policyError(sessionFile, "the saved denied-tool policy is malformed");
+	}
+	return { version: 1, owner, tools, deniedTools };
 }
 
 function getForkContentLines(parentSessionFile: string): string[] {
