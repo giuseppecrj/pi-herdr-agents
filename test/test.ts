@@ -3882,7 +3882,7 @@ describe("tool registration", () => {
 		assert.match(subagentTool.description, /retain.*parent review/i);
 	});
 
-	it("warns when an effective bundled role normally uses an ordinary pane", async () => {
+	it("warns only when the resolved role is bundled", async () => {
 		const testApi = subagentsModule.__test__;
 		const worktree = { branch: "review/unneeded-worktree" };
 
@@ -3914,6 +3914,97 @@ describe("tool registration", () => {
 				undefined,
 			);
 		});
+
+		await withIsolatedAgentEnv(
+			async ({ projectDir, projectAgentsDir, globalAgentsDir }) => {
+				const namedRolesDir = join(projectDir, "named-pack", "roles");
+				const namelessRolesDir = join(projectDir, "nameless-pack", "roles");
+				mkdirSync(namedRolesDir, { recursive: true });
+				mkdirSync(namelessRolesDir, { recursive: true });
+				writeFileSync(
+					join(namedRolesDir, "..", "package.json"),
+					JSON.stringify({ name: "@acme/writing-roles" }),
+				);
+				writeAgentFile(
+					namedRolesDir,
+					"scout",
+					"description: Writing scout\ntools: write",
+				);
+				writeAgentFile(
+					namelessRolesDir,
+					"reviewer",
+					"description: Writing reviewer\ntools: write",
+				);
+				writeAgentFile(
+					namelessRolesDir,
+					"adversarial-reviewer",
+					"description: Writing adversarial reviewer\ntools: write",
+				);
+
+				const { api } = createMockExtensionApi();
+				api.events.on(
+					"pi-herdr-subagents:roles:discover:v1",
+					(request: { register(path: string): void }) => {
+						request.register(namedRolesDir);
+						request.register(namelessRolesDir);
+					},
+				);
+				const disabled = { bundled: false };
+				for (const agent of ["scout", "reviewer", "adversarial-reviewer"]) {
+					assert.equal(
+						testApi.resolveWorktreeLaunchWarning(
+							{ agent, worktree },
+							api,
+							disabled,
+						),
+						undefined,
+					);
+				}
+
+				writeAgentFile(
+					globalAgentsDir,
+					"scout",
+					"description: Global writing scout\ntools: write",
+				);
+				writeAgentFile(
+					projectAgentsDir,
+					"reviewer",
+					"description: Project writing reviewer\ntools: write",
+				);
+				assert.equal(
+					testApi.resolveWorktreeLaunchWarning(
+						{ agent: "scout", worktree },
+						api,
+						disabled,
+					),
+					undefined,
+				);
+				assert.equal(
+					testApi.resolveWorktreeLaunchWarning(
+						{ agent: "reviewer", worktree },
+						api,
+						disabled,
+					),
+					undefined,
+				);
+				assert.equal(
+					testApi.resolveWorktreeLaunchWarning(
+						{ agent: "unknown", worktree },
+						api,
+						disabled,
+					),
+					undefined,
+				);
+				assert.equal(
+					testApi.resolveWorktreeLaunchWarning(
+						{ agent: "scout" },
+						api,
+						disabled,
+					),
+					undefined,
+				);
+			},
+		);
 	});
 
 	it("renders partial subagent tool-call args without throwing", () => {

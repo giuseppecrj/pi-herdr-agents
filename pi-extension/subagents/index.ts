@@ -889,12 +889,14 @@ const BUNDLED_WORKTREE_WARNINGS = {
 function resolveWorktreeLaunchWarning(
 	params: Pick<Static<typeof SubagentParams>, "agent" | "worktree">,
 	pi?: Pick<ExtensionAPI, "events">,
+	roleConfig?: RoleConfig,
 ): string | undefined {
 	if (!params.worktree || !params.agent) return undefined;
 	const warning = Object.entries(BUNDLED_WORKTREE_WARNINGS).find(
 		([agent]) => agent === params.agent,
 	)?.[1];
-	return warning && loadAgentDefaults(params.agent, pi)?.source === "package"
+	const definition = loadAgentDefaults(params.agent, pi, roleConfig);
+	return warning && dirname(definition?.path ?? "") === getBundledAgentsDir()
 		? warning
 		: undefined;
 }
