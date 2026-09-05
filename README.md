@@ -301,11 +301,15 @@ cp config.json.example config.json
   },
   "roles": {
     "bundled": true
+  },
+  "panes": {
+    "mode": "tab",
+    "direction": "right"
   }
 }
 ```
 
-If `config.json` is absent, status and role settings fall back to `config.json.example`.
+If `config.json` is absent, status, role, and pane settings fall back to `config.json.example`.
 Model routing does not read the example: no model overrides apply until a real
 `config.json` exists.
 
@@ -325,7 +329,11 @@ exact IDs from your authenticated model catalog:
 }
 ```
 
-Set `roles.bundled` to `false` to exclude this package's bundled role definitions from listing and exact-name launch. It defaults to `true`. Registered role packs remain available, and global and project definitions keep their existing precedence. A role-pack name collides with a bundled role only while that bundled layer is enabled; when it is disabled, the role pack can supply that name. Run `/reload` after changing this setting.
+Set `roles.bundled` to `false` to exclude this package's bundled role definitions from listing and exact-name launch. It defaults to `true`. Registered role packs remain available, and global and project definitions keep their existing precedence. A role-pack name collides with a bundled role only while that bundled layer is enabled; when it is disabled, the role pack can supply that name.
+
+Set `panes.mode` to `"split"` to open ordinary public `subagent` and `subagent_resume` launches, including bare forks and `/iterate`, as splits of the stable parent pane. Set `panes.direction` to `"right"` or `"down"`; it defaults to `"right"` and is ignored when mode is `"tab"`. The default `"tab"` mode preserves existing behavior. Managed worktrees still use separate workspaces, while approved workflow readers and `/btw` keep their existing tab behavior.
+
+Run `/reload` after changing role, model, or pane settings.
 
 `models.default` sets the model for subagents that do not specify a model.
 `models.agents` sets per-agent defaults, keyed by the agent name passed to
@@ -344,7 +352,7 @@ only, to keep approved workflow runtimes deterministic.
 `config.json` is gitignored in the source tree so local overrides are not
 committed from a checkout. On an installed package root, treat it as disposable
 local state that package updates may replace. Run `/reload` after changing it;
-status and model configuration are loaded when the extension starts.
+status, model, role, and pane configuration are loaded when the extension starts.
 
 ---
 

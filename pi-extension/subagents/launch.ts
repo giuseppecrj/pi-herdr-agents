@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { getSubagentActivityFile } from "./activity.ts";
 import { createLifecycle, type SubagentLifecycle } from "./lifecycle.ts";
 import type { ResolvedRuntimePlan } from "./runtime-routing.ts";
+import { createSubagentPaneFactory, loadPaneConfig } from "./pane-config.ts";
 import { HerdrWorktreeCreateError } from "./herdr.ts";
 import type { JsonObject } from "./type-guards.ts";
 import {
@@ -22,6 +23,7 @@ import {
 	closePane,
 	createSubagentPane,
 	createSubagentWorktree,
+	splitCurrentPane,
 	runScriptInPane,
 	shellQuote,
 	waitForPiReady,
@@ -161,8 +163,14 @@ export interface PiLaunchOperations {
 	focusWorkspace?(workspaceId: string): void;
 }
 
+const paneConfig = loadPaneConfig();
+
 const defaultOperations: PiLaunchOperations = {
-	createPane: createSubagentPane,
+	createPane: createSubagentPaneFactory(
+		paneConfig,
+		createSubagentPane,
+		splitCurrentPane,
+	),
 	createWorktree: createSubagentWorktree,
 	waitForShellReady,
 	runScript: runScriptInPane,

@@ -18,7 +18,9 @@ import {
 	createTestEnv,
 	cleanupTestEnv,
 	createTrackedSurface,
+	createSubagentPane,
 	createSubagentWorktree,
+	splitCurrentPane,
 	getFocusedSurface,
 	untrackSurface,
 	runInPane,
@@ -32,6 +34,10 @@ import {
 	waitForScreen,
 	type TestEnv,
 } from "./harness.ts";
+import {
+	createSubagentPaneFactory,
+	parsePaneConfig,
+} from "../../pi-extension/subagents/pane-config.ts";
 
 const backends = getAvailableBackends();
 
@@ -80,6 +86,56 @@ for (const backend of backends) {
 				waitForScreen(childB, new RegExp(`FOCUS_B_${markerB}`), 20_000, 50),
 			]);
 			assert.equal(getFocusedSurface(backend), focusedPane);
+		});
+
+		it("splits the stable parent without stealing focus or closing it", async () => {
+			const parentPane = createTrackedSurface(env, "split-parent");
+			await waitForPaneReady(parentPane);
+			const focusedPane = getFocusedSurface(backend);
+			const parentBefore = JSON.parse(
+				execFileSync("herdr", ["pane", "get", parentPane], {
+					encoding: "utf8",
+				}),
+			).result.pane;
+			const createConfiguredPane = createSubagentPaneFactory(
+				parsePaneConfig({ panes: { mode: "split", direction: "down" } }),
+				createSubagentPane,
+				splitCurrentPane,
+			);
+			const previousParentPane = process.env.HERDR_PANE_ID;
+			let child: string | undefined;
+			try {
+				process.env.HERDR_PANE_ID = parentPane;
+				child = createConfiguredPane("split-child");
+			} finally {
+				if (previousParentPane === undefined) delete process.env.HERDR_PANE_ID;
+				else process.env.HERDR_PANE_ID = previousParentPane;
+			}
+
+			try {
+				await waitForPaneReady(child);
+				const childInfo = JSON.parse(
+					execFileSync("herdr", ["pane", "get", child], {
+						encoding: "utf8",
+					}),
+				).result.pane;
+				assert.notEqual(childInfo.pane_id, parentPane);
+				assert.equal(childInfo.tab_id, parentBefore.tab_id);
+				assert.equal(getFocusedSurface(backend), focusedPane);
+
+				const marker = uniqueId();
+				runInPane(child, `echo "SPLIT_${marker}"`);
+				await waitForScreen(child, new RegExp(`SPLIT_${marker}`), 20_000, 50);
+			} finally {
+				closePane(child);
+			}
+
+			const parentAfter = JSON.parse(
+				execFileSync("herdr", ["pane", "get", parentPane], {
+					encoding: "utf8",
+				}),
+			).result.pane;
+			assert.equal(parentAfter.pane_id, parentPane);
 		});
 
 		it("creates an isolated worktree workspace without stealing focus", async () => {

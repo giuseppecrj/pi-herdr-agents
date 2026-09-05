@@ -31,6 +31,7 @@ import {
 	isTerminalAvailable,
 	createSubagentPane,
 	createSubagentWorktree,
+	splitCurrentPane,
 	runInPane,
 	runScriptInPane,
 	readPane,
@@ -46,6 +47,7 @@ type MuxBackend = "herdr";
 export {
 	createSubagentPane,
 	createSubagentWorktree,
+	splitCurrentPane,
 	runInPane,
 	runScriptInPane,
 	readPane,
