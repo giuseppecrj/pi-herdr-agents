@@ -1,6 +1,11 @@
 {
   "files": {
-    "includes": ["pi-extension/**", "test/**", "!**/*.md"]
+    "includes": [
+      "pi-extension/**",
+      "test/**",
+      "skills/orchestrate/adversarial-review-example.js",
+      "!**/*.md"
+    ]
   },
   "formatter": {
     "enabled": true

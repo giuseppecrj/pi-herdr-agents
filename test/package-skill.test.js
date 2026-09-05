@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+const biomeConfig = JSON.parse(readFileSync(join(root, "biome.json"), "utf8"));
 const skill = readFileSync(
 	join(root, "skills", "orchestrate", "SKILL.md"),
 	"utf8",
@@ -58,6 +59,22 @@ describe("production package manifest", () => {
 });
 
 describe("bundled orchestration skill", () => {
+	it("checks the shipped review helper", () => {
+		assert.ok(
+			biomeConfig.files?.includes.includes(
+				"skills/orchestrate/adversarial-review-example.js",
+			),
+			"missing shipped helper from Biome coverage",
+		);
+		for (const script of ["format", "format:check", "lint"]) {
+			assert.match(
+				manifest.scripts?.[script] ?? "",
+				/skills\/orchestrate\/adversarial-review-example\.js/,
+				`missing shipped helper from ${script}`,
+			);
+		}
+	});
+
 	it("is exposed with the extension in the installed package", () => {
 		assert.deepEqual(manifest.pi?.skills, ["./skills"]);
 		assert.deepEqual(manifest.pi?.extensions, [
