@@ -19,6 +19,7 @@ import {
 	seedSubagentSessionFile,
 } from "./session.ts";
 import {
+	closePane,
 	createSubagentPane,
 	createSubagentWorktree,
 	runScriptInPane,
@@ -151,6 +152,7 @@ export interface PiLaunchOperations {
 		command: string,
 		options: { scriptPath: string; scriptPreamble: string },
 	): string;
+	closePane(pane: string): void;
 	waitForPiReady?(
 		surface: string,
 		sessionFile: string,
@@ -164,6 +166,7 @@ const defaultOperations: PiLaunchOperations = {
 	createWorktree: createSubagentWorktree,
 	waitForShellReady,
 	runScript: runScriptInPane,
+	closePane,
 	waitForPiReady,
 	focusWorkspace,
 };
@@ -243,9 +246,10 @@ async function launchFreshPiSubagent(
 	operations: PiLaunchOperations,
 ): Promise<PiRunningChild> {
 	const resolved = resolveLaunchRequest(request);
-	const surface = prepareLaunchSurface(resolved, operations);
+	let surface: PreparedSurface | undefined;
 
 	try {
+		surface = prepareLaunchSurface(resolved, operations);
 		const session = prepareChildSession(resolved, surface);
 		const handoffArtifacts = request.handoff
 			? prepareTaskArtifacts(resolved, session)
@@ -275,7 +279,17 @@ async function launchFreshPiSubagent(
 		}
 		return createRunningChild(resolved, artifacts, launchScriptFile);
 	} catch (error) {
-		if (!surface.worktree) throw error;
+		if (!surface) throw error;
+		if (!surface.worktree) {
+			if (!request.surface) {
+				try {
+					operations.closePane(surface.surface);
+				} catch {
+					// The launch error remains authoritative when cleanup also fails.
+				}
+			}
+			throw error;
+		}
 		const handoff = captureWorktreeHandoff(surface.worktree);
 		try {
 			persistWorktreeResult(surface.worktree, "failed", handoff);
@@ -673,73 +687,82 @@ async function launchResumedPiSubagent(
 		request.parent.sessionId,
 	);
 	const surface = operations.createPane(request.name);
-	await operations.waitForShellReady(surface);
-	const activityFile = getSubagentActivityFile(artifactDir, id);
-	mkdirSync(dirname(activityFile), { recursive: true });
+	try {
+		await operations.waitForShellReady(surface);
+		const activityFile = getSubagentActivityFile(artifactDir, id);
+		mkdirSync(dirname(activityFile), { recursive: true });
 
-	let messageFile: string | undefined;
-	if (request.message) {
-		messageFile = join(
-			artifactDir,
-			"subagent-resume",
-			`${safeName(request.name) || "resume"}-${timestampForFile(false)}.md`,
-		);
-		mkdirSync(dirname(messageFile), { recursive: true });
-		writeFileSync(messageFile, request.message, "utf8");
-	}
-
-	const env = [
-		...(process.env.PI_CODING_AGENT_DIR
-			? [`PI_CODING_AGENT_DIR=${shellQuote(process.env.PI_CODING_AGENT_DIR)}`]
-			: []),
-		`PI_SUBAGENT_NAME=${shellQuote(request.name)}`,
-		`PI_SUBAGENT_SESSION=${shellQuote(request.sessionFile)}`,
-		`PI_SUBAGENT_ID=${shellQuote(id)}`,
-		`PI_SUBAGENT_ACTIVITY_FILE=${shellQuote(activityFile)}`,
-		`PI_SUBAGENT_AUTO_EXIT=${autoExit ? "1" : "0"}`,
-	];
-	const command = [
-		...env,
-		"pi",
-		"--session",
-		shellQuote(request.sessionFile),
-		"-e",
-		shellQuote(join(SUBAGENTS_DIR, "subagent-done.ts")),
-		...(messageFile ? [shellQuote(`@${messageFile}`)] : []),
-	].join(" ");
-	const launchScriptFile = operations.runScript(
-		surface,
-		`${command}; echo '__SUBAGENT_DONE_'$?'__'`,
-		{
-			scriptPath: join(
+		let messageFile: string | undefined;
+		if (request.message) {
+			messageFile = join(
 				artifactDir,
-				"subagent-scripts",
-				`${safeName(request.name) || "resume"}-resume-${Date.now()}.sh`,
-			),
-			scriptPreamble: [
-				shellComment(`Subagent resume script for ${request.name}`),
-				shellComment(`Generated: ${new Date().toISOString()}`),
-				shellComment(`Session: ${request.sessionFile}`),
-				shellComment(`Surface: ${surface}`),
-				...(messageFile
-					? [shellComment(`Resume message file: ${messageFile}`)]
-					: []),
-			].join("\n"),
-		},
-	);
-	return {
-		id,
-		name: request.name,
-		task: request.message ?? "resumed session",
-		surface,
-		startTime,
-		sessionFile: request.sessionFile,
-		launchScriptFile,
-		activityFile,
-		interactive,
-		runtimePlan: undefined,
-		lifecycle: createLifecycle(startTime),
-	};
+				"subagent-resume",
+				`${safeName(request.name) || "resume"}-${timestampForFile(false)}.md`,
+			);
+			mkdirSync(dirname(messageFile), { recursive: true });
+			writeFileSync(messageFile, request.message, "utf8");
+		}
+
+		const env = [
+			...(process.env.PI_CODING_AGENT_DIR
+				? [`PI_CODING_AGENT_DIR=${shellQuote(process.env.PI_CODING_AGENT_DIR)}`]
+				: []),
+			`PI_SUBAGENT_NAME=${shellQuote(request.name)}`,
+			`PI_SUBAGENT_SESSION=${shellQuote(request.sessionFile)}`,
+			`PI_SUBAGENT_ID=${shellQuote(id)}`,
+			`PI_SUBAGENT_ACTIVITY_FILE=${shellQuote(activityFile)}`,
+			`PI_SUBAGENT_AUTO_EXIT=${autoExit ? "1" : "0"}`,
+		];
+		const command = [
+			...env,
+			"pi",
+			"--session",
+			shellQuote(request.sessionFile),
+			"-e",
+			shellQuote(join(SUBAGENTS_DIR, "subagent-done.ts")),
+			...(messageFile ? [shellQuote(`@${messageFile}`)] : []),
+		].join(" ");
+		const launchScriptFile = operations.runScript(
+			surface,
+			`${command}; echo '__SUBAGENT_DONE_'$?'__'`,
+			{
+				scriptPath: join(
+					artifactDir,
+					"subagent-scripts",
+					`${safeName(request.name) || "resume"}-resume-${Date.now()}.sh`,
+				),
+				scriptPreamble: [
+					shellComment(`Subagent resume script for ${request.name}`),
+					shellComment(`Generated: ${new Date().toISOString()}`),
+					shellComment(`Session: ${request.sessionFile}`),
+					shellComment(`Surface: ${surface}`),
+					...(messageFile
+						? [shellComment(`Resume message file: ${messageFile}`)]
+						: []),
+				].join("\n"),
+			},
+		);
+		return {
+			id,
+			name: request.name,
+			task: request.message ?? "resumed session",
+			surface,
+			startTime,
+			sessionFile: request.sessionFile,
+			launchScriptFile,
+			activityFile,
+			interactive,
+			runtimePlan: undefined,
+			lifecycle: createLifecycle(startTime),
+		};
+	} catch (error) {
+		try {
+			operations.closePane(surface);
+		} catch {
+			// The launch error remains authoritative when cleanup also fails.
+		}
+		throw error;
+	}
 }
 
 export function buildSubagentToolAllowlist(

@@ -186,6 +186,7 @@ The extension never pushes, creates a PR, merges, cherry-picks, or changes the p
 
 ## Failure, help, and restart behavior
 
+- **Ordinary launch failure:** if a fresh launch or `subagent_resume` fails after the extension creates its pane, the extension closes that pane and preserves the original launch error. It does not close a caller-supplied surface.
 - **Creation failure:** the manifest is marked failed. If Herdr created the branch but returned an incomplete response, the extension reconciles a unique branch match through `/worktree list` and records any recovered workspace/path.
 - **Launch failure after creation:** the manifest is marked failed and the workspace, forked session, and path are retained. The destination is not focused unless Pi startup is confirmed.
 - **Worker failure:** summary and available Git state are returned; the workspace remains open. Auto-exit waits until Pi is fully settled, so a transient provider error followed by automatic compaction or retry does not end the worker early.
