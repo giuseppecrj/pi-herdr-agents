@@ -478,6 +478,8 @@ Parameters:
 - If process identity cannot be captured for an active pane, the pane remains present after close, or any captured process still lives after the bounded wait, the checkout is retained and the run ends `failed` with `cancel_termination_failed`. Successful cancellation is not reported in that case.
 - A successful cancel writes one `cancelled` terminal journal event and one result-free delivery. Repeated cancel is idempotent and returns the authoritative terminal outcome (including a prior fail-closed result).
 
+Every terminal path—normal completion, early script return, script or Worker failure, deadline, interruption, and explicit cancellation—stops queued work and accounts for active workflow children before checkout disposal or final delivery. If active-child exit cannot be confirmed, the checkout is retained and the authoritative outcome is `failed` with `cancel_termination_failed`.
+
 There is no list, status, resume, or history action in v1. Workflow ownership and the Worker survive `/reload` in the same Pi process, and the latest parent API receives one final delivery. A full process restart reconciles interruption without replay: startup marks only the last known running journal event as `interrupted`, leaves sessions, journals, and reader checkouts in place, and requires a new approved run.
 
 ### Bundled `orchestrate` skill
@@ -490,7 +492,7 @@ The script and journal retain every original child envelope. Synthesis receives 
 
 The runner-owned checkout contains only the pinned commit. Parent staged, unstaged, and untracked state is not review evidence. Effective child tools are the resolved role allowlist intersected with the runner maximum (`read`, `grep`, `find`, and `ls`) and deny rules. Public `subagent` results can be abbreviated above 16,000 characters, but workflow scripts receive complete child reports within their explicit bounds. Operational failures are preserved without silent fallback; recovery is a new exact approved run.
 
-The parent calls `herdr_workflow prepare`, presents its packet unchanged, and waits for the exact `APPROVE <8-character lowercase hash prefix>` reply before calling `start`. After start, one final delivery is sent without polling. Cancellation is fail-closed and retains evidence when process exit cannot be confirmed. Same-process `/reload` preserves ownership; full restart records interruption without replay, restart, cleanup, or history. Workflow JavaScript runs in a Worker-hosted `vm` for event-loop availability only; neither the Worker nor `vm` is a security boundary, and worktrees do not provide process or security isolation.
+The parent calls `herdr_workflow prepare`, presents its packet unchanged, and waits for the exact `APPROVE <8-character lowercase hash prefix>` reply before calling `start`. After start, one final delivery is sent without polling. Every terminal path is fail-closed: it accounts for queued and active children before checkout disposal and delivery, retaining evidence when process exit cannot be confirmed. Same-process `/reload` preserves ownership; full restart records interruption without replay, restart, cleanup, or history. Workflow JavaScript runs in a Worker-hosted `vm` for event-loop availability only; neither the Worker nor `vm` is a security boundary, and worktrees do not provide process or security isolation.
 
 ---
 

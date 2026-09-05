@@ -1399,6 +1399,72 @@ describe("workflow preparation", () => {
 		});
 	});
 
+	it("accounts for active agents before every non-cancel terminal outcome", async () => {
+		const baseSha = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], {
+			encoding: "utf8",
+		}).trim();
+		const cases = [
+			{
+				name: "early return",
+				body: "agent('review', { kind: 'review', role: 'reviewer' });\nreturn { early: true };\n",
+				state: "completed",
+			},
+			{
+				name: "workflow exception",
+				body: "agent('review', { kind: 'review', role: 'reviewer' });\nthrow new Error('boom');\n",
+				state: "failed",
+			},
+			{
+				name: "deadline",
+				body: "return await agent('review', { kind: 'review', role: 'reviewer' });\n",
+				state: "failed",
+				deadlineMs: 100,
+			},
+			{
+				name: "Worker exit",
+				body: "agent('review', { kind: 'review', role: 'reviewer' });\nagent.constructor('return process')().exit(1);\n",
+				state: "failed",
+			},
+		] as const;
+		for (const testCase of cases) {
+			const candidate = prepare(
+				root,
+				writeWorkflow(
+					root,
+					workflow(baseSha) + testCase.body,
+					`terminal-${testCase.name.replace(" ", "-")}`,
+				),
+			);
+			let resolveAgent!: () => void;
+			let active = false;
+			let settled = false;
+			const terminalStates: string[] = [];
+			const result = await executeWorkflow(candidate, {
+				deadlineMs: "deadlineMs" in testCase ? testCase.deadlineMs : 1_000,
+				onAgent: () =>
+					new Promise((resolve) => {
+						active = true;
+						resolveAgent = () => {
+							settled = true;
+							resolve({ ok: true, value: "late" });
+						};
+					}),
+				onTerminal: async (outcome) => {
+					terminalStates.push(outcome.state);
+					assert.equal(
+						active,
+						true,
+						`${testCase.name} must see its active agent`,
+					);
+					resolveAgent();
+				},
+			});
+			assert.equal(result.state, testCase.state, testCase.name);
+			assert.deepEqual(terminalStates, [testCase.state], testCase.name);
+			assert.equal(settled, true, testCase.name);
+		}
+	});
+
 	it("preserves failed review evidence for synthesis and an incomplete task result", async () => {
 		const baseSha = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], {
 			encoding: "utf8",

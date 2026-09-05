@@ -67,6 +67,7 @@ import {
 	recoverWorkflowStartup,
 	sameWorkflowCandidate,
 	validateWorkflowApproval,
+	type CancelTerminationResult,
 	type PendingWorkflow,
 	type WorkflowReaderCheckout,
 	type WorkflowRole,
@@ -1239,6 +1240,7 @@ interface WorkflowOwner {
 	checkout?: string;
 	journal?: ReturnType<typeof createWorkflowJournal>;
 	cancelPromise?: Promise<WorkflowTerminalOutcome>;
+	termination?: CancelTerminationResult;
 }
 
 interface WorkflowCancelHooks {
@@ -2713,6 +2715,118 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			runtime.activeWorkflow = undefined;
 		return outcome;
 	};
+	const terminateWorkflowChildren = async (
+		owner: WorkflowOwner,
+		options: WorkflowCancelHooks = {},
+	): Promise<CancelTerminationResult> => {
+		const hooks = { ...runtime.workflowCancelHooks, ...options };
+		const getProcessInfo = hooks.getProcessInfo ?? getPaneProcessInfo;
+		const closeSurface = hooks.closeSurface ?? closePane;
+		const waitAbsence = hooks.waitAbsence ?? waitForPaneAbsence;
+		const waitExit = hooks.waitExit ?? waitForProcessesExit;
+		try {
+			owner.controller.abort();
+			const children = [...owner.children.values()];
+			const captured: Array<{
+				surface?: string;
+				pids: number[];
+				identityUnconfirmed: boolean;
+			}> = [];
+			for (const child of children) {
+				child.controller.abort();
+				const pids: number[] = [];
+				let identityUnconfirmed = false;
+				if (child.surface) {
+					try {
+						const info = getProcessInfo(child.surface);
+						pids.push(...info.pids);
+						owner.journal?.append("cancel_process_info", {
+							surface: child.surface,
+							pids: info.pids,
+						});
+						if (info.pids.length === 0) identityUnconfirmed = true;
+					} catch (error) {
+						identityUnconfirmed = true;
+						owner.journal?.append("cancel_process_info_failed", {
+							surface: child.surface,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+				}
+				captured.push({
+					surface: child.surface,
+					pids,
+					identityUnconfirmed,
+				});
+			}
+			for (const child of captured) {
+				if (!child.surface) continue;
+				try {
+					closeSurface(child.surface);
+				} catch (error) {
+					owner.journal?.append("pane_close_failed", {
+						surface: child.surface,
+						error: error instanceof Error ? error.message : String(error),
+					});
+				}
+			}
+			const surviving: number[] = [];
+			let identityUnconfirmed = false;
+			for (const child of captured) {
+				if (child.identityUnconfirmed) identityUnconfirmed = true;
+				if (child.surface) {
+					const gone = await waitAbsence(child.surface, {
+						timeoutMs: 5_000,
+						intervalMs: 50,
+					});
+					if (!gone) {
+						identityUnconfirmed = true;
+						owner.journal?.append("cancel_pane_still_present", {
+							surface: child.surface,
+						});
+					}
+				}
+				if (child.pids.length > 0) {
+					surviving.push(
+						...(await waitExit(child.pids, {
+							timeoutMs: 5_000,
+							intervalMs: 50,
+						})),
+					);
+				}
+			}
+			const uniqueSurvivors = [...new Set(surviving)];
+			const termination = cancelTerminationResult(
+				uniqueSurvivors,
+				owner.checkout,
+				{ identityUnconfirmed },
+			);
+			if (termination.retainCheckout && owner.checkout) {
+				owner.journal?.append("reader_checkout_retained", {
+					path: owner.checkout,
+					reason: "cancel_termination_failed",
+					survivingPids: uniqueSurvivors,
+					identityUnconfirmed,
+				});
+			}
+			owner.termination = termination;
+			return termination;
+		} catch (error) {
+			const termination = cancelTerminationResult([], owner.checkout, {
+				identityUnconfirmed: true,
+			});
+			termination.outcome.error!.message =
+				error instanceof Error ? error.message : String(error);
+			if (owner.checkout) {
+				owner.journal?.append("reader_checkout_retained", {
+					path: owner.checkout,
+					reason: "cancel_termination_failed",
+				});
+			}
+			owner.termination = termination;
+			return termination;
+		}
+	};
 	const cancelWorkflow = async (
 		owner: WorkflowOwner,
 		options: WorkflowCancelHooks = {},
@@ -2748,127 +2862,23 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		});
 		owner.cancelPromise = deferred;
 
-		const hooks = { ...runtime.workflowCancelHooks, ...options };
-		const getProcessInfo = hooks.getProcessInfo ?? getPaneProcessInfo;
-		const closeSurface = hooks.closeSurface ?? closePane;
-		const waitAbsence = hooks.waitAbsence ?? waitForPaneAbsence;
-		const waitExit = hooks.waitExit ?? waitForProcessesExit;
 		void (async () => {
-			try {
-				owner.controller.abort();
-				const children = [...owner.children.values()];
-				const captured: Array<{
-					surface?: string;
-					pids: number[];
-					identityUnconfirmed: boolean;
-				}> = [];
-				for (const child of children) {
-					child.controller.abort();
-					const pids: number[] = [];
-					let identityUnconfirmed = false;
-					if (child.surface) {
-						try {
-							const info = getProcessInfo(child.surface);
-							pids.push(...info.pids);
-							owner.journal?.append("cancel_process_info", {
-								surface: child.surface,
-								pids: info.pids,
-								shellPid: info.shellPid,
-								foregroundProcessGroupId: info.foregroundProcessGroupId,
-							});
-							// Active panes with no waitable PIDs lack exit proof.
-							if (info.pids.length === 0) identityUnconfirmed = true;
-						} catch (error) {
-							identityUnconfirmed = true;
-							owner.journal?.append("cancel_process_info_failed", {
-								surface: child.surface,
-								error: error instanceof Error ? error.message : String(error),
-							});
-						}
-					}
-					captured.push({
-						surface: child.surface,
-						pids,
-						identityUnconfirmed,
-					});
-				}
-				for (const child of captured) {
-					if (!child.surface) continue;
-					try {
-						closeSurface(child.surface);
-					} catch (error) {
-						owner.journal?.append("pane_close_failed", {
-							surface: child.surface,
-							error: error instanceof Error ? error.message : String(error),
-						});
-					}
-				}
-				const surviving: number[] = [];
-				let identityUnconfirmed = false;
-				for (const child of captured) {
-					if (child.identityUnconfirmed) identityUnconfirmed = true;
-					if (child.surface) {
-						const gone = await waitAbsence(child.surface, {
-							timeoutMs: 5_000,
-							intervalMs: 50,
-						});
-						if (!gone) {
-							// Pane still present after close: treat as unconfirmed termination.
-							identityUnconfirmed = true;
-							owner.journal?.append("cancel_pane_still_present", {
-								surface: child.surface,
-							});
-						}
-					}
-					if (child.pids.length > 0) {
-						surviving.push(
-							...(await waitExit(child.pids, {
-								timeoutMs: 5_000,
-								intervalMs: 50,
-							})),
-						);
-					}
-				}
-				const uniqueSurvivors = [...new Set(surviving)];
-				const termination = cancelTerminationResult(
-					uniqueSurvivors,
-					owner.checkout,
-					{ identityUnconfirmed },
-				);
-				let checkoutResult: WorkflowReaderCheckout | undefined =
-					termination.checkout;
-				if (termination.retainCheckout) {
-					if (owner.checkout) {
-						owner.journal?.append("reader_checkout_retained", {
-							path: owner.checkout,
-							reason: "cancel_termination_failed",
-							survivingPids: uniqueSurvivors,
-							identityUnconfirmed,
-						});
-					}
-					settle(finalizeWorkflow(owner, termination.outcome, checkoutResult));
-					return;
-				}
-				if (owner.checkout && owner.journal) {
-					checkoutResult = disposeWorkflowReaderCheckout(
-						owner.candidate,
-						owner.checkout,
-						owner.journal,
-					);
-					owner.checkout = undefined;
-				}
+			const termination = await terminateWorkflowChildren(owner, options);
+			let checkoutResult: WorkflowReaderCheckout | undefined =
+				termination.checkout;
+			if (termination.retainCheckout) {
 				settle(finalizeWorkflow(owner, termination.outcome, checkoutResult));
-			} catch (error) {
-				settle(
-					finalizeWorkflow(owner, {
-						state: "failed",
-						error: {
-							code: "cancel_termination_failed",
-							message: error instanceof Error ? error.message : String(error),
-						},
-					}),
-				);
+				return;
 			}
+			if (owner.checkout && owner.journal) {
+				checkoutResult = disposeWorkflowReaderCheckout(
+					owner.candidate,
+					owner.checkout,
+					owner.journal,
+				);
+				owner.checkout = undefined;
+			}
+			settle(finalizeWorkflow(owner, termination.outcome, checkoutResult));
 		})();
 		return deferred;
 	};
@@ -2889,6 +2899,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					owner.worker = worker;
 				},
 				onLog: (message) => journal.append("workflow_log", { message }),
+				onTerminal: async () => {
+					if (owner.gate.phase !== "running") {
+						if (owner.cancelPromise) await owner.cancelPromise;
+						return undefined;
+					}
+					const termination = await terminateWorkflowChildren(owner);
+					return termination.retainCheckout
+						? { state: "failed" as const, error: termination.outcome.error! }
+						: undefined;
+				},
 				onAgent: async (prompt, options) => {
 					const result = await runWorkflowAgent(
 						owner,
@@ -2920,7 +2940,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			if (owner.cancelPromise) await owner.cancelPromise;
 			return;
 		}
-		let checkoutResult: WorkflowReaderCheckout | undefined;
+		let checkoutResult = owner.termination?.checkout;
+		if (owner.termination?.retainCheckout) {
+			finalizeWorkflow(owner, execution, checkoutResult);
+			return;
+		}
 		if (owner.checkout) {
 			checkoutResult = disposeWorkflowReaderCheckout(
 				candidate,
