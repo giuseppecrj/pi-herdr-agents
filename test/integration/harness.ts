@@ -252,7 +252,14 @@ export function createTestEnv(backend: MuxBackend): TestEnv {
 	process.env.HERDR_WORKSPACE_ID = workspaceId;
 	mkdirSync(agentsDir, { recursive: true });
 	if (USE_TEST_PROVIDER) {
-		mkdirSync(agentDir, { recursive: true });
+		// Nested coordinator children use automatic extension discovery. Point the
+		// isolated agent home at this worktree instead of an installed snapshot.
+		mkdirSync(join(agentDir, "extensions"), { recursive: true });
+		writeFileSync(
+			join(agentDir, "extensions", "subagents.ts"),
+			`export { default } from ${JSON.stringify(EXTENSION_SOURCE)};\n`,
+			"utf8",
+		);
 		writeTestProviderConfig(agentDir);
 		process.env.PI_CODING_AGENT_DIR = agentDir;
 	}
@@ -292,13 +299,17 @@ export function cleanupTestEnv(env: TestEnv): void {
 	for (const surface of env.surfaces) {
 		try {
 			closePane(surface);
-		} catch {}
+		} catch {
+			// Best effort; workspace cleanup below closes remaining panes.
+		}
 	}
 	try {
 		execFileSync("herdr", ["workspace", "close", env.workspaceId], {
 			encoding: "utf8",
 		});
-	} catch {}
+	} catch {
+		// Best effort; the workspace can already be closed.
+	}
 	if (env.previousWorkspaceId) {
 		process.env.HERDR_WORKSPACE_ID = env.previousWorkspaceId;
 	} else {
@@ -312,11 +323,15 @@ export function cleanupTestEnv(env: TestEnv): void {
 	for (const file of env.tempFiles) {
 		try {
 			unlinkSync(file);
-		} catch {}
+		} catch {
+			// Best effort; the test can remove its own marker.
+		}
 	}
 	try {
 		rmSync(env.dir, { recursive: true, force: true });
-	} catch {}
+	} catch {
+		// Best effort after owned processes and workspaces are closed.
+	}
 }
 
 /**
@@ -339,7 +354,9 @@ export async function waitForPaneReady(
 		try {
 			runInPane(surface, `printf '${marker}\\n'`);
 			if ((await readPaneAsync(surface, 50)).includes(marker)) return;
-		} catch {}
+		} catch {
+			// Retry while the new shell initializes.
+		}
 		await sleep(200);
 	}
 	throw new Error(
@@ -412,14 +429,18 @@ export async function waitForScreen(
 		try {
 			const screen = await readPaneAsync(surface, lines);
 			if (pattern.test(screen)) return screen;
-		} catch {}
+		} catch {
+			// Retry transient pane-read failures until the bounded timeout.
+		}
 		await sleep(2000);
 	}
 
 	let finalScreen = "";
 	try {
 		finalScreen = readPane(surface, lines);
-	} catch {}
+	} catch {
+		// Keep the timeout error when final diagnostic capture fails.
+	}
 	throw new Error(
 		`Timeout (${timeout}ms) waiting for pattern ${pattern}.\nLast screen:\n${finalScreen.slice(-1000)}`,
 	);

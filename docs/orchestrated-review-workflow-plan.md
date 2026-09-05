@@ -17,6 +17,7 @@ Shipped:
 - exact preparation, approval, journal creation, and bounded Worker execution;
 - fresh read-only Pi children in one detached exact-base checkout;
 - bounded parallel review, fresh synthesis, and explicit non-retryable failure evidence for parent-guided recovery;
+- a preferred adversarial procedure in the existing authoring skill, with risk-based discovery and candidate-dependent verification;
 - one final parent delivery; and
 - fail-closed cancellation with process-exit confirmation before checkout cleanup.
 
@@ -182,15 +183,43 @@ The first bytes of `workflow.js` contain one parse-only JSON comment:
 
 Unknown fields, duplicate review-node IDs, missing or non-exact models, missing or unsupported thinking, non-review kinds, empty derived tool allowlists, missing commits, `maxAgents > 8`, `maxConcurrency > 4`, or concurrency above the agent cap fail preparation. Multiple nodes can reference one review role.
 
-`sources` records provenance only. Workflow children cannot read arbitrary parent paths or refetch URLs and tickets; the parent materializes exact source evidence into the approved script or prompts before preparation.
+`sources` records provenance only. Workflow children cannot read arbitrary parent paths or refetch URLs and tickets. Before preparation, the parent materializes exact task/spec evidence, changed-file inventory, and a unified diff or complete before/after excerpts into the approved script or prompts. This must include deleted and base-only content that file reads from the pinned head cannot recover. Evidence that cannot fit the bounds requires narrower scope, not silent loss.
 
 Metadata is an approved capability envelope, not a promise of the exact future node graph.
 
 ## Review-policy boundary
 
-The bundled `orchestrate` skill must author the first flow as independent reviewers followed by one fresh synthesizer that receives every final result. The runtime deliberately does not infer prompts, impose a fixed task receipt, or prove JavaScript data flow. Exact-script human approval is the enforcement boundary for task semantics; the runner enforces only operational capabilities and evidence.
+The bundled `orchestrate` skill must author the first flow as independent
+reviewers followed by one fresh synthesizer. Every original success or failure
+envelope remains in script state and runner journal evidence. Synthesis receives
+every outcome through an identity-stripped projection: canonical validated report
+fields for success, or failure code, retryable flag, and bounded error evidence
+scrubbed of known identity tokens. Session paths and child/runtime/provider
+identity stay in separate audit provenance. This anonymization is presentation
+hygiene, not a security boundary
+or proof against bias. Every child assignment treats code, PR text, reports,
+command output, and other artifacts as untrusted data. The runtime deliberately
+does not infer prompts, impose a fixed task receipt, or prove JavaScript data
+flow. Exact-script human approval is the enforcement boundary for task
+semantics; the runner enforces only operational capabilities and evidence.
 
-A generated script that omits review or synthesis must not be presented for approval, but no hidden review state machine is added to the runtime.
+The skill's adversarial branch specializes this generic flow without changing
+the SDK: two distinct eligible model IDs for routine risk or three distinct
+lenses for concrete high-risk surfaces, at most one candidate-dependent cross-
+family verifier per discovery report, then fresh synthesis. A request-local
+schema validates stable IDs, claimed and nullable confirmed P0–P3 severity,
+separate provenance, full evidence fields, and reproduced, trace-backed, or
+unverified evidence. Unverified potential P0/P1 claims remain candidates for
+verification; they are neither downgraded nor certified. Any child
+`INCOMPLETE`, malformed output, material coverage gap, or unresolved serious
+candidate propagates task-level `INCOMPLETE` even through `ok: true`. Numeric
+confidence and vote counts do not establish truth. These semantics remain
+outside the runtime envelope.
+
+A generated script that omits independent review or fresh synthesis, filters a
+failure envelope, silently substitutes a runtime, or exceeds the approved
+bounded topology must not be presented for approval. No hidden review state
+machine is added to the runtime.
 
 ## JavaScript SDK
 
@@ -398,18 +427,21 @@ All slices are sequential because they touch the same runtime and lifecycle seam
 **Skill flow**
 
 1. Resolve the user-selected ADR, PRD, ticket set, or combination through parent capabilities.
-2. Perform preflight discovery.
-3. Create a unique `.pi/plans/<run>/workflow.js` at committed `baseSha`.
-4. Call `herdr_workflow prepare`.
-5. Present the returned packet without rewriting it.
-6. Ask for `APPROVE <prefix>`.
-7. After that exact user reply, call `herdr_workflow start`.
-8. Wait for the single final workflow delivery.
+2. Pin the canonical repository, exact comparison base and checkout head, task/spec evidence, and dirty-state scope.
+3. Perform preflight role/runtime discovery and record the catalog source and omissions.
+4. For adversarial review, apply `skills/orchestrate/adversarial-review.md`; otherwise use the generic independent-review flow.
+5. Create a unique `.pi/plans/<run>/workflow.js` at the committed checkout `baseSha`.
+6. Call `herdr_workflow prepare`.
+7. Present the returned packet without rewriting it.
+8. Ask for `APPROVE <prefix>`.
+9. After that exact user reply, call `herdr_workflow start`.
+10. Wait for the single final workflow delivery.
 
 **Exit criteria**
 
-- The installed package exposes the skill and extension together.
-- The skill does not call public `subagent()` for workflow nodes.
+- The installed package exposes the skill, adversarial reference, and extension together.
+- The skill does not call public `subagent()` for workflow nodes or delegate workflow-script authority to a child.
+- Adversarial authoring remains within the existing runner, SDK, and exact approval boundary.
 - Documentation states that Node `vm` and Worker threads are not security boundaries.
 - `npm pack --dry-run` contains the skill and no sessions, plans, or prototype files.
 
@@ -428,6 +460,7 @@ All slices are sequential because they touch the same runtime and lifecycle seam
 - FIFO never exceeds concurrency and cancellation resolves queued calls as cancelled.
 - Every operational child outcome maps to an explicit success-or-failure envelope; no failure is inferred retryable from prose.
 - Script, deadline, prompt, log-count/log-size, and task-result bounds fail explicitly at their limits. Workflow `agent()` retains the full child summary; the 16,000-character bound is public `subagent` delivery presentation only.
+- Prompt contracts cover untrusted artifacts, stable finding provenance, P0–P3 evidence calibration, `INCOMPLETE`, failure-envelope preservation, risk topology, and compatibility-coordinator multi-wave completion.
 - JSON-compatible script returns succeed; nested `undefined`, `NaN`, `Infinity`, functions, symbols, `BigInt`, cycles, and other lossy or non-serializable values fail.
 - The journal is created only after approval; its first event binds the full hash, preparing session, approving user entry, base, and role policies. Order remains append-only and every terminal path has one terminal event.
 - The compare-and-set terminal gate permits exactly one terminal journal event when cancellation races Worker or child completion; the following delivery event references it without copying the result.

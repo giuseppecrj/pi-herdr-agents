@@ -198,11 +198,78 @@ function btwText(source: string): string | undefined {
 	return undefined;
 }
 
+function multiWaveCoordinatorResponse(
+	request: ChatRequest,
+): ResponsePlan | null {
+	const names = toolNames(request);
+	const source = requestText(request);
+	const user = lastUserText(request);
+	const id = source.match(
+		/INTEGRATION_MULTI_WAVE_COORDINATOR:([A-Za-z0-9_-]+)/,
+	)?.[1];
+	if (!names.has("subagent") || !names.has("caller_ping") || !id) {
+		return null;
+	}
+	const discoveryName = `${id}-review-1`;
+	const synthesisName = `${id}-review-2`;
+	const discoveryResult = `DISCOVERY_RESULT_${id}`;
+	const synthesisResult = `SYNTHESIS_RESULT_${id}`;
+	const discoveryLaunched = source.includes(
+		`Sub-agent "${discoveryName}" launched`,
+	);
+	const synthesisLaunched = source.includes(
+		`Sub-agent "${synthesisName}" launched`,
+	);
+
+	if (user.includes(synthesisResult)) {
+		if (source.includes("Shutting down subagent session.")) {
+			return { text: `FINAL_MULTI_WAVE_${id}` };
+		}
+		return {
+			text: `FINAL_MULTI_WAVE_${id}`,
+			toolCalls: [{ name: "subagent_done", arguments: {} }],
+		};
+	}
+	if (user.includes(discoveryResult) && !synthesisLaunched) {
+		return {
+			toolCalls: [
+				{
+					name: "subagent",
+					arguments: {
+						name: synthesisName,
+						agent: "test-echo",
+						model: TEST_MODEL,
+						task: `Alias S1. Return exactly ${synthesisResult}`,
+					},
+				},
+			],
+		};
+	}
+	if (synthesisLaunched) return { text: `WAITING_FOR_SYNTHESIS_${id}` };
+	if (discoveryLaunched) return { text: `WAITING_FOR_DISCOVERY_${id}` };
+	return {
+		toolCalls: [
+			{
+				name: "subagent",
+				arguments: {
+					name: discoveryName,
+					agent: "test-echo",
+					model: TEST_MODEL,
+					task: `Alias R1. Return exactly ${discoveryResult}`,
+				},
+			},
+		],
+	};
+}
+
 async function planResponse(request: ChatRequest): Promise<ResponsePlan> {
 	const names = toolNames(request);
 	const source = requestText(request);
 	const user = lastUserText(request);
 	const lastRole = request.messages?.at(-1)?.role;
+
+	const multiWave = multiWaveCoordinatorResponse(request);
+	if (multiWave) return multiWave;
 
 	const resumed = !/Call the subagent_resume tool/i.test(user)
 		? user.match(/RESUME_FOLLOWUP_INPUT:\s*([a-z0-9]+)/i)?.[1]
@@ -215,7 +282,7 @@ async function planResponse(request: ChatRequest): Promise<ResponsePlan> {
 	// prompt actually asks for a help ping (test-ping), not for ordinary tasks.
 	if (
 		names.has("caller_ping") &&
-		/caller_ping|ONLY call caller_ping|call the caller_ping tool/i.test(source)
+		/caller_ping|ONLY call caller_ping|call the caller_ping tool/i.test(user)
 	) {
 		return {
 			toolCalls: [
@@ -311,6 +378,14 @@ async function planResponse(request: ChatRequest): Promise<ResponsePlan> {
 		if (resumeCall) return { toolCalls: [resumeCall] };
 	}
 
+	// A fork retains the parent's launch instruction and can also expose subagent.
+	// Route its current explicit shell task before scanning inherited launch text.
+	if (names.has("bash") && /^Run this bash command:/i.test(user.trim())) {
+		const command = bashCommand(user);
+		if (command)
+			return { toolCalls: [{ name: "bash", arguments: { command } }] };
+	}
+
 	if (names.has("subagent")) {
 		if (
 			/Sub-agent "[^"]+" launched and is now running in the background/.test(
@@ -388,23 +463,20 @@ function writeResponse(
 	});
 
 	if (plan.toolCalls && plan.toolCalls.length > 0) {
-		writeEvent(
-			response,
-			request,
-			{
-				role: "assistant",
-				tool_calls: plan.toolCalls.map((toolCall, index) => ({
-					index,
-					id: `call_${Date.now()}_${index}`,
-					type: "function",
-					function: {
-						name: toolCall.name,
-						arguments: JSON.stringify(toolCall.arguments),
-					},
-				})),
-			},
-			null,
-		);
+		const delta: ChatDelta = {
+			role: "assistant",
+			tool_calls: plan.toolCalls.map((toolCall, index) => ({
+				index,
+				id: `call_${Date.now()}_${index}`,
+				type: "function",
+				function: {
+					name: toolCall.name,
+					arguments: JSON.stringify(toolCall.arguments),
+				},
+			})),
+		};
+		if (plan.text) delta.content = plan.text;
+		writeEvent(response, request, delta, null);
 		writeEvent(response, request, {}, "tool_calls");
 	} else {
 		writeEvent(

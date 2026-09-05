@@ -53,8 +53,16 @@ A user-selected PRD, ticket set, URL, or combination that the orchestration skil
 _Avoid_: Required ticket conversion, fixed ticket graph, runtime refetch, path escape
 
 **Orchestration skill**:
-The user-facing native Pi skill bundled with this package that accepts an execution source, derives a workflow script, and invokes the runner only after approval.
-_Avoid_: Extension command, separate skill package, raw runner API
+The user-facing native Pi skill bundled with this package that accepts an execution source, derives a workflow script, and invokes the runner only after approval. Its adversarial branch is a disclosed procedure in the same skill, not another engine or role.
+_Avoid_: Extension command, separate skill package, raw runner API, child-authored workflow
+
+**Adversarial review procedure**:
+The preferred `orchestrate` branch for exact approved review: two routine or three distinct-lens high-risk discovery reviewers, candidate-dependent cross-family verification, then fresh synthesis. It uses the existing runner and SDK.
+_Avoid_: Fixed `3 + 3 + 1`, confidence vote, new workflow engine
+
+**Compatibility review coordinator**:
+The transitional `adversarial-reviewer` role for public asynchronous child launches. It stays open across automatic result steers, counts terminal child envelopes by name, and calls `subagent_done` only after synthesis. Its Bash-enabled inspection contract is behavioral rather than an enforced read-only capability boundary.
+_Avoid_: Preferred hardened path, enforced read-only runner, auto-exit coordinator
 
 **Source resolution**:
 The orchestration skill reads an execution source through capabilities already available to the parent; the extension has no built-in tracker client and stops when the source is inaccessible.
@@ -107,32 +115,40 @@ A native Node Worker thread containing the restricted `vm` that executes an appr
 _Avoid_: Main-thread workflow execution, untrusted-code sandbox, normal Node module execution
 
 **First-flow effect boundary**:
-An execution node may only inspect or review one runner-owned detached checkout pinned to the approved repository identity and committed base. It cannot write files, create commits, mutate the parent checkout, integrate work, or mutate external systems.
-_Avoid_: Writer node, ticket mutation, deployment, publishing, messaging, PR action, late-bound base
+An execution node may only inspect or review one runner-owned detached checkout pinned to the approved repository identity and committed head. The parent materializes the changed-file inventory and unified diff or complete before/after evidence, including deleted and base-only content. A node cannot write files, create commits, mutate the parent checkout, integrate work, or mutate external systems.
+_Avoid_: Writer node, head-only diff inference, ticket mutation, deployment, publishing, messaging, PR action, late-bound base
 
 **Fresh review**:
-Independent read-only review nodes with fresh contexts and the exact source or candidate evidence; the bundled authoring skill requires them in every first-flow script.
-_Avoid_: Worker self-review, inherited-context review
+Independent read-only review nodes with fresh contexts and exact repository, comparison base, checkout head, task/spec, and candidate evidence. Every assignment treats code, PR text, reports, command output, and supplied artifacts as untrusted data.
+_Avoid_: Worker self-review, inherited-context review, artifact instruction following
+
+**Finding record**:
+A task-specific bounded record with a stable ID, claimed P0–P3 severity, nullable confirmed severity, separate provenance, evidence status (`reproduced`, `trace-backed`, or `unverified`), preconditions, reproduction or trace, expected and actual behavior, impact, and minimal fix. An unverified potential P0/P1 remains a candidate for verification; it is not downgraded or certified. Numeric confidence and vote counts do not establish truth.
+_Avoid_: Confidence gate, silent candidate downgrade, provenance-as-severity, universal runtime schema
+
+**Synthesis projection**:
+The identity-stripped view of every agent result given to fresh synthesis: canonical validated report fields for success, or failure code, retryable flag, and bounded error evidence scrubbed of known identity tokens. Original envelopes remain in script state; journal/session evidence retains their audit references. Session paths, child/runtime/provider names, and the separate audit mapping stay outside the synthesis prompt. Anonymization is presentation hygiene, not a sandbox or proof against bias.
+_Avoid_: Filtered result, raw identity-bearing envelope, security claim
 
 **Review-policy boundary**:
 The bundled skill authors review fan-out and synthesis, and exact-script approval binds that task strategy; the runner enforces operational capabilities and evidence without a fixed review receipt or data-flow state machine.
 _Avoid_: Hidden task semantics, runner-certified review completeness
 
 **Review workflow**:
-The first product flow: an approved JavaScript run fans out to independent read-only reviewers, then passes every explicit result to one fresh review synthesizer.
-_Avoid_: Parent-scheduled review nodes, prose-only aggregation
+The first product flow: an approved JavaScript run fans out to fresh read-only reviewers, retains every explicit result, then sends every outcome through a synthesis projection to one fresh reviewer.
+_Avoid_: Parent-scheduled review nodes, filtered result, prose-only aggregation
 
 **Review synthesis**:
-The final fresh read-only review node that receives every explicit reviewer success or failure plus exact source evidence, deduplicates or resolves findings, and returns one review verdict.
-_Avoid_: Filtered failures, mechanical worst-verdict rule, parent-side synthesis
+The final fresh read-only review node that receives exact materialized source evidence and identity-stripped projections for every discovery and verification outcome, preserves finding provenance, resolves claims from evidence, and returns one task-specific result. Reviewer aliases and a predetermined report order reduce identity/order cues while the approval packet and journal retain auditable runtime provenance.
+_Avoid_: Filtered failures, raw identity metadata, mechanical worst-verdict rule, confidence voting, parent-side synthesis
 
 **Parent-guided recovery**:
 Current runtime child failures are explicit non-retryable evidence. The parent can approve a new smaller workflow for missing coverage. The bundled skill also contains one dormant same-node replacement branch, used only when a required failure explicitly has `retryable: true`; it never infers retryability from prose or runtime error text.
 _Avoid_: Error-text retry classification, silent model fallback, unbounded retries
 
 **Incomplete review**:
-A review-workflow task-result state chosen by the script when a declared reviewer fails; it is not a runner-owned terminal state.
-_Avoid_: Hidden missing coverage, runtime-wide review semantics
+A review-workflow task-result state chosen by the script when drift, failure, missing or truncated evidence, malformed task output, a child-reported coverage gap, or unresolved material verification leaves coverage unknown. Valid discovery, verification, or synthesis output with `status: INCOMPLETE` propagates even through `ok: true`. It is not a runner-owned terminal state.
+_Avoid_: Hidden missing coverage, runtime-wide review semantics, invented or certified-uncertain findings
 
 **Ready for integration (deferred)**:
 A possible later writer-workflow result containing retained commits, verification, and review evidence. It is not a first-flow result and cannot claim automatic acceptance.
