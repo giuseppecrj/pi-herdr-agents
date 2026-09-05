@@ -2453,6 +2453,293 @@ describe("subagent-done.ts", () => {
 		}
 	});
 
+	it("waits for settlement after a transient compaction error", () => {
+		withTempDir((dir) => {
+			const previousAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+			const previousSession = process.env.PI_SUBAGENT_SESSION;
+			const sessionFile = join(dir, "child.jsonl");
+			process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+			process.env.PI_SUBAGENT_SESSION = sessionFile;
+			try {
+				const { api, eventHandlers } = createMockExtensionApi();
+				subagentDoneExtension(api);
+				const agentEnd = eventHandlers.get("agent_end")?.[0];
+				const agentSettled = eventHandlers.get("agent_settled")?.[0];
+				assert.ok(agentEnd);
+				assert.ok(agentSettled);
+
+				let shutdowns = 0;
+				let branch: any[] = [];
+				const ctx = {
+					shutdown: () => shutdowns++,
+					sessionManager: { getBranch: () => branch },
+				};
+				const transientError = {
+					role: "assistant",
+					stopReason: "error",
+					errorMessage: "This operation was aborted",
+				};
+				agentEnd({ messages: [transientError] }, ctx);
+				assert.equal(existsSync(`${sessionFile}.exit`), false);
+				assert.equal(shutdowns, 0);
+
+				const completed = {
+					role: "assistant",
+					stopReason: "stop",
+					content: [{ type: "text", text: "Completed after compaction." }],
+				};
+				branch = [
+					{ type: "message", message: transientError },
+					{ type: "compaction", summary: "Compacted" },
+					{ type: "message", message: completed },
+				];
+				agentEnd({ messages: [completed] }, ctx);
+				assert.equal(existsSync(`${sessionFile}.exit`), false);
+				assert.equal(shutdowns, 0);
+
+				agentSettled({}, ctx);
+				assert.deepEqual(
+					JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8")),
+					{
+						type: "done",
+					},
+				);
+				assert.equal(shutdowns, 1);
+				agentSettled({}, ctx);
+				assert.equal(shutdowns, 1);
+			} finally {
+				restoreEnvVar("PI_SUBAGENT_AUTO_EXIT", previousAutoExit);
+				restoreEnvVar("PI_SUBAGENT_SESSION", previousSession);
+			}
+		});
+	});
+
+	it("uses the settled branch instead of a stale agent_end error", () => {
+		withTempDir((dir) => {
+			const previousAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+			const previousSession = process.env.PI_SUBAGENT_SESSION;
+			const sessionFile = join(dir, "child.jsonl");
+			process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+			process.env.PI_SUBAGENT_SESSION = sessionFile;
+			try {
+				const { api, eventHandlers } = createMockExtensionApi();
+				subagentDoneExtension(api);
+				const cachedError = {
+					role: "assistant",
+					stopReason: "error",
+					errorMessage: "This operation was aborted",
+				};
+				let shutdowns = 0;
+				const ctx = {
+					shutdown: () => shutdowns++,
+					sessionManager: {
+						getBranch: () => [
+							{ type: "message", message: cachedError },
+							{
+								type: "message",
+								message: { role: "assistant", stopReason: "stop" },
+							},
+						],
+					},
+				};
+
+				eventHandlers.get("agent_end")?.[0]({ messages: [cachedError] }, ctx);
+				eventHandlers.get("agent_settled")?.[0]({}, ctx);
+				assert.deepEqual(
+					JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8")),
+					{ type: "done" },
+				);
+				assert.equal(shutdowns, 1);
+			} finally {
+				restoreEnvVar("PI_SUBAGENT_AUTO_EXIT", previousAutoExit);
+				restoreEnvVar("PI_SUBAGENT_SESSION", previousSession);
+			}
+		});
+	});
+
+	it("reports a provider error that remains after settlement", () => {
+		withTempDir((dir) => {
+			const previousAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+			const previousSession = process.env.PI_SUBAGENT_SESSION;
+			const sessionFile = join(dir, "child.jsonl");
+			process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+			process.env.PI_SUBAGENT_SESSION = sessionFile;
+			try {
+				const { api, eventHandlers } = createMockExtensionApi();
+				subagentDoneExtension(api);
+				const error = {
+					role: "assistant",
+					stopReason: "error",
+					errorMessage: "provider failed",
+				};
+				let shutdowns = 0;
+				const ctx = {
+					shutdown: () => shutdowns++,
+					sessionManager: {
+						getBranch: () => {
+							throw new Error("session branch unavailable");
+						},
+					},
+				};
+
+				eventHandlers.get("agent_end")?.[0]({ messages: [error] }, ctx);
+				assert.equal(existsSync(`${sessionFile}.exit`), false);
+				eventHandlers.get("agent_settled")?.[0]({}, ctx);
+				assert.deepEqual(
+					JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8")),
+					{
+						type: "error",
+						errorMessage: "provider failed",
+						stopReason: "error",
+					},
+				);
+				assert.equal(shutdowns, 1);
+			} finally {
+				restoreEnvVar("PI_SUBAGENT_AUTO_EXIT", previousAutoExit);
+				restoreEnvVar("PI_SUBAGENT_SESSION", previousSession);
+			}
+		});
+	});
+
+	it("stays open when the settled assistant turn was aborted", () => {
+		withTempDir((dir) => {
+			const previousAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+			const previousSession = process.env.PI_SUBAGENT_SESSION;
+			const sessionFile = join(dir, "child.jsonl");
+			process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+			process.env.PI_SUBAGENT_SESSION = sessionFile;
+			try {
+				const { api, eventHandlers } = createMockExtensionApi();
+				subagentDoneExtension(api);
+				const aborted = { role: "assistant", stopReason: "aborted" };
+				let shutdowns = 0;
+				const ctx = {
+					shutdown: () => shutdowns++,
+					sessionManager: {
+						getBranch: () => [{ type: "message", message: aborted }],
+					},
+				};
+
+				eventHandlers.get("agent_end")?.[0]({ messages: [aborted] }, ctx);
+				eventHandlers.get("agent_settled")?.[0]({}, ctx);
+				assert.equal(existsSync(`${sessionFile}.exit`), false);
+				assert.equal(shutdowns, 0);
+			} finally {
+				restoreEnvVar("PI_SUBAGENT_AUTO_EXIT", previousAutoExit);
+				restoreEnvVar("PI_SUBAGENT_SESSION", previousSession);
+			}
+		});
+	});
+
+	it("preserves caller_ping completion when the agent later settles", async () => {
+		const dir = createTestDir();
+		const previousAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+		const previousSession = process.env.PI_SUBAGENT_SESSION;
+		const previousName = process.env.PI_SUBAGENT_NAME;
+		const sessionFile = join(dir, "child.jsonl");
+		process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+		process.env.PI_SUBAGENT_SESSION = sessionFile;
+		process.env.PI_SUBAGENT_NAME = "test-child";
+		try {
+			const { api, eventHandlers, registeredTools } = createMockExtensionApi();
+			subagentDoneExtension(api);
+			let shutdowns = 0;
+			const ctx = {
+				shutdown: () => shutdowns++,
+				sessionManager: {
+					getBranch: () => [
+						{
+							type: "message",
+							message: { role: "assistant", stopReason: "stop" },
+						},
+					],
+				},
+			};
+			const callerPing = registeredTools.find(
+				(tool) => tool.name === "caller_ping",
+			);
+			assert.ok(callerPing);
+
+			await callerPing.execute(
+				"call",
+				{ message: "Need input" },
+				null,
+				null,
+				ctx,
+			);
+			eventHandlers.get("agent_end")?.[0](
+				{ messages: [{ role: "assistant", stopReason: "stop" }] },
+				ctx,
+			);
+			eventHandlers.get("agent_settled")?.[0]({}, ctx);
+			assert.deepEqual(
+				JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8")),
+				{
+					type: "ping",
+					name: "test-child",
+					message: "Need input",
+				},
+			);
+			assert.equal(shutdowns, 1);
+		} finally {
+			restoreEnvVar("PI_SUBAGENT_AUTO_EXIT", previousAutoExit);
+			restoreEnvVar("PI_SUBAGENT_SESSION", previousSession);
+			restoreEnvVar("PI_SUBAGENT_NAME", previousName);
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("leaves non-auto-exit coordinators open until subagent_done", async () => {
+		const dir = createTestDir();
+		const previousAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+		const previousSession = process.env.PI_SUBAGENT_SESSION;
+		const sessionFile = join(dir, "child.jsonl");
+		delete process.env.PI_SUBAGENT_AUTO_EXIT;
+		process.env.PI_SUBAGENT_SESSION = sessionFile;
+		try {
+			const { api, eventHandlers, registeredTools } = createMockExtensionApi();
+			subagentDoneExtension(api);
+			let shutdowns = 0;
+			const ctx = {
+				shutdown: () => shutdowns++,
+				sessionManager: {
+					getBranch: () => [
+						{
+							type: "message",
+							message: { role: "assistant", stopReason: "stop" },
+						},
+					],
+				},
+			};
+
+			eventHandlers.get("agent_end")?.[0](
+				{ messages: [{ role: "assistant", stopReason: "stop" }] },
+				ctx,
+			);
+			eventHandlers.get("agent_settled")?.[0]({}, ctx);
+			assert.equal(existsSync(`${sessionFile}.exit`), false);
+			assert.equal(shutdowns, 0);
+
+			const subagentDone = registeredTools.find(
+				(tool) => tool.name === "subagent_done",
+			);
+			assert.ok(subagentDone);
+			await subagentDone.execute("call", {}, null, null, ctx);
+			eventHandlers.get("agent_settled")?.[0]({}, ctx);
+			assert.deepEqual(
+				JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8")),
+				{
+					type: "done",
+				},
+			);
+			assert.equal(shutdowns, 1);
+		} finally {
+			restoreEnvVar("PI_SUBAGENT_AUTO_EXIT", previousAutoExit);
+			restoreEnvVar("PI_SUBAGENT_SESSION", previousSession);
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	describe("shouldMarkUserTookOver", () => {
 		it("ignores the initial injected task before the first agent run", () => {
 			assert.equal(shouldMarkUserTookOver(false), false);
