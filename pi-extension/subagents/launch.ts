@@ -17,7 +17,9 @@ import { HerdrWorktreeCreateError } from "./herdr.ts";
 import type { JsonObject } from "./type-guards.ts";
 import {
 	createWorktreeSessionFork,
+	readSubagentSessionPolicy,
 	seedSubagentSessionFile,
+	writeSubagentSessionPolicy,
 } from "./session.ts";
 import {
 	closePane,
@@ -452,6 +454,11 @@ function prepareChildSession(
 		surface.worktree.sessionFile = sessionFile;
 		writeWorktreeManifest(surface.worktree.manifestFile, { sessionFile });
 	}
+	writeSubagentSessionPolicy(sessionFile, {
+		owner: surface.worktree ? "managed-worktree" : "public",
+		tools: resolved.request.behavior.tools,
+		deniedTools: resolved.request.behavior.deniedTools,
+	});
 	const activityFile = getSubagentActivityFile(
 		resolved.artifactDir,
 		resolved.id,
@@ -686,6 +693,13 @@ async function launchResumedPiSubagent(
 	operations: PiLaunchOperations,
 ): Promise<PiRunningChild> {
 	const id = request.id ?? Math.random().toString(16).slice(2, 10);
+	const policy = readSubagentSessionPolicy(request.sessionFile);
+	if (policy.owner !== "public") {
+		throw new Error(
+			`Cannot resume ${policy.owner} session through subagent_resume. ` +
+				"Use its retained workspace or workflow evidence instead.",
+		);
+	}
 	const autoExit = request.behavior?.autoExit ?? true;
 	const interactive = request.behavior?.interactive ?? !autoExit;
 	const startTime = Date.now();
@@ -715,17 +729,25 @@ async function launchResumedPiSubagent(
 			...(process.env.PI_CODING_AGENT_DIR
 				? [`PI_CODING_AGENT_DIR=${shellQuote(process.env.PI_CODING_AGENT_DIR)}`]
 				: []),
+			...(policy.deniedTools.length > 0
+				? [`PI_DENY_TOOLS=${shellQuote(policy.deniedTools.join(","))}`]
+				: []),
 			`PI_SUBAGENT_NAME=${shellQuote(request.name)}`,
 			`PI_SUBAGENT_SESSION=${shellQuote(request.sessionFile)}`,
 			`PI_SUBAGENT_ID=${shellQuote(id)}`,
 			`PI_SUBAGENT_ACTIVITY_FILE=${shellQuote(activityFile)}`,
 			`PI_SUBAGENT_AUTO_EXIT=${autoExit ? "1" : "0"}`,
 		];
+		const toolAllowlist = buildSubagentToolAllowlist(
+			policy.tools?.join(","),
+			autoExit,
+		);
 		const command = [
 			...env,
 			"pi",
 			"--session",
 			shellQuote(request.sessionFile),
+			...(toolAllowlist ? ["--tools", shellQuote(toolAllowlist)] : []),
 			"-e",
 			shellQuote(join(SUBAGENTS_DIR, "subagent-done.ts")),
 			...(messageFile ? [shellQuote(`@${messageFile}`)] : []),

@@ -19,7 +19,7 @@ Shipped:
 - bounded parallel review, fresh synthesis, and explicit non-retryable failure evidence for parent-guided recovery;
 - a preferred adversarial procedure in the existing authoring skill, with risk-based discovery and candidate-dependent verification;
 - one final parent delivery; and
-- fail-closed cancellation with process-exit confirmation before checkout cleanup.
+- fail-closed terminal cleanup with process-exit confirmation for every outcome before checkout disposal.
 
 Package and runtime slices are shipped. Remaining work is limited to deferred writer behavior and any future workflow extensions.
 
@@ -146,7 +146,7 @@ The LLM cannot authorize execution by passing approval text in tool arguments. `
 7. dispose the reader checkout only after termination is confirmed;
 8. append one `cancelled` terminal event and deliver one bounded cancellation receipt.
 
-If a captured process remains after the bounded wait, retain the checkout and append `failed` with `cancel_termination_failed`; never report successful cancellation or clean up underneath a live child. All completion, failure, interruption, and cancellation paths use the same compare-and-set terminal gate. Repeated cancellation is idempotent.
+If a captured process remains after the bounded wait, retain the checkout and append `failed` with `cancel_termination_failed`; never report successful cancellation or clean up underneath a live child. All completion, early return, failure, interruption, deadline, and cancellation paths use the same compare-and-set terminal gate and terminate queued or active children before checkout disposal and delivery. Repeated cancellation is idempotent.
 
 ## Workflow metadata
 

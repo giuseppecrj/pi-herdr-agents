@@ -19,6 +19,10 @@ import {
 	type ResumePiLaunchRequest,
 } from "../pi-extension/subagents/launch.ts";
 import { createSubagentPaneFactory } from "../pi-extension/subagents/pane-config.ts";
+import {
+	readSubagentSessionPolicy,
+	writeSubagentSessionPolicy,
+} from "../pi-extension/subagents/session.ts";
 
 function fixture() {
 	const root = mkdtempSync(join(tmpdir(), "subagent-launch-test-"));
@@ -77,6 +81,14 @@ function withFixture(
 	});
 }
 
+function writePublicResumePolicy(sessionFile: string): void {
+	writeSubagentSessionPolicy(sessionFile, {
+		owner: "public",
+		tools: "read,bash",
+		deniedTools: ["subagent", "subagent_resume"],
+	});
+}
+
 describe("Pi launch", () => {
 	it("launches an ordinary child through one transaction", async () => {
 		await withFixture(async ({ request, project, agentDir }) => {
@@ -119,6 +131,12 @@ describe("Pi launch", () => {
 			assert.equal(running.surface, "pane-1");
 			assert.equal(running.launchScriptFile, scriptPath);
 			assert.ok(running.sessionFile.startsWith(join(agentDir, "sessions")));
+			assert.deepEqual(readSubagentSessionPolicy(running.sessionFile), {
+				version: 1,
+				owner: "public",
+				tools: ["read", "bash"],
+				deniedTools: ["subagent", "subagent_resume"],
+			});
 			assert.equal(command.includes(projectAgentDir), false);
 			assert.match(command, new RegExp(`^cd '${project}' && `));
 			assert.match(command, /--model 'fake\/worker'/);
@@ -154,6 +172,7 @@ describe("Pi launch", () => {
 					const closed: string[] = [];
 					const sessionFile = join(root, "resumed.jsonl");
 					writeFileSync(sessionFile, "existing session\n");
+					if (kind === "resume") writePublicResumePolicy(sessionFile);
 					const launchRequest: FreshPiLaunchRequest | ResumePiLaunchRequest =
 						kind === "fresh"
 							? request
@@ -374,6 +393,7 @@ describe("Pi launch", () => {
 
 			const resumedSession = join(root, "resumed.jsonl");
 			writeFileSync(resumedSession, "existing session\n");
+			writePublicResumePolicy(resumedSession);
 			await launchPiSubagent(
 				{
 					kind: "resume",
@@ -474,6 +494,7 @@ describe("Pi launch", () => {
 		await withFixture(async ({ root, sessionDir }) => {
 			const sessionFile = join(root, "child.jsonl");
 			writeFileSync(sessionFile, "existing session\n");
+			writePublicResumePolicy(sessionFile);
 			const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 			process.env.PI_CODING_AGENT_DIR = join(root, "isolated-agent");
 			try {
@@ -535,7 +556,12 @@ describe("Pi launch", () => {
 						`^PI_CODING_AGENT_DIR='${process.env.PI_CODING_AGENT_DIR}' `,
 					),
 				);
-				assert.match(command, new RegExp(`pi --session '${sessionFile}' -e `));
+				assert.match(
+					command,
+					new RegExp(
+						`pi --session '${sessionFile}' --tools 'read,bash,caller_ping' -e `,
+					),
+				);
 				assert.match(command, /PI_SUBAGENT_NAME='Resume worker'/);
 				assert.match(
 					command,
@@ -544,6 +570,7 @@ describe("Pi launch", () => {
 				assert.match(command, /PI_SUBAGENT_ID='resume-1'/);
 				assert.match(command, /PI_SUBAGENT_ACTIVITY_FILE='/);
 				assert.match(command, /PI_SUBAGENT_AUTO_EXIT=1/);
+				assert.match(command, /PI_DENY_TOOLS='subagent,subagent_resume'/);
 				assert.doesNotMatch(command, /--model|--thinking|^cd /);
 				const messagePath = command.match(/'@([^']+\.md)'/)?.[1];
 				assert.ok(messagePath, "expected artifact-backed follow-up message");
@@ -571,6 +598,7 @@ describe("Pi launch", () => {
 		await withFixture(async ({ root, sessionDir }) => {
 			const sessionFile = join(root, "interactive.jsonl");
 			writeFileSync(sessionFile, "existing session\n");
+			writePublicResumePolicy(sessionFile);
 			const previousAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
 			process.env.PI_SUBAGENT_AUTO_EXIT = "1";
 			try {
@@ -690,6 +718,10 @@ describe("Pi launch", () => {
 			assert.equal(running.worktree?.baseSha, baseSha);
 			assert.equal(running.worktree?.path, worktreePath);
 			assert.equal(running.worktree?.sessionFile, running.sessionFile);
+			assert.equal(
+				readSubagentSessionPolicy(running.sessionFile).owner,
+				"managed-worktree",
+			);
 			assert.match(command, new RegExp(`^cd '${worktreePath}' && `));
 			const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
 			assert.equal(manifest.state, "running");

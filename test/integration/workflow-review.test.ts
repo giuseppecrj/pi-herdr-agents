@@ -27,6 +27,7 @@ import {
 	TEST_MODEL,
 } from "./harness.ts";
 import { isString } from "../../pi-extension/subagents/type-guards.ts";
+import { readSubagentSessionPolicy } from "../../pi-extension/subagents/session.ts";
 
 const backends = getAvailableBackends();
 
@@ -277,6 +278,14 @@ for (const backend of backends) {
 				);
 				assert.equal(starts.length, 4);
 				assert.equal(starts[3].role, "synthesizer");
+				assert.equal(
+					starts.every(
+						(event) =>
+							readSubagentSessionPolicy(event.sessionFile).owner === "workflow",
+					),
+					true,
+					"workflow child sessions are marked before public resume can create a pane",
+				);
 				assert.equal(
 					events.findIndex((event) => event.type === "agent_completed"),
 					6,

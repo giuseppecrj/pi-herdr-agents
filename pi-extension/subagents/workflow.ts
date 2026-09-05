@@ -1000,6 +1000,12 @@ export async function executeWorkflow(
 		onLog?: (message: string) => void;
 		onWorker?: (worker: Worker) => void;
 		onAgent?: (prompt: string, options: any) => JsonValue | Promise<JsonValue>;
+		onTerminal?: (
+			outcome: WorkflowExecutionResult,
+		) =>
+			| WorkflowExecutionResult
+			| undefined
+			| Promise<void | WorkflowExecutionResult | undefined>;
 	} = {},
 ): Promise<WorkflowExecutionResult> {
 	return new Promise((resolve) => {
@@ -1015,6 +1021,7 @@ export async function executeWorkflow(
 		let agents = 0;
 		let activeAgents = 0;
 		const agentQueue: Array<(forced?: JsonValue) => void> = [];
+		const activeAgentOperations = new Set<Promise<void>>();
 		const drainQueue = (result: JsonValue = CANCELLED_AGENT_RESULT) => {
 			const queued = agentQueue.splice(0);
 			for (const start of queued) start(result);
@@ -1026,12 +1033,13 @@ export async function executeWorkflow(
 						resolveAgent(forced);
 						return;
 					}
-					if (options.signal?.aborted) {
+					if (settled || options.signal?.aborted) {
 						resolveAgent(CANCELLED_AGENT_RESULT);
 						return;
 					}
 					activeAgents += 1;
-					void (async () => {
+					let operation!: Promise<void>;
+					operation = (async () => {
 						try {
 							const result = await options.onAgent?.(prompt, agentOptions);
 							resolveAgent(
@@ -1052,10 +1060,12 @@ export async function executeWorkflow(
 							});
 						} finally {
 							activeAgents -= 1;
+							activeAgentOperations.delete(operation);
 							const next = agentQueue.shift();
 							if (next) next();
 						}
 					})();
+					activeAgentOperations.add(operation);
 				};
 				if (options.signal?.aborted) {
 					resolveAgent(CANCELLED_AGENT_RESULT);
@@ -1070,7 +1080,24 @@ export async function executeWorkflow(
 			clearTimeout(deadline);
 			options.signal?.removeEventListener("abort", onAbort);
 			drainQueue();
-			void worker.terminate().finally(() => resolve(result));
+			void (async () => {
+				let finalResult = result;
+				try {
+					await worker.terminate();
+					const terminalResult = await options.onTerminal?.(result);
+					if (terminalResult) finalResult = terminalResult;
+					await Promise.allSettled(activeAgentOperations);
+				} catch (error) {
+					finalResult = {
+						state: "failed",
+						error: {
+							code: "workflow_terminal_error",
+							message: error instanceof Error ? error.message : String(error),
+						},
+					};
+				}
+				resolve(finalResult);
+			})();
 		};
 		const fail = (code: string, message: string) =>
 			finish({ state: "failed", error: { code, message } });

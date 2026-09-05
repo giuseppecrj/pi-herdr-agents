@@ -342,12 +342,25 @@ followed by agent frontmatter, per-agent config, the global default, and finally
 the parent model. Model values must be exact authenticated `provider/model-id`
 references. A value can contain an ordered comma-separated fallback list, for
 example `provider/preferred, provider/fallback`. The extension validates every
-candidate before launch, retries the preferred model normally, then launches
-later candidates only after a provider/agent request failure. A completed child
-result, including a negative task result, never switches models. Completion
-metadata and the status widget report the model actually used; an exhausted
-list reports every attempted model. Workflow metadata accepts one exact model
-only, to keep approved workflow runtimes deterministic.
+candidate before launch, then launches later candidates only after the selected
+child settles with a provider/agent error. Pi owns any automatic transient
+retrying inside that child; the extension does not infer retry counts or
+permanence from the error text. A completed child result, including a negative
+task result, never switches models. Completion metadata reports the requested
+candidate, every attempted candidate, the model actually used, and each raw
+model failure in attempt order when fallbacks are tried. Workflow metadata accepts one exact
+model only, to keep approved workflow runtimes deterministic.
+
+A catalog-listed model and configured authentication do not prove that the
+active provider account can use that model. Providers may reject an account /
+model combination only when the request is made. The completion preserves each
+raw provider reason with its model and suggests checking account access,
+spawning a new subagent with a supported model, or choosing an appropriate
+configured fallback. `subagent_resume` does not select a model and should be
+used only after the session's stored model is usable. The completion does not
+claim a permanent failure or a retry count that Pi has not exposed. Reliable
+structured permanence and retry counts require an upstream Pi/ExtensionAPI
+diagnostics seam for final provider errors and retry outcomes.
 
 `config.json` is gitignored in the source tree so local overrides are not
 committed from a checkout. On an installed package root, treat it as disposable
@@ -478,6 +491,8 @@ Parameters:
 - If process identity cannot be captured for an active pane, the pane remains present after close, or any captured process still lives after the bounded wait, the checkout is retained and the run ends `failed` with `cancel_termination_failed`. Successful cancellation is not reported in that case.
 - A successful cancel writes one `cancelled` terminal journal event and one result-free delivery. Repeated cancel is idempotent and returns the authoritative terminal outcome (including a prior fail-closed result).
 
+Every terminal path—normal completion, early script return, script or Worker failure, deadline, interruption, and explicit cancellation—stops queued work and accounts for active workflow children before checkout disposal or final delivery. If active-child exit cannot be confirmed, the checkout is retained and the authoritative outcome is `failed` with `cancel_termination_failed`.
+
 There is no list, status, resume, or history action in v1. Workflow ownership and the Worker survive `/reload` in the same Pi process, and the latest parent API receives one final delivery. A full process restart reconciles interruption without replay: startup marks only the last known running journal event as `interrupted`, leaves sessions, journals, and reader checkouts in place, and requires a new approved run.
 
 ### Bundled `orchestrate` skill
@@ -490,7 +505,7 @@ The script and journal retain every original child envelope. Synthesis receives 
 
 The runner-owned checkout contains only the pinned commit. Parent staged, unstaged, and untracked state is not review evidence. Effective child tools are the resolved role allowlist intersected with the runner maximum (`read`, `grep`, `find`, and `ls`) and deny rules. Public `subagent` results can be abbreviated above 16,000 characters, but workflow scripts receive complete child reports within their explicit bounds. Operational failures are preserved without silent fallback; recovery is a new exact approved run.
 
-The parent calls `herdr_workflow prepare`, presents its packet unchanged, and waits for the exact `APPROVE <8-character lowercase hash prefix>` reply before calling `start`. After start, one final delivery is sent without polling. Cancellation is fail-closed and retains evidence when process exit cannot be confirmed. Same-process `/reload` preserves ownership; full restart records interruption without replay, restart, cleanup, or history. Workflow JavaScript runs in a Worker-hosted `vm` for event-loop availability only; neither the Worker nor `vm` is a security boundary, and worktrees do not provide process or security isolation.
+The parent calls `herdr_workflow prepare`, presents its packet unchanged, and waits for the exact `APPROVE <8-character lowercase hash prefix>` reply before calling `start`. After start, one final delivery is sent without polling. Every terminal path is fail-closed: it accounts for queued and active children before checkout disposal and delivery, retaining evidence when process exit cannot be confirmed. Same-process `/reload` preserves ownership; full restart records interruption without replay, restart, cleanup, or history. Workflow JavaScript runs in a Worker-hosted `vm` for event-loop availability only; neither the Worker nor `vm` is a security boundary, and worktrees do not provide process or security isolation.
 
 ---
 
@@ -508,6 +523,8 @@ The `caller_ping` tool lets a Pi-backed subagent request help from its parent ag
 - `name` (optional): Display name for the resumed pane (defaults to `Resume`)
 - `message` (optional): Follow-up prompt to send after resuming
 - `autoExit` (optional): Whether the resumed session should auto-exit after its next response fully settles. Defaults to `true` for autonomous follow-up work; set `false` when resuming for an interactive handoff.
+
+Each public child stores a session-adjacent versioned launch-policy sidecar. Public resume restores its resolved tool allowlist and denied subagent tools rather than looking up the current role, so later role changes cannot widen a child. An intentionally unrestricted launch remains unrestricted (no `--tools` argument); a restricted launch restores its exact allowlist. The `autoExit` override still controls whether `subagent_done` is available, while `caller_ping` remains available. Missing, malformed, or unsupported policy fails closed before a pane is created with recovery guidance. Public resume also rejects workflow-owned and managed-worktree child sessions; use their retained workflow evidence or workspace instead.
 
 **Interaction flow:**
 
@@ -632,8 +649,11 @@ specific exact authenticated `provider/model-id`.
 
 `tools` is passed to Pi's `--tools` allowlist and may name any registered
 built-in, extension, or custom tool. Listing a tool does not install its
-extension. Likewise, `skills` names must already be discoverable by Pi; this
-package does not install role prerequisites.
+extension. Use one non-empty inline comma-separated scalar, such as
+`tools: read, grep`; do not use YAML lists, containers, quotes, or comments.
+Omitting `tools` intentionally leaves the role unrestricted. Likewise, `skills`
+names must already be discoverable by Pi; this package does not install role
+prerequisites.
 
 ### 3. Verify and launch
 
@@ -736,9 +756,17 @@ collision rules, and rejected alternatives.
 - Generic roles omit `model` unless a particular runtime is functionally required.
 - `/subagent list` shows the expected source and a smoke launch succeeds.
 
-The current parser is permissive: unsupported or unknown frontmatter may be
-ignored rather than rejected. Compare definitions against the reference below
-and verify them with `/subagent list` plus a smoke launch.
+Capability declarations are strict: use the unquoted, unindented keys
+`tools:`, `deny-tools:`, and `spawning:` exactly once when present. Declare
+`tools` and `deny-tools` as non-empty inline comma-separated scalars, and
+`spawning` as exactly `true` or `false`. YAML lists, containers, multiline
+values, quotes, comments, empty values, duplicates, noncanonical key spelling,
+and invalid booleans are rejected. A role with an invalid capability declaration
+is excluded from discovery, and an exact-name launch reports the diagnostic
+before creating a Herdr pane or worktree. Other unsupported or unknown
+frontmatter may still be ignored.
+Compare definitions against the reference below and verify them with
+`/subagent list` plus a smoke launch.
 
 ### Frontmatter Reference
 
@@ -749,11 +777,11 @@ and verify them with `/subagent list` plus a smoke launch.
 | `model`       | string  | Optional exact authenticated Pi model default or ordered comma-separated fallback list; omit to use per-agent config, global config, then the parent                                                                                                                       |
 | `thinking`    | string  | Optional Pi thinking default (`off` through `max`); omit to inherit the parent                                                                                                                                   |
 | `system-prompt` | string | `append` passes the agent body through Pi's appended system prompt; `replace` replaces Pi's default system prompt. Without this field, the body is included in the task wrapper                                                                                                                                                                                                                                 |
-| `tools`       | string  | Comma-separated Pi `--tools` allowlist; may contain any registered built-in, extension, or custom tool name                                                                                                                                                                 |
+| `tools`       | string  | One non-empty inline comma-separated Pi `--tools` allowlist under the exact unquoted key `tools:`; may contain any registered built-in, extension, or custom tool name. Omit to leave unrestricted. YAML lists, containers, multiline values, quotes, comments, noncanonical keys, and duplicates are rejected. |
 | `skills`      | string  | Comma-separated installed skill names to auto-load. Use this plural form for new definitions; legacy project/global definitions using singular `skill` remain compatible. |
 | `session-mode` | string | Default child-session mode: `standalone`, `lineage-only`, or `fork` |
-| `spawning`    | boolean | Set `false` to deny all subagent-spawning tools                                                                                                                                                                                                                             |
-| `deny-tools`  | string  | Comma-separated `pi-herdr-agents` tool names to suppress; this is not a universal cross-extension deny list                                                                                                                                                                  |
+| `spawning`    | boolean | Set exactly `false` to deny all subagent-spawning tools under the exact unquoted key `spawning:`. Only one `true` or `false` declaration is accepted. |
+| `deny-tools`  | string  | One non-empty inline comma-separated `pi-herdr-agents` tool list to suppress under the exact unquoted key `deny-tools:`; this is not a universal cross-extension deny list. YAML lists, containers, multiline values, quotes, comments, noncanonical keys, and duplicates are rejected. |
 | `auto-exit`   | boolean | Auto-shutdown after Pi fully settles when the latest assistant turn does not end with `stopReason: "aborted"` — no `subagent_done` call needed. User input does not permanently disable auto-exit. Recommended for autonomous agents (scout, worker); not for interactive ones (planner). Also determines the default value of `interactive` (see below). |
 | `interactive` | boolean | Override whether stall/recovery transitions wake the parent session. Defaults to the inverse of `auto-exit`: autonomous agents (`auto-exit: true`) are non-interactive and get stall pings; agents without `auto-exit` are interactive and stay quiet. Explicit values take precedence. |
 | `cwd`         | string  | Default working directory. Absolute paths are unambiguous; relative agent-frontmatter paths resolve from Pi's agent config directory (`PI_CODING_AGENT_DIR` or `~/.pi/agent`), not the project root                                                                                                                                                                                                            |

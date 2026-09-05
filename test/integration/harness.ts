@@ -193,6 +193,7 @@ function writeTestProviderConfig(agentDir: string): void {
 							"fallback-primary",
 							"fallback-secondary",
 							"fallback-fail",
+							"account-rejected",
 						].map((id) => ({
 							id,
 							name: "Deterministic integration test model",

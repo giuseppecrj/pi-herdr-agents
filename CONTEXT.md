@@ -33,7 +33,7 @@ The runner-owned append-only `run.jsonl` that starts with approval binding the w
 _Avoid_: User-authored plan, mutable audit log, duplicated result
 
 **Terminal lifecycle**:
-Completed read and review panes close after result capture while child session files and run evidence remain. Writer-worktree retention belongs to a deferred writer workflow.
+Every workflow terminal path stops queued work and accounts for active read and review panes before checkout disposal and final delivery. Completed panes close after result capture while child session files and run evidence remain. Unconfirmed child exit retains the checkout and ends failed with `cancel_termination_failed`. Writer-worktree retention belongs to a deferred writer workflow.
 _Avoid_: Retaining every clean pane, deleting review evidence
 
 **Restart boundary**:
