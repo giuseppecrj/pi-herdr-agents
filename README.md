@@ -342,12 +342,25 @@ followed by agent frontmatter, per-agent config, the global default, and finally
 the parent model. Model values must be exact authenticated `provider/model-id`
 references. A value can contain an ordered comma-separated fallback list, for
 example `provider/preferred, provider/fallback`. The extension validates every
-candidate before launch, retries the preferred model normally, then launches
-later candidates only after a provider/agent request failure. A completed child
-result, including a negative task result, never switches models. Completion
-metadata and the status widget report the model actually used; an exhausted
-list reports every attempted model. Workflow metadata accepts one exact model
-only, to keep approved workflow runtimes deterministic.
+candidate before launch, then launches later candidates only after the selected
+child settles with a provider/agent error. Pi owns any automatic transient
+retrying inside that child; the extension does not infer retry counts or
+permanence from the error text. A completed child result, including a negative
+task result, never switches models. Completion metadata reports the requested
+candidate, every attempted candidate, the model actually used, and each raw
+model failure in attempt order when fallbacks are tried. Workflow metadata accepts one exact
+model only, to keep approved workflow runtimes deterministic.
+
+A catalog-listed model and configured authentication do not prove that the
+active provider account can use that model. Providers may reject an account /
+model combination only when the request is made. The completion preserves each
+raw provider reason with its model and suggests checking account access,
+spawning a new subagent with a supported model, or choosing an appropriate
+configured fallback. `subagent_resume` does not select a model and should be
+used only after the session's stored model is usable. The completion does not
+claim a permanent failure or a retry count that Pi has not exposed. Reliable
+structured permanence and retry counts require an upstream Pi/ExtensionAPI
+diagnostics seam for final provider errors and retry outcomes.
 
 `config.json` is gitignored in the source tree so local overrides are not
 committed from a checkout. On an installed package root, treat it as disposable

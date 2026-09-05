@@ -565,6 +565,19 @@ const server = createServer(async (request, response) => {
 	}
 	try {
 		const chatRequest = await readJson(request);
+		if (chatRequest.model === "account-rejected") {
+			providerRequests.push({ model: chatRequest.model, status: 400 });
+			response.writeHead(400, { "content-type": "application/json" });
+			response.end(
+				JSON.stringify({
+					error: {
+						message:
+							"The 'account-rejected' model is not supported when using this account.",
+					},
+				}),
+			);
+			return;
+		}
 		if (
 			chatRequest.model === "fallback-primary" ||
 			chatRequest.model === "fallback-fail"

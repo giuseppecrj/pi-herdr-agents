@@ -86,7 +86,7 @@ function completionArtifact(
 	return consumeExitSidecar(options.sessionFile);
 }
 
-async function waitForDisappearanceArtifacts(
+async function waitForDelayedSidecar(
 	signal: AbortSignal,
 	options: CompletionOptions,
 ): Promise<CompletionResult | null> {
@@ -137,7 +137,15 @@ export async function waitForCompletion(
 
 		try {
 			const exitCode = terminalExitCode(await options.readTerminalTail());
-			if (exitCode !== null) return { reason: "sentinel", exitCode };
+			if (exitCode !== null) {
+				// The shell sentinel can become readable just before the child writes
+				// its authoritative error sidecar. Preserve that error metadata.
+				if (exitCode !== 0) {
+					const racedCompletion = await waitForDelayedSidecar(signal, options);
+					if (racedCompletion) return racedCompletion;
+				}
+				return { reason: "sentinel", exitCode };
+			}
 		} catch {
 			// Terminal reads are only sentinel/output probes; Herdr status is polled
 			// independently below, even when terminal reads succeed.
@@ -155,10 +163,7 @@ export async function waitForCompletion(
 			if (inspection.kind === "missing") {
 				// Pane closure and atomic artifact publication are separate operations.
 				// Allow a short bounded grace window before declaring evidence lost.
-				const racedCompletion = await waitForDisappearanceArtifacts(
-					signal,
-					options,
-				);
+				const racedCompletion = await waitForDelayedSidecar(signal, options);
 				if (racedCompletion) return racedCompletion;
 				return {
 					reason: "error",

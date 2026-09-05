@@ -1110,6 +1110,98 @@ for (const backend of backends) {
 				result.details.runtimePlan.model,
 				"pi-integration/fallback-secondary",
 			);
+			assert.equal(result.details.fallbackFailures.length, 1);
+			assert.equal(
+				result.details.fallbackFailures[0].model,
+				"pi-integration/fallback-primary",
+			);
+			assert.match(
+				result.details.fallbackFailures[0].error,
+				/deterministic fallback provider failure/,
+			);
+			assert.match(
+				result.content,
+				/Requested model: pi-integration\/fallback-primary/,
+			);
+			assert.match(
+				result.content,
+				/Model used: pi-integration\/fallback-secondary/,
+			);
+		});
+
+		it("advances after an account-style HTTP rejection without repeating that model", async () => {
+			const id = uniqueId();
+			const markerFile = `/tmp/pi-integ-account-fallback-${id}.txt`;
+			const parentSession = join(
+				env.dir,
+				`account-fallback-parent-${id}.jsonl`,
+			);
+			trackTempFile(env, markerFile);
+			const surface = createTrackedSurface(env, `account-fallback-${id}`);
+			await waitForPaneReady(surface);
+			startPi(
+				surface,
+				env.dir,
+				[
+					`Call subagent once with name: "AccountFallback-${id}".`,
+					'agent: "test-echo".',
+					`model: "pi-integration/account-rejected, pi-integration/fallback-secondary".`,
+					`task: "Run: echo 'ACCOUNT_FALLBACK_${id}' > '${markerFile}'".`,
+				].join("\n"),
+				{ extraArgs: `--session ${shellQuote(parentSession)}` },
+			);
+
+			assert.match(
+				await waitForFile(markerFile, PI_TIMEOUT),
+				new RegExp(`ACCOUNT_FALLBACK_${id}`),
+			);
+			await waitForFile(
+				parentSession,
+				PI_TIMEOUT,
+				/"customType":"subagent_result"/,
+			);
+			const entries = readFileSync(parentSession, "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line));
+			const results = entries.filter(
+				(entry) =>
+					entry.type === "custom_message" &&
+					entry.customType === "subagent_result",
+			);
+			assert.equal(results.length, 1, "parent must receive one completion");
+			const result = results[0];
+			assert.deepEqual(result.details.fallbackAttempts, [
+				"pi-integration/account-rejected",
+				"pi-integration/fallback-secondary",
+			]);
+			assert.equal(
+				result.details.runtimePlan.model,
+				"pi-integration/fallback-secondary",
+			);
+			assert.equal(result.details.fallbackFailures.length, 1);
+			assert.equal(
+				result.details.fallbackFailures[0].model,
+				"pi-integration/account-rejected",
+			);
+			assert.match(
+				result.details.fallbackFailures[0].error,
+				/account-rejected.*not supported.*account/i,
+			);
+			assert.match(
+				result.content,
+				/Models attempted: pi-integration\/account-rejected, pi-integration\/fallback-secondary/,
+			);
+			assert.match(
+				result.content,
+				/Model used: pi-integration\/fallback-secondary/,
+			);
+			assert.doesNotMatch(result.content, /auto-retry exhausted/);
+			const rejectedRequests = getProviderRequests().filter(
+				(request) => request.model === "account-rejected",
+			);
+			assert.equal(rejectedRequests.length, 1);
+			assert.equal(rejectedRequests[0].status, 400);
 		});
 
 		it("reports every attempted model when all fallbacks fail", async () => {
@@ -1157,6 +1249,26 @@ for (const backend of backends) {
 				failedRequests.every((request) => request.status === 503),
 				true,
 			);
+			assert.equal(result.details.fallbackFailures.length, 2);
+			assert.deepEqual(
+				result.details.fallbackFailures.map(
+					(failure: { model: string }) => failure.model,
+				),
+				["pi-integration/fallback-primary", "pi-integration/fallback-fail"],
+			);
+			assert.match(
+				result.details.fallbackFailures[0].error,
+				/deterministic fallback provider failure/,
+			);
+			assert.match(
+				result.details.fallbackFailures[1].error,
+				/deterministic fallback provider failure/,
+			);
+			assert.match(
+				result.content,
+				/Models attempted: pi-integration\/fallback-primary, pi-integration\/fallback-fail/,
+			);
+			assert.doesNotMatch(result.content, /auto-retry exhausted/);
 		});
 	});
 }

@@ -1113,6 +1113,11 @@ function resolveUnexpectedErrorPresentation(
 	);
 }
 
+interface ModelFailure {
+	model: string;
+	error: string;
+}
+
 interface SubagentResultDetails {
 	name: string;
 	task?: string;
@@ -1123,6 +1128,7 @@ interface SubagentResultDetails {
 	error?: string;
 	errorMessage?: string;
 	fallbackAttempts?: string[];
+	fallbackFailures?: ModelFailure[];
 	worktree?: WorktreeHandoff;
 	runtimePlan?: ResolvedRuntimePlan;
 }
@@ -1245,6 +1251,8 @@ function resolveResultPresentation(
 		| "sessionFile"
 		| "errorMessage"
 		| "fallbackAttempts"
+		| "fallbackFailures"
+		| "runtimePlan"
 		| "worktree"
 	>,
 	name: string,
@@ -1252,18 +1260,26 @@ function resolveResultPresentation(
 ): string {
 	const sessionRef = formatSessionReference(result.sessionFile);
 	let body: string;
+	const attempted = result.fallbackAttempts ?? [];
+	const requestedModel =
+		attempted[0] ??
+		result.runtimePlan?.requestedModel ??
+		result.runtimePlan?.model;
+	const usedModel =
+		result.runtimePlan?.observed?.model ?? result.runtimePlan?.model;
 
 	if (result.errorMessage) {
-		// Auto-retry exhausted or other agent-loop error. The subagent did not
-		// produce a usable result — surface the underlying provider/network
-		// failure so the orchestrator can decide whether to retry, resume, or
-		// change approach instead of silently treating the run as completed.
+		// Pi owns provider retry policy and exposes the settled error as text. Do
+		// not infer retry counts or permanence from that text; preserve it as-is.
 		body =
 			`Sub-agent "${name}" failed after ${formatElapsed(result.elapsed)} ` +
-			`(provider/agent error — auto-retry exhausted).\n\n` +
+			`(provider/agent error).\n\n` +
 			`Error: ${result.errorMessage}\n\n` +
-			`The subagent did not produce a result. You can retry by spawning a new ` +
-			`subagent or resume the session with subagent_resume.`;
+			`The subagent did not produce a result. Next action: check the raw ` +
+			`provider reason and verify model access for this account. Spawn a new ` +
+			`subagent with a supported model or configured fallback; use ` +
+			`subagent_resume only after resolving access for this session's stored ` +
+			`model because resume does not select a model.`;
 	} else {
 		body =
 			result.exitCode === 0
@@ -1271,8 +1287,16 @@ function resolveResultPresentation(
 				: `Sub-agent "${name}" failed (exit code ${result.exitCode}).\n\n${result.summary}`;
 	}
 
-	if (result.fallbackAttempts && result.fallbackAttempts.length > 1) {
-		body += `\n\nModels attempted: ${result.fallbackAttempts.join(", ")}`;
+	if (requestedModel) body += `\n\nRequested model: ${requestedModel}`;
+	if (attempted.length > 1)
+		body += `\nModels attempted: ${attempted.join(", ")}`;
+	if (usedModel) body += `\nModel used: ${usedModel}`;
+	if (result.fallbackFailures?.length) {
+		body +=
+			"\nModel failures (raw errors, in attempt order):" +
+			result.fallbackFailures
+				.map(({ model, error }) => `\n- ${model}: ${error}`)
+				.join("");
 	}
 	if (result.worktree) body += `\n\n${formatWorktreeHandoff(result.worktree)}`;
 	const runtimeWarning = runtimeMismatch
@@ -1292,12 +1316,15 @@ interface SubagentResult {
 	exitCode: number;
 	elapsed: number;
 	error?: string;
-	/** Provider/agent error message when auto-retry exhausted (overload, rate limit, etc.). */
+	/** Settled provider/agent error text from the child, preserved verbatim. */
 	errorMessage?: string;
 	/** Ordered models launched for this run, including failed fallback attempts. */
 	fallbackAttempts?: string[];
+	/** Ordered raw errors associated with failed model attempts. */
+	fallbackFailures?: ModelFailure[];
 	ping?: { name: string; message: string };
 	worktree?: WorktreeHandoff;
+	runtimePlan?: ResolvedRuntimePlan;
 }
 
 /**
@@ -2038,6 +2065,7 @@ export const __test__ = {
 	handleSubagentInterrupt,
 	resolveResultPresentation,
 	resolveUnexpectedErrorPresentation,
+	shouldAdvanceToFallback,
 	sendSubagentResult,
 	shouldRetainSubagentSurface,
 	resolveWorktreeLaunchWarning,
@@ -2220,8 +2248,12 @@ async function launchSubagentWithFallbacks(
 	ctx: Parameters<typeof launchSubagent>[1],
 	parentThinking: ThinkingLevel,
 	plans: ResolvedRuntimePlan[],
-): Promise<{ running: RunningSubagent; index: number }> {
-	const failures: string[] = [];
+): Promise<{
+	running: RunningSubagent;
+	index: number;
+	launchFailures: ModelFailure[];
+}> {
+	const launchFailures: ModelFailure[] = [];
 	for (const [index, plan] of plans.entries()) {
 		try {
 			return {
@@ -2229,15 +2261,17 @@ async function launchSubagentWithFallbacks(
 					runtimePlan: plan,
 				}),
 				index,
+				launchFailures,
 			};
 		} catch (error) {
-			failures.push(
-				`${plan.model}: ${error instanceof Error ? error.message : String(error)}`,
-			);
+			launchFailures.push({
+				model: plan.model,
+				error: error instanceof Error ? error.message : String(error),
+			});
 		}
 	}
 	throw new Error(
-		`Subagent could not launch with any configured model. Attempted: ${plans.map((plan) => plan.model).join(", ")}. ${failures.join("; ")}`,
+		`Subagent could not launch with any configured model. Attempted: ${plans.map((plan) => plan.model).join(", ")}. ${launchFailures.map(({ model, error }) => `${model}: ${error}`).join("; ")}`,
 	);
 }
 
@@ -2344,6 +2378,7 @@ async function watchSubagent(
 			exitCode: result.exitCode,
 			elapsed,
 			ping: result.ping,
+			runtimePlan: running.runtimePlan,
 		};
 		if (result.errorMessage) watchResult.errorMessage = result.errorMessage;
 		if (worktreeHandoff) watchResult.worktree = worktreeHandoff;
@@ -2384,6 +2419,13 @@ async function watchSubagent(
 	}
 }
 
+export function shouldAdvanceToFallback(
+	result: Pick<SubagentResult, "errorMessage">,
+	remainingPlans: number,
+): boolean {
+	return !!result.errorMessage && remainingPlans > 0;
+}
+
 async function watchSubagentWithFallbacks(
 	initial: RunningSubagent,
 	initialPlanIndex: number,
@@ -2392,23 +2434,41 @@ async function watchSubagentWithFallbacks(
 	parentThinking: ThinkingLevel,
 	plans: ResolvedRuntimePlan[],
 	signal: AbortSignal,
+	initialLaunchFailures: ModelFailure[] = [],
 ): Promise<{ running: RunningSubagent; result: SubagentResult }> {
 	let running = initial;
 	let nextPlan = initialPlanIndex + 1;
-	const attempts = [running.runtimePlan?.model].filter(
-		(model): model is string => !!model,
-	);
+	const attempts = plans
+		.slice(0, initialPlanIndex + 1)
+		.map((plan) => plan.model);
+	const modelFailures = [...initialLaunchFailures];
 
 	for (;;) {
 		const result = await watchSubagent(running, signal);
-		const shouldRetry = !!result.errorMessage && nextPlan < plans.length;
+		const shouldRetry = shouldAdvanceToFallback(
+			result,
+			plans.length - nextPlan,
+		);
+		if (result.errorMessage) {
+			modelFailures.push({
+				model: running.runtimePlan?.model ?? attempts[attempts.length - 1],
+				error: result.errorMessage,
+			});
+		}
 		if (!shouldRetry) {
-			return { running, result: { ...result, fallbackAttempts: attempts } };
+			return {
+				running,
+				result: {
+					...result,
+					fallbackAttempts: attempts,
+					fallbackFailures: modelFailures,
+				},
+			};
 		}
 
 		runningSubagents.delete(running.id);
 		updateWidget();
-		const launchErrors: string[] = [];
+		const launchFailures: ModelFailure[] = [];
 		let launchedFallback = false;
 		while (nextPlan < plans.length) {
 			const plan = plans[nextPlan++];
@@ -2424,18 +2484,21 @@ async function watchSubagentWithFallbacks(
 				startStatusRefresh(runtime.pi!);
 				break;
 			} catch (error) {
-				launchErrors.push(
-					`${plan.model}: ${error instanceof Error ? error.message : String(error)}`,
-				);
+				launchFailures.push({
+					model: plan.model,
+					error: error instanceof Error ? error.message : String(error),
+				});
 			}
 		}
+		modelFailures.push(...launchFailures);
 		if (!launchedFallback) {
 			return {
 				running,
 				result: {
 					...result,
-					errorMessage: `${result.errorMessage}\n\nFallback launch failures: ${launchErrors.join("; ")}`,
+					errorMessage: `${result.errorMessage}\n\nFallback launch failures: ${launchFailures.map(({ model, error }) => `${model}: ${error}`).join("; ")}`,
 					fallbackAttempts: attempts,
+					fallbackFailures: modelFailures,
 				},
 			};
 		}
@@ -3465,13 +3528,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					params,
 					runtime.pi,
 				);
-				const { running, index: initialPlanIndex } =
-					await launchSubagentWithFallbacks(
-						params,
-						ctx,
-						parentThinking,
-						runtimePlans,
-					);
+				const {
+					running,
+					index: initialPlanIndex,
+					launchFailures: initialLaunchFailures,
+				} = await launchSubagentWithFallbacks(
+					params,
+					ctx,
+					parentThinking,
+					runtimePlans,
+				);
 
 				// Create a separate AbortController for the watcher
 				// (the tool's signal completes when we return)
@@ -3491,6 +3557,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					parentThinking,
 					runtimePlans,
 					watcherAbort.signal,
+					initialLaunchFailures,
 				)
 					.then(({ running: completedRunning, result }) => {
 						if (!shouldDeliverSubagentCompletion(completedRunning)) {
@@ -3553,6 +3620,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 							resultDetails.errorMessage = result.errorMessage;
 						if (result.fallbackAttempts)
 							resultDetails.fallbackAttempts = result.fallbackAttempts;
+						if (result.fallbackFailures)
+							resultDetails.fallbackFailures = result.fallbackFailures;
 						if (result.worktree) resultDetails.worktree = result.worktree;
 						if (completedRunning.runtimePlan)
 							resultDetails.runtimePlan = completedRunning.runtimePlan;
@@ -4370,7 +4439,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					)
 					.replace(
 						new RegExp(
-							`^Sub-agent "${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}" failed after ${elapsed} \\(provider/agent error — auto-retry exhausted\\)\\.\\n\\n`,
+							`^Sub-agent "${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}" failed after ${elapsed} \\(provider/agent error\\)\\.\\n\\n`,
 						),
 						"",
 					);

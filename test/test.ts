@@ -4057,6 +4057,37 @@ describe("completion.ts", () => {
 		assert.deepEqual(result, { reason: "sentinel", exitCode: 17 });
 	});
 
+	it("prefers an error sidecar published during the terminal read", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "completion-sentinel-race-"));
+		const sessionFile = join(dir, "child.jsonl");
+		try {
+			const result = await waitForCompletion(new AbortController().signal, {
+				intervalMs: 1,
+				sessionFile,
+				readTerminalTail: async () => {
+					await Promise.resolve();
+					writeFileSync(
+						`${sessionFile}.exit`,
+						JSON.stringify({
+							type: "error",
+							errorMessage: "account/model rejected",
+							stopReason: "error",
+						}),
+					);
+					return "output\n__SUBAGENT_DONE_1__\n";
+				},
+			});
+			assert.deepEqual(result, {
+				reason: "error",
+				exitCode: 1,
+				errorMessage: "account/model rejected",
+			});
+			assert.equal(existsSync(`${sessionFile}.exit`), false);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("retries transient terminal read failures and reports ticks", async () => {
 		let reads = 0;
 		let ticks = 0;
@@ -5292,7 +5323,8 @@ describe("subagent interruption", () => {
 		);
 
 		assert.match(presentation, /Sub-agent "Worker" failed/);
-		assert.match(presentation, /provider\/agent error — auto-retry exhausted/);
+		assert.match(presentation, /provider\/agent error/);
+		assert.doesNotMatch(presentation, /auto-retry exhausted/);
 		assert.match(
 			presentation,
 			/Error: Anthropic 529 Overloaded after 3 retries/,
@@ -5300,6 +5332,134 @@ describe("subagent interruption", () => {
 		assert.match(presentation, /subagent_resume/);
 		assert.match(presentation, /Resume: pi --session/);
 		assert.doesNotMatch(presentation, /ignored when errorMessage is present/);
+	});
+
+	it("does not advance fallback for a valid negative task result", () => {
+		const testApi = subagentsModule.__test__;
+		assert.equal(
+			testApi.shouldAdvanceToFallback({ errorMessage: undefined }, 1),
+			false,
+		);
+		assert.equal(
+			testApi.shouldAdvanceToFallback({ errorMessage: "provider failed" }, 1),
+			true,
+		);
+		assert.equal(
+			testApi.shouldAdvanceToFallback({ errorMessage: "provider failed" }, 0),
+			false,
+		);
+	});
+
+	it("preserves raw account/model errors and model evidence without retry claims", () => {
+		const testApi = subagentsModule.__test__;
+		const modelRef = "openai-codex/gpt-5.4";
+		const presentation = testApi.resolveResultPresentation(
+			{
+				exitCode: 1,
+				elapsed: 5,
+				summary: "ignored",
+				sessionFile: "/tmp/subagent.jsonl",
+				errorMessage:
+					"Codex error: The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account.",
+				fallbackAttempts: [modelRef],
+				runtimePlan: {
+					provider: "openai-codex",
+					modelId: "gpt-5.4",
+					model: modelRef,
+					thinking: "medium",
+					modelSource: "request",
+					thinkingSource: "request",
+				},
+			},
+			"Worker",
+		);
+
+		assert.match(presentation, /Requested model: openai-codex\/gpt-5\.4/);
+		assert.match(presentation, /Model used: openai-codex\/gpt-5\.4/);
+		assert.match(
+			presentation,
+			/Error: Codex error: The 'gpt-5\.4' model is not supported.*ChatGPT account/,
+		);
+		assert.match(presentation, /Next action: check the raw provider reason/);
+		assert.doesNotMatch(presentation, /auto-retry exhausted|permanent failure/);
+	});
+
+	it("reports ordered fallback causes, attempted models, and the model used on success", () => {
+		const testApi = subagentsModule.__test__;
+		const presentation = testApi.resolveResultPresentation(
+			{
+				exitCode: 0,
+				elapsed: 6,
+				summary: "Useful result",
+				fallbackAttempts: ["fake/primary", "fake/middle", "fake/secondary"],
+				fallbackFailures: [
+					{ model: "fake/primary", error: "provider rejected fake/primary" },
+					{ model: "fake/middle", error: "provider rejected fake/middle" },
+				],
+				runtimePlan: {
+					provider: "fake",
+					modelId: "secondary",
+					model: "fake/secondary",
+					thinking: "medium",
+					modelSource: "request",
+					thinkingSource: "request",
+				},
+			},
+			"Worker",
+		);
+
+		assert.match(presentation, /Requested model: fake\/primary/);
+		assert.match(
+			presentation,
+			/Models attempted: fake\/primary, fake\/middle, fake\/secondary/,
+		);
+		assert.match(presentation, /Model used: fake\/secondary/);
+		assert.match(
+			presentation,
+			/Model failures .*fake\/primary: provider rejected fake\/primary.*fake\/middle: provider rejected fake\/middle/s,
+		);
+		assert.doesNotMatch(presentation, /auto-retry exhausted/);
+	});
+
+	it("reports every rejected fallback candidate without inventing retry counts", () => {
+		const testApi = subagentsModule.__test__;
+		const presentation = testApi.resolveResultPresentation(
+			{
+				exitCode: 1,
+				elapsed: 7,
+				summary: "ignored",
+				errorMessage: "provider rejected fake/secondary",
+				fallbackAttempts: ["fake/primary", "fake/middle", "fake/secondary"],
+				fallbackFailures: [
+					{ model: "fake/primary", error: "provider rejected fake/primary" },
+					{ model: "fake/middle", error: "provider rejected fake/middle" },
+					{
+						model: "fake/secondary",
+						error: "provider rejected fake/secondary",
+					},
+				],
+				runtimePlan: {
+					provider: "fake",
+					modelId: "secondary",
+					model: "fake/secondary",
+					thinking: "medium",
+					modelSource: "request",
+					thinkingSource: "request",
+				},
+			},
+			"Worker",
+		);
+
+		assert.match(
+			presentation,
+			/Models attempted: fake\/primary, fake\/middle, fake\/secondary/,
+		);
+		assert.match(presentation, /Model used: fake\/secondary/);
+		assert.match(
+			presentation,
+			/Model failures .*fake\/primary: provider rejected fake\/primary.*fake\/middle: provider rejected fake\/middle.*fake\/secondary: provider rejected fake\/secondary/s,
+		);
+		assert.doesNotMatch(presentation, /auto-retry exhausted|after \d+ retries/);
 	});
 
 	it("leaves small completion presentations unchanged", () => {
@@ -5689,6 +5849,45 @@ describe("subagent status renderer", () => {
 
 		assert.match(rendered, /Session: \/tmp\/subagent\.jsonl/);
 		assert.match(rendered, /Resume:\s+pi --session \/tmp\/subagent\.jsonl/);
+	});
+
+	it("recognizes the neutral provider error header when rendering expanded results", () => {
+		const { api, registeredMessageRenderers } = createMockExtensionApi();
+		subagentsModule.default(api);
+		const rendererEntry = registeredMessageRenderers.find(
+			(entry) => entry.name === "subagent_result",
+		);
+		assert.ok(rendererEntry);
+
+		const rendered = rendererEntry
+			.renderer(
+				{
+					customType: "subagent_result",
+					content:
+						'Sub-agent "Worker" failed after 5s (provider/agent error).\n\n' +
+						"Error: account/model rejected\n\n" +
+						"Requested model: openai-codex/gpt-5.4\n" +
+						"Model used: openai-codex/gpt-5.4",
+					details: {
+						name: "Worker",
+						exitCode: 1,
+						errorMessage: "account/model rejected",
+						resultContent:
+							'Sub-agent "Worker" failed after 5s (provider/agent error).\n\n' +
+							"Error: account/model rejected\n\n" +
+							"Requested model: openai-codex/gpt-5.4\n" +
+							"Model used: openai-codex/gpt-5.4",
+					},
+				},
+				{ expanded: true },
+				createTheme(),
+			)
+			.render(120)
+			.join("\n");
+
+		assert.match(rendered, /account\/model rejected/);
+		assert.match(rendered, /Requested model: openai-codex\/gpt-5\.4/);
+		assert.doesNotMatch(rendered, /auto-retry exhausted/);
 	});
 
 	it("renders result details while keeping the custom message context small", () => {
