@@ -385,15 +385,89 @@ function getBundledAgentsDir(): string {
 	return join(SUBAGENTS_DIR, "../../agents");
 }
 
+function getFrontmatterLines(frontmatter: string, key: string): string[] {
+	const prefix = `${key}:`;
+	return frontmatter
+		.split("\n")
+		.filter((candidate) => candidate.startsWith(prefix));
+}
+
 function getFrontmatterValue(
 	frontmatter: string,
 	key: string,
 ): string | undefined {
-	const prefix = `${key}:`;
-	const line = frontmatter
-		.split("\n")
-		.find((candidate) => candidate.startsWith(prefix));
-	return line?.slice(prefix.length).trim() || undefined;
+	const line = getFrontmatterLines(frontmatter, key)[0];
+	return line?.slice(`${key}:`.length).trim() || undefined;
+}
+
+interface CapabilityDeclarations {
+	canonical: string[];
+	hasNoncanonical: boolean;
+}
+
+function isCapabilityDeclaration(
+	line: string,
+	field: "tools" | "deny-tools" | "spawning",
+): boolean {
+	const trimmed = line.trimStart();
+	const colon = trimmed.indexOf(":");
+	if (colon === -1) return false;
+	const key = trimmed.slice(0, colon).trim();
+	return key === field || key === `"${field}"` || key === `'${field}'`;
+}
+
+function getCapabilityDeclarations(
+	frontmatter: string,
+	field: "tools" | "deny-tools" | "spawning",
+): CapabilityDeclarations {
+	const canonicalPrefix = `${field}:`;
+	const lines = frontmatter.split("\n");
+	return {
+		canonical: lines.filter((line) => line.startsWith(canonicalPrefix)),
+		hasNoncanonical: lines.some(
+			(line) =>
+				isCapabilityDeclaration(line, field) &&
+				!line.startsWith(canonicalPrefix),
+		),
+	};
+}
+
+function validateCapabilityDeclarations(
+	frontmatter: string,
+): string | undefined {
+	for (const field of ["tools", "deny-tools", "spawning"] as const) {
+		const declarations = getCapabilityDeclarations(frontmatter, field);
+		if (declarations.hasNoncanonical) {
+			return `${field} must use an unquoted, unindented key written exactly as ${field}:`;
+		}
+		if (declarations.canonical.length > 1) {
+			return `${field} may be declared only once.`;
+		}
+		if (declarations.canonical.length === 0) continue;
+
+		const value = declarations.canonical[0].slice(`${field}:`.length).trim();
+		if (field === "spawning") {
+			if (value !== "true" && value !== "false") {
+				return "spawning must be true or false.";
+			}
+			continue;
+		}
+
+		if (
+			!value ||
+			value.startsWith("[") ||
+			value.startsWith("{") ||
+			value.startsWith("|") ||
+			value.startsWith(">") ||
+			value.includes("#") ||
+			value.includes('"') ||
+			value.includes("'") ||
+			value.split(",").some((entry) => !entry.trim())
+		) {
+			return `${field} must use a non-empty comma-separated scalar; YAML lists and containers, comments and quotes are unsupported.`;
+		}
+	}
+	return undefined;
 }
 
 function parseOptionalBoolean(value: string | undefined): boolean | undefined {
@@ -456,6 +530,24 @@ function parseAgentDefinition(
 				frontmatter,
 				"disable-model-invocation",
 			)?.toLowerCase() === "true",
+	};
+}
+
+function invalidCapabilityDeclarationDiagnostic(
+	content: string,
+	agentName: string,
+	path: string,
+): AgentDiagnostic | null {
+	const match = content.match(/^---\n([\s\S]*?)\n---/);
+	if (!match) return null;
+	const resolvedAgentName = getFrontmatterValue(match[1], "name") ?? agentName;
+	const error = validateCapabilityDeclarations(match[1]);
+	if (!error) return null;
+	return {
+		code: "invalid-capability-declaration",
+		message: `Role "${resolvedAgentName}" has an invalid capability declaration in ${path}: ${error} Use documented comma-separated tools or deny-tools values, true or false for spawning, or omit the field.`,
+		path,
+		agentName: resolvedAgentName,
 	};
 }
 
@@ -571,6 +663,16 @@ function discoverAgentCatalog(
 				agents.delete(legacyDiagnostic.agentName ?? fallbackName);
 				continue;
 			}
+			const capabilityDiagnostic = invalidCapabilityDeclarationDiagnostic(
+				content,
+				fallbackName,
+				filePath,
+			);
+			if (capabilityDiagnostic) {
+				diagnostics.push(capabilityDiagnostic);
+				agents.delete(capabilityDiagnostic.agentName ?? fallbackName);
+				continue;
+			}
 			const parsed = parseAgentDefinition(content, fallbackName);
 			if (parsed)
 				agents.set(parsed.name, { ...parsed, source, path: filePath });
@@ -637,6 +739,18 @@ function discoverAgentCatalog(
 			);
 			if (legacyDiagnostic) {
 				diagnostics.push({ ...legacyDiagnostic, provider: metadata.provider });
+				continue;
+			}
+			const capabilityDiagnostic = invalidCapabilityDeclarationDiagnostic(
+				content,
+				fallbackName,
+				filePath,
+			);
+			if (capabilityDiagnostic) {
+				diagnostics.push({
+					...capabilityDiagnostic,
+					provider: metadata.provider,
+				});
 				continue;
 			}
 			const parsed = parseAgentDefinition(content, fallbackName);
@@ -3288,19 +3402,25 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					};
 				}
 
-				const legacyRoleDiagnostic = params.agent
-					? discoverAgentCatalog(runtime.pi).diagnostics.find(
-							(candidate) =>
-								candidate.agentName === params.agent &&
-								candidate.code === "external-cli-unsupported",
-						)
+				const catalog = params.agent
+					? discoverAgentCatalog(runtime.pi)
 					: undefined;
-				if (legacyRoleDiagnostic) {
+				const roleDiagnostic =
+					catalog &&
+					!catalog.agents.some((agent) => agent.name === params.agent)
+						? catalog.diagnostics.find(
+								(candidate) =>
+									candidate.agentName === params.agent &&
+									(candidate.code === "external-cli-unsupported" ||
+										candidate.code === "invalid-capability-declaration"),
+							)
+						: undefined;
+				if (roleDiagnostic) {
 					return {
 						content: [
-							{ type: "text", text: `Error: ${legacyRoleDiagnostic.message}` },
+							{ type: "text", text: `Error: ${roleDiagnostic.message}` },
 						],
-						details: { error: legacyRoleDiagnostic.code },
+						details: { error: roleDiagnostic.code },
 					};
 				}
 

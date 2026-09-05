@@ -636,8 +636,11 @@ specific exact authenticated `provider/model-id`.
 
 `tools` is passed to Pi's `--tools` allowlist and may name any registered
 built-in, extension, or custom tool. Listing a tool does not install its
-extension. Likewise, `skills` names must already be discoverable by Pi; this
-package does not install role prerequisites.
+extension. Use one non-empty inline comma-separated scalar, such as
+`tools: read, grep`; do not use YAML lists, containers, quotes, or comments.
+Omitting `tools` intentionally leaves the role unrestricted. Likewise, `skills`
+names must already be discoverable by Pi; this package does not install role
+prerequisites.
 
 ### 3. Verify and launch
 
@@ -740,9 +743,17 @@ collision rules, and rejected alternatives.
 - Generic roles omit `model` unless a particular runtime is functionally required.
 - `/subagent list` shows the expected source and a smoke launch succeeds.
 
-The current parser is permissive: unsupported or unknown frontmatter may be
-ignored rather than rejected. Compare definitions against the reference below
-and verify them with `/subagent list` plus a smoke launch.
+Capability declarations are strict: use the unquoted, unindented keys
+`tools:`, `deny-tools:`, and `spawning:` exactly once when present. Declare
+`tools` and `deny-tools` as non-empty inline comma-separated scalars, and
+`spawning` as exactly `true` or `false`. YAML lists, containers, multiline
+values, quotes, comments, empty values, duplicates, noncanonical key spelling,
+and invalid booleans are rejected. A role with an invalid capability declaration
+is excluded from discovery, and an exact-name launch reports the diagnostic
+before creating a Herdr pane or worktree. Other unsupported or unknown
+frontmatter may still be ignored.
+Compare definitions against the reference below and verify them with
+`/subagent list` plus a smoke launch.
 
 ### Frontmatter Reference
 
@@ -753,11 +764,11 @@ and verify them with `/subagent list` plus a smoke launch.
 | `model`       | string  | Optional exact authenticated Pi model default or ordered comma-separated fallback list; omit to use per-agent config, global config, then the parent                                                                                                                       |
 | `thinking`    | string  | Optional Pi thinking default (`off` through `max`); omit to inherit the parent                                                                                                                                   |
 | `system-prompt` | string | `append` passes the agent body through Pi's appended system prompt; `replace` replaces Pi's default system prompt. Without this field, the body is included in the task wrapper                                                                                                                                                                                                                                 |
-| `tools`       | string  | Comma-separated Pi `--tools` allowlist; may contain any registered built-in, extension, or custom tool name                                                                                                                                                                 |
+| `tools`       | string  | One non-empty inline comma-separated Pi `--tools` allowlist under the exact unquoted key `tools:`; may contain any registered built-in, extension, or custom tool name. Omit to leave unrestricted. YAML lists, containers, multiline values, quotes, comments, noncanonical keys, and duplicates are rejected. |
 | `skills`      | string  | Comma-separated installed skill names to auto-load. Use this plural form for new definitions; legacy project/global definitions using singular `skill` remain compatible. |
 | `session-mode` | string | Default child-session mode: `standalone`, `lineage-only`, or `fork` |
-| `spawning`    | boolean | Set `false` to deny all subagent-spawning tools                                                                                                                                                                                                                             |
-| `deny-tools`  | string  | Comma-separated `pi-herdr-agents` tool names to suppress; this is not a universal cross-extension deny list                                                                                                                                                                  |
+| `spawning`    | boolean | Set exactly `false` to deny all subagent-spawning tools under the exact unquoted key `spawning:`. Only one `true` or `false` declaration is accepted. |
+| `deny-tools`  | string  | One non-empty inline comma-separated `pi-herdr-agents` tool list to suppress under the exact unquoted key `deny-tools:`; this is not a universal cross-extension deny list. YAML lists, containers, multiline values, quotes, comments, noncanonical keys, and duplicates are rejected. |
 | `auto-exit`   | boolean | Auto-shutdown after Pi fully settles when the latest assistant turn does not end with `stopReason: "aborted"` — no `subagent_done` call needed. User input does not permanently disable auto-exit. Recommended for autonomous agents (scout, worker); not for interactive ones (planner). Also determines the default value of `interactive` (see below). |
 | `interactive` | boolean | Override whether stall/recovery transitions wake the parent session. Defaults to the inverse of `auto-exit`: autonomous agents (`auto-exit: true`) are non-interactive and get stall pings; agents without `auto-exit` are interactive and stay quiet. Explicit values take precedence. |
 | `cwd`         | string  | Default working directory. Absolute paths are unambiguous; relative agent-frontmatter paths resolve from Pi's agent config directory (`PI_CODING_AGENT_DIR` or `~/.pi/agent`), not the project root                                                                                                                                                                                                            |

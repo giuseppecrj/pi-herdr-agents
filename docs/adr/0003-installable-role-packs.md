@@ -29,7 +29,14 @@ roles are listed or launched.
 
 Role packs use the existing agent-definition format. The filename stem is the
 canonical role name; `name` frontmatter is optional and, when present, must
-match the stem. `description` is required for contributed roles.
+match the stem. `description` is required for contributed roles. Capability
+declarations are strict: use the unquoted, unindented keys `tools:`,
+`deny-tools:`, and `spawning:` exactly once when present. `tools` and
+`deny-tools` must each be one non-empty inline comma-separated scalar, and
+`spawning` must be exactly `true` or `false`. YAML lists, containers,
+multiline or empty values, quotes, comments, noncanonical key spelling, and
+duplicate declarations are invalid; omit `tools` to intentionally leave a role
+unrestricted.
 
 ## Why
 
@@ -80,7 +87,10 @@ Within the package layer:
 
 Invalid registrations do not suppress unrelated roles. Listing surfaces report
 concise diagnostics, and an exact-name launch reports the matching diagnostic
-instead of treating an invalid contribution as a bare agent.
+instead of treating an invalid contribution as a bare agent. An invalid
+capability declaration makes that role name unavailable at its precedence layer
+rather than falling through to a lower-priority role, and launch rejects it
+before Herdr creates a pane or worktree.
 
 ## Reload and security
 

@@ -2687,6 +2687,305 @@ describe("subagent discovery", () => {
 		);
 	});
 
+	it("rejects malformed capability declarations without widening role tools", async () => {
+		await withIsolatedAgentEnv(async ({ projectDir, projectAgentsDir }) => {
+			const rolePackDir = join(projectDir, "invalid-capability-pack");
+			const rolesDir = join(rolePackDir, "roles");
+			mkdirSync(rolesDir, { recursive: true });
+			writeFileSync(
+				join(rolePackDir, "package.json"),
+				JSON.stringify({ name: "@acme/invalid-capability-pack" }),
+			);
+			writeAgentFile(
+				rolesDir,
+				"multiline-tools",
+				["description: Invalid multiline tools", "tools:", "  - read"].join(
+					"\n",
+				),
+			);
+			writeAgentFile(
+				projectAgentsDir,
+				"empty-tools",
+				["description: Invalid empty tools", "tools:"].join("\n"),
+			);
+			writeAgentFile(
+				projectAgentsDir,
+				"duplicate-tools",
+				[
+					"description: Invalid duplicate tools",
+					"tools: read",
+					"tools: grep",
+				].join("\n"),
+			);
+			writeAgentFile(
+				projectAgentsDir,
+				"invalid-deny-tools",
+				[
+					"description: Invalid multiline deny tools",
+					"deny-tools:",
+					"  - subagent",
+				].join("\n"),
+			);
+			writeAgentFile(
+				projectAgentsDir,
+				"invalid-spawning",
+				["description: Invalid spawning boolean", "spawning: maybe"].join("\n"),
+			);
+			for (const [name, frontmatter] of [
+				[
+					"quoted-deny-tools",
+					["description: Quoted deny tools", 'deny-tools: "subagent"'].join(
+						"\n",
+					),
+				],
+				[
+					"comment-deny-tools",
+					[
+						"description: Commented deny tools",
+						"deny-tools: subagent # prevent recursion",
+					].join("\n"),
+				],
+				[
+					"quoted-tools",
+					["description: Quoted tools", 'tools: "read"'].join("\n"),
+				],
+				[
+					"comment-tools",
+					["description: Commented tools", "tools: read # inspection"].join(
+						"\n",
+					),
+				],
+				[
+					"indented-tools",
+					["description: Indented tools", "  tools: read"].join("\n"),
+				],
+				[
+					"spaced-tools",
+					["description: Spaced tools", "tools : read"].join("\n"),
+				],
+				[
+					"quoted-key-tools",
+					["description: Quoted key tools", '"tools": read'].join("\n"),
+				],
+			] as const) {
+				writeAgentFile(projectAgentsDir, name, frontmatter);
+			}
+			writeAgentFile(
+				projectAgentsDir,
+				"scout",
+				["description: Invalid bundled override", "tools: []"].join("\n"),
+			);
+			writeAgentFile(
+				projectAgentsDir,
+				"valid-comma-tools",
+				["description: Valid comma tools", "tools: read, grep"].join("\n"),
+			);
+			writeAgentFile(
+				projectAgentsDir,
+				"valid-deny-tools",
+				["description: Valid deny tools", "deny-tools: subagent"].join("\n"),
+			);
+			writeAgentFile(
+				projectAgentsDir,
+				"omitted-tools",
+				"description: Intentionally unrestricted",
+			);
+
+			const { api, registeredTools } = createMockExtensionApi();
+			api.events.on(
+				"pi-herdr-subagents:roles:discover:v1",
+				(request: { register(path: string): void }) =>
+					request.register(rolesDir),
+			);
+			subagentsModule.default(api);
+
+			const listTool = registeredTools.find(
+				(tool) => tool.name === "subagents_list",
+			);
+			assert.ok(listTool, "expected subagents_list to be registered");
+			const result = await listTool.execute();
+			const names = new Set(
+				result.details.agents.map((agent: any) => agent.name),
+			);
+			for (const name of [
+				"multiline-tools",
+				"empty-tools",
+				"duplicate-tools",
+				"invalid-deny-tools",
+				"invalid-spawning",
+				"quoted-deny-tools",
+				"comment-deny-tools",
+				"quoted-tools",
+				"comment-tools",
+				"indented-tools",
+				"spaced-tools",
+				"quoted-key-tools",
+				"scout",
+			]) {
+				assert.equal(names.has(name), false, `${name} must be rejected`);
+			}
+			assert.equal(
+				result.details.agents.find(
+					(agent: any) => agent.name === "valid-comma-tools",
+				)?.tools,
+				"read, grep",
+			);
+			assert.equal(
+				result.details.agents.find(
+					(agent: any) => agent.name === "omitted-tools",
+				)?.tools,
+				undefined,
+			);
+			assert.equal(
+				testApi
+					.resolveDenyTools(testApi.loadAgentDefaults("valid-deny-tools"))
+					.has("subagent"),
+				true,
+				"a valid deny-tools scalar must resolve the actual tool name",
+			);
+			assert.equal(
+				result.details.diagnostics.filter(
+					(diagnostic: any) =>
+						diagnostic.code === "invalid-capability-declaration",
+				).length,
+				13,
+			);
+			assert.match(result.content[0].text, /tools must use a non-empty/i);
+			assert.match(result.content[0].text, /spawning must be true or false/i);
+			assert.match(
+				result.content[0].text,
+				/comments and quotes are unsupported/i,
+			);
+			assert.match(result.content[0].text, /unquoted, unindented key/i);
+
+			const subagentTool = registeredTools.find(
+				(tool) => tool.name === "subagent",
+			);
+			assert.ok(subagentTool, "expected subagent to be registered");
+			const previousHerdrEnv = process.env.HERDR_ENV;
+			delete process.env.HERDR_ENV;
+			try {
+				const launch = await subagentTool.execute(
+					"call-1",
+					{ name: "Malformed", task: "Review this branch", agent: "scout" },
+					new AbortController().signal,
+					() => {},
+					{},
+				);
+				assert.equal(launch.details.error, "invalid-capability-declaration");
+				assert.match(launch.content[0].text, /tools/i);
+			} finally {
+				restoreEnvVar("HERDR_ENV", previousHerdrEnv);
+			}
+		});
+	});
+
+	it("uses the effective higher-precedence role before launch diagnostics", async () => {
+		await withIsolatedAgentEnv(
+			async ({ projectDir, projectAgentsDir, globalAgentsDir }) => {
+				const rolePackDir = join(projectDir, "precedence-capability-pack");
+				const rolesDir = join(rolePackDir, "roles");
+				mkdirSync(rolesDir, { recursive: true });
+				writeFileSync(
+					join(rolePackDir, "package.json"),
+					JSON.stringify({ name: "@acme/precedence-capability-pack" }),
+				);
+				writeAgentFile(
+					globalAgentsDir,
+					"global-invalid-project-valid",
+					["description: Invalid global", "tools: []"].join("\n"),
+				);
+				writeAgentFile(
+					projectAgentsDir,
+					"global-invalid-project-valid",
+					["description: Valid project", "tools: read"].join("\n"),
+				);
+				writeAgentFile(
+					rolesDir,
+					"pack-invalid-project-valid",
+					["description: Invalid pack", "tools: []"].join("\n"),
+				);
+				writeAgentFile(
+					projectAgentsDir,
+					"pack-invalid-project-valid",
+					["description: Valid project", "tools: read"].join("\n"),
+				);
+				writeAgentFile(
+					globalAgentsDir,
+					"invalid-hidden-project-valid",
+					["description: Invalid global", "tools: []"].join("\n"),
+				);
+				writeAgentFile(
+					projectAgentsDir,
+					"invalid-hidden-project-valid",
+					[
+						"description: Valid hidden project",
+						"tools: read",
+						"disable-model-invocation: true",
+					].join("\n"),
+				);
+
+				const { api, registeredTools } = createMockExtensionApi();
+				api.events.on(
+					"pi-herdr-subagents:roles:discover:v1",
+					(request: { register(path: string): void }) =>
+						request.register(rolesDir),
+				);
+				subagentsModule.default(api);
+
+				const catalog = testApi.discoverAgentCatalog(api);
+				assert.equal(
+					catalog.diagnostics.filter(
+						(diagnostic) =>
+							diagnostic.code === "invalid-capability-declaration",
+					).length,
+					3,
+					"invalid lower-precedence roles remain visible as diagnostics",
+				);
+				for (const name of [
+					"global-invalid-project-valid",
+					"pack-invalid-project-valid",
+					"invalid-hidden-project-valid",
+				]) {
+					const agent = catalog.agents.find(
+						(candidate) => candidate.name === name,
+					);
+					assert.equal(agent?.source, "project");
+					assert.equal(agent?.tools, "read");
+				}
+
+				const subagentTool = registeredTools.find(
+					(tool) => tool.name === "subagent",
+				);
+				assert.ok(subagentTool, "expected subagent to be registered");
+				const previousHerdrEnv = process.env.HERDR_ENV;
+				delete process.env.HERDR_ENV;
+				try {
+					for (const agent of [
+						"global-invalid-project-valid",
+						"pack-invalid-project-valid",
+						"invalid-hidden-project-valid",
+					]) {
+						const launch = await subagentTool.execute(
+							"call-1",
+							{ name: "Valid override", task: "Inspect", agent },
+							new AbortController().signal,
+							() => {},
+							{},
+						);
+						assert.equal(launch.details.error, "herdr not available");
+						assert.doesNotMatch(
+							launch.content[0].text,
+							/invalid capability declaration/i,
+						);
+					}
+				} finally {
+					restoreEnvVar("HERDR_ENV", previousHerdrEnv);
+				}
+			},
+		);
+	});
+
 	it("rejects legacy external CLI roles before launch", async () => {
 		await withIsolatedAgentEnv(
 			async ({ globalAgentsDir, projectAgentsDir }) => {
