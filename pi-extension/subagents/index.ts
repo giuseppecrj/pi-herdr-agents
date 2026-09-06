@@ -1767,6 +1767,16 @@ function resolvePersistentTarget(params: { id?: string; name?: string }) {
 function persistentSpecialistState(
 	running: RunningSubagent,
 ): "idle" | "working" | "stalled" | "stopped" {
+	// Persistent task completion is authoritative for logical specialist state.
+	// Herdr can continue reporting the long-lived Pi pane as working while the
+	// process remains open between turns.
+	if (
+		running.persistent &&
+		running.tasksCompleted != null &&
+		!running.taskId &&
+		!running.stopState
+	)
+		return "idle";
 	const projection = projectLifecycle(
 		ensureLifecycle(running),
 		Date.now(),
@@ -3002,6 +3012,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 								completedRunning.stopState === "requested" ||
 								completedRunning.stopState === "pending"
 							) {
+								// A confirmed persistent stop owns pane cleanup; ordinary
+								// turn delivery intentionally leaves this pane alive.
+								finalizeSubagentSurface(
+									completedRunning,
+									"ready_for_review",
+									true,
+								);
 								appendPersistentDeliveryLedger(completedRunning.sessionFile, {
 									task: "stop",
 									outcome: "stopped",
