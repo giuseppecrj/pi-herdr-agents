@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isPlainObject } from "./type-guards.ts";
+import { isFiniteNumber, isRecord } from "./type-guards.ts";
 
 const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const DEFAULT_PERSISTENT_CONFIG_PATH = join(PACKAGE_ROOT, "config.json");
@@ -26,13 +26,13 @@ export function parsePersistentConfig(
 	rawConfig: any,
 	source = "config.json",
 ): PersistentConfig {
-	if (!isPlainObject(rawConfig)) {
+	if (!isRecord(rawConfig)) {
 		invalidPersistentConfig(source, "root must be an object");
 	}
 	if (!Object.hasOwn(rawConfig, "persistent")) {
 		return { maxAgents: DEFAULT_MAX_PERSISTENT_AGENTS };
 	}
-	if (!isPlainObject(rawConfig.persistent)) {
+	if (!isRecord(rawConfig.persistent)) {
 		invalidPersistentConfig(source, "persistent must be an object");
 	}
 	const unsupported = Object.keys(rawConfig.persistent).filter(
@@ -48,7 +48,11 @@ export function parsePersistentConfig(
 		return { maxAgents: DEFAULT_MAX_PERSISTENT_AGENTS };
 	}
 	const { maxAgents } = rawConfig.persistent;
-	if (!Number.isInteger(maxAgents) || maxAgents < 1) {
+	if (
+		!isFiniteNumber(maxAgents) ||
+		!Number.isInteger(maxAgents) ||
+		maxAgents < 1
+	) {
 		invalidPersistentConfig(
 			source,
 			"persistent.maxAgents must be a positive integer",

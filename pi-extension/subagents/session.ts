@@ -15,6 +15,7 @@ import { dirname, join } from "node:path";
 import {
 	isBoolean,
 	isPlainObject,
+	isRecord,
 	isString,
 	type JsonObject,
 	type JsonValue,
@@ -317,7 +318,7 @@ export function readSubagentSessionPolicy(
 	let worktree: PolicyWorktree | undefined;
 	const persistedWorktree = value.worktree;
 	if (persistedWorktree !== undefined) {
-		if (!isPlainObject(persistedWorktree))
+		if (!isRecord(persistedWorktree))
 			throw policyError(
 				sessionFile,
 				"the saved persistent worktree policy is malformed",
@@ -403,7 +404,7 @@ export function readPersistentTaskEvents(
 			try {
 				const value: unknown = JSON.parse(line);
 				if (
-					!isPlainObject(value) ||
+					!isRecord(value) ||
 					value.version !== 1 ||
 					(value.type !== "task-done" && value.type !== "help-request") ||
 					!isString(value.task) ||
@@ -465,10 +466,11 @@ export function readPersistentDeliveryLedger(
 			try {
 				const value: unknown = JSON.parse(line);
 				if (
-					!isPlainObject(value) ||
+					!isRecord(value) ||
 					!isString(value.task) ||
 					!isString(value.generation) ||
 					!isString(value.logicalId) ||
+					!isString(value.policyHash) ||
 					!/^[a-f0-9]{64}$/.test(value.policyHash) ||
 					!isString(value.at)
 				)
@@ -526,7 +528,7 @@ export function consumePersistentTaskInbox(
 	try {
 		const value: unknown = JSON.parse(readFileSync(claimed, "utf8"));
 		if (
-			!isPlainObject(value) ||
+			!isRecord(value) ||
 			value.version !== 1 ||
 			(value.type !== undefined &&
 				value.type !== "task" &&
