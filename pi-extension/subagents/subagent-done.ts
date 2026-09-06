@@ -7,6 +7,12 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { writeFileSync } from "node:fs";
+import {
+	appendPersistentTaskEvent,
+	consumePersistentTaskInbox,
+	readPersistentDeliveryLedger,
+	readPersistentTaskEvents,
+} from "./session.ts";
 import { createSubagentActivityRecorder } from "./activity.ts";
 import { isString } from "./type-guards.ts";
 
@@ -80,6 +86,43 @@ export function buildCompletionSidecar(
 	return errorInfo ? { type: "error", ...errorInfo } : { type: "done" };
 }
 
+export function buildPersistentTaskEvent(task: string, generation: string) {
+	return {
+		version: 1 as const,
+		type: "task-done" as const,
+		task,
+		generation,
+		at: new Date().toISOString(),
+	};
+}
+
+export function isPersistentStopDirective(
+	inbox: ReturnType<typeof consumePersistentTaskInbox>,
+): boolean {
+	return inbox?.type === "stop";
+}
+
+function findUnsettledPersistentTask(
+	sessionFile: string,
+	generation: string,
+): string {
+	const settledTasks = new Set(
+		readPersistentTaskEvents(sessionFile)
+			.filter((event) => event.generation === generation)
+			.map((event) => event.task),
+	);
+	return (
+		readPersistentDeliveryLedger(sessionFile)
+			.filter(
+				(entry) =>
+					entry.generation === generation &&
+					entry.outcome === "dispatched" &&
+					!settledTasks.has(entry.task),
+			)
+			.at(-1)?.task ?? ""
+	);
+}
+
 export function parseDeniedTools(rawValue: string | undefined): string[] {
 	return (rawValue ?? "")
 		.split(",")
@@ -97,6 +140,20 @@ export default function (pi: ExtensionAPI) {
 	const subagentAgent = process.env.PI_SUBAGENT_AGENT ?? "";
 	const deniedToolsValue = process.env.PI_DENY_TOOLS;
 	const autoExit = process.env.PI_SUBAGENT_AUTO_EXIT === "1";
+	const persistent = process.env.PI_SUBAGENT_PERSISTENT === "1";
+	const generation = process.env.PI_SUBAGENT_GENERATION_ID ?? "";
+	const sessionFile = process.env.PI_SUBAGENT_SESSION;
+	const initialTask = process.env.PI_SUBAGENT_TASK_ID ?? "";
+	let currentTask = persistent
+		? findUnsettledPersistentTask(sessionFile ?? "", generation) ||
+			(initialTask &&
+			!readPersistentTaskEvents(sessionFile ?? "").some(
+				(event) =>
+					event.task === initialTask && event.generation === generation,
+			)
+				? initialTask
+				: "")
+		: "";
 	const recorder = createSubagentActivityRecorder({
 		runningChildId: process.env.PI_SUBAGENT_ID,
 		activityFile: process.env.PI_SUBAGENT_ACTIVITY_FILE,
@@ -166,9 +223,11 @@ export default function (pi: ExtensionAPI) {
 	let agentStarted = false;
 	let latestAgentMessages: any[] | undefined;
 	let completionFinalized = false;
+	let sessionContext: { shutdown(): void } | undefined;
 
 	// Show widget + status bar on session start
 	pi.on("session_start", (_event, ctx) => {
+		sessionContext = ctx;
 		recorder.sessionStart();
 		const tools = pi.getAllTools();
 		toolNames = tools.map((t) => t.name).sort();
@@ -205,6 +264,28 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("agent_settled", (_event, ctx) => {
+		if (persistent && !completionFinalized) {
+			let messages = latestAgentMessages;
+			try {
+				const branchMessages = ctx.sessionManager
+					.getBranch()
+					.flatMap((entry) =>
+						entry.type === "message" ? [entry.message] : [],
+					);
+				if (branchMessages.length > 0) messages = branchMessages;
+			} catch {
+				// Fall back to the latest low-level run when session evidence is unavailable.
+			}
+			if (currentTask && shouldAutoExitOnAgentEnd(userTookOver, messages)) {
+				appendPersistentTaskEvent(
+					process.env.PI_SUBAGENT_SESSION ?? "",
+					buildPersistentTaskEvent(currentTask, generation),
+				);
+				currentTask = "";
+				recorder.agentEndWaiting();
+			}
+			return;
+		}
 		if (!autoExit || completionFinalized) return;
 
 		let messages = latestAgentMessages;
@@ -281,6 +362,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", (event) => {
+		if (inboxPoller) clearInterval(inboxPoller);
 		recorder.sessionShutdown(event.reason);
 	});
 
@@ -313,6 +395,23 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			recorder.callerPing();
+			if (persistent) {
+				appendPersistentTaskEvent(sessionFile, {
+					type: "help-request",
+					task: currentTask,
+					generation,
+					message: params.message,
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Help request sent. Stay available for subagent_send.",
+						},
+					],
+					details: {},
+				};
+			}
 			const exitData = {
 				type: "ping" as const,
 				name: process.env.PI_SUBAGENT_NAME ?? "subagent",
@@ -334,6 +433,36 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
+	let inboxPoller: ReturnType<typeof setInterval> | undefined;
+	if (persistent) {
+		inboxPoller = setInterval(() => {
+			try {
+				const sessionFile = process.env.PI_SUBAGENT_SESSION;
+				if (!sessionFile || currentTask) return;
+				const inbox = consumePersistentTaskInbox(sessionFile);
+				if (!inbox) return;
+				if (isPersistentStopDirective(inbox)) {
+					try {
+						writeFileSync(
+							`${sessionFile}.exit`,
+							JSON.stringify({ type: "done" }),
+						);
+					} catch {
+						// The parent can still confirm the shell exit marker.
+					}
+					completionFinalized = true;
+					recorder.subagentDone();
+					sessionContext?.shutdown();
+					return;
+				}
+				currentTask = inbox.task;
+				pi.sendUserMessage(inbox.message);
+			} catch {
+				// A malformed or transiently unavailable inbox must not kill the poller.
+			}
+		}, 1000);
+	}
+
 	if (autoExit) return;
 
 	pi.registerTool({
@@ -347,6 +476,22 @@ export default function (pi: ExtensionAPI) {
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
 			const sessionFile = process.env.PI_SUBAGENT_SESSION;
 			recorder.subagentDone();
+			if (persistent && sessionFile && currentTask) {
+				appendPersistentTaskEvent(
+					sessionFile,
+					buildPersistentTaskEvent(currentTask, generation),
+				);
+				currentTask = "";
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Task complete. Staying available for subagent_send.",
+						},
+					],
+					details: {},
+				};
+			}
 			if (sessionFile) {
 				writeFileSync(`${sessionFile}.exit`, JSON.stringify({ type: "done" }));
 			}

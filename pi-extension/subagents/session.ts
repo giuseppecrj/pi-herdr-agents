@@ -5,13 +5,17 @@ import {
 	existsSync,
 	mkdirSync,
 	readFileSync,
+	readdirSync,
+	renameSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import {
+	isBoolean,
 	isPlainObject,
+	isRecord,
 	isString,
 	type JsonObject,
 	type JsonValue,
@@ -46,21 +50,85 @@ export interface WorktreeSessionFork {
 	handoffMessage: string;
 }
 
-const SUBAGENT_POLICY_VERSION = 1;
+const SUBAGENT_POLICY_VERSION = 2;
 const SUBAGENT_POLICY_SUFFIX = ".pi-herdr-subagent-policy.json";
 
 export type SubagentSessionOwner = "public" | "managed-worktree";
 
-export interface SubagentSessionPolicy {
+interface PolicyWorktree {
+	path: string;
+	workspaceId: string;
+	branch: string;
+	baseSha: string;
+}
+
+export interface SubagentSessionPolicyV1 {
 	version: 1;
+	owner: SubagentSessionOwner;
+	tools: string[] | null;
+	deniedTools: string[];
+	persistent: false;
+}
+
+export interface SubagentSessionPolicyV2 {
+	version: 2;
 	owner: SubagentSessionOwner;
 	/** null deliberately means Pi's unrestricted default tool selection. */
 	tools: string[] | null;
 	deniedTools: string[];
+	persistent: boolean;
+	logicalId: string;
+	generationId: string;
+	policyHash: string;
+	worktree?: PolicyWorktree;
+}
+
+export type SubagentSessionPolicy =
+	| SubagentSessionPolicyV1
+	| SubagentSessionPolicyV2;
+
+export interface PersistentTaskEvent {
+	version: 1;
+	type: "task-done" | "help-request";
+	task: string;
+	generation: string;
+	at: string;
+	message?: string;
+}
+
+export interface PersistentDeliveryLedgerEntry {
+	task: string;
+	outcome:
+		| "dispatched"
+		| "delivered"
+		| "rejected-busy"
+		| "help-requested"
+		| "stop-pending"
+		| "stopped";
+	generation: string;
+	logicalId: string;
+	policyHash: string;
+	at: string;
+}
+
+export interface PersistentTaskInboxEntry {
+	version: 1;
+	type?: "task" | "stop";
+	task: string;
+	message: string;
+	at: string;
 }
 
 export function getSubagentSessionPolicyFile(sessionFile: string): string {
 	return `${sessionFile}${SUBAGENT_POLICY_SUFFIX}`;
+}
+
+export function getPersistentTaskEventsFile(sessionFile: string): string {
+	return `${sessionFile}.tasks`;
+}
+
+export function getPersistentDeliveryLedgerFile(sessionFile: string): string {
+	return `${sessionFile}.ledger`;
 }
 
 function normalizePolicyToolNames(
@@ -77,24 +145,57 @@ function normalizePolicyToolNames(
 	return normalized.length > 0 ? normalized : null;
 }
 
+function canonicalPolicyJson(
+	policy: Omit<SubagentSessionPolicyV2, "policyHash">,
+): string {
+	const canonical = {
+		version: policy.version,
+		owner: policy.owner,
+		tools: policy.tools,
+		deniedTools: policy.deniedTools,
+		persistent: policy.persistent,
+		logicalId: policy.logicalId,
+		generationId: policy.generationId,
+	};
+	return JSON.stringify(
+		policy.worktree ? { ...canonical, worktree: policy.worktree } : canonical,
+	);
+}
+
 export function writeSubagentSessionPolicy(
 	sessionFile: string,
-	policy: Omit<SubagentSessionPolicy, "version" | "tools" | "deniedTools"> & {
+	policy: {
+		owner: SubagentSessionOwner;
 		tools?: string | readonly string[];
 		deniedTools: readonly string[];
+		persistent?: boolean;
+		logicalId?: string;
+		generationId?: string;
+		worktree?: PolicyWorktree;
 	},
-): void {
-	const value: SubagentSessionPolicy = {
+): SubagentSessionPolicyV2 {
+	const unsigned: Omit<SubagentSessionPolicyV2, "policyHash"> = {
 		version: SUBAGENT_POLICY_VERSION,
 		owner: policy.owner,
 		tools: normalizePolicyToolNames(policy.tools),
 		deniedTools: normalizePolicyToolNames(policy.deniedTools) ?? [],
+		persistent: policy.persistent ?? false,
+		logicalId: policy.logicalId ?? randomUUID(),
+		generationId: policy.generationId ?? randomUUID(),
+	};
+	if (policy.worktree) unsigned.worktree = policy.worktree;
+	const value: SubagentSessionPolicyV2 = {
+		...unsigned,
+		policyHash: createHash("sha256")
+			.update(canonicalPolicyJson(unsigned))
+			.digest("hex"),
 	};
 	writeFileSync(
 		getSubagentSessionPolicyFile(sessionFile),
 		`${JSON.stringify(value)}\n`,
 		"utf8",
 	);
+	return value;
 }
 
 function policyError(sessionFile: string, reason: string): Error {
@@ -124,17 +225,31 @@ export function readSubagentSessionPolicy(
 	}
 	if (!isPolicyRecord(value))
 		throw policyError(sessionFile, "the saved launch policy is malformed");
-	const expected = new Set(["version", "owner", "tools", "deniedTools"]);
+	const version = value.version;
+	if (version !== 1 && version !== SUBAGENT_POLICY_VERSION) {
+		throw policyError(
+			sessionFile,
+			"the saved launch policy version is unsupported",
+		);
+	}
+	const expected =
+		version === 1
+			? new Set(["version", "owner", "tools", "deniedTools"])
+			: new Set([
+					"version",
+					"owner",
+					"tools",
+					"deniedTools",
+					"persistent",
+					"logicalId",
+					"generationId",
+					"policyHash",
+					"worktree",
+				]);
 	if (Object.keys(value).some((key) => !expected.has(key))) {
 		throw policyError(
 			sessionFile,
 			"the saved launch policy has unsupported fields",
-		);
-	}
-	if (value.version !== SUBAGENT_POLICY_VERSION) {
-		throw policyError(
-			sessionFile,
-			"the saved launch policy version is unsupported",
 		);
 	}
 	const owner = value.owner;
@@ -185,7 +300,270 @@ export function readSubagentSessionPolicy(
 	if (deniedTools === null) {
 		throw policyError(sessionFile, "the saved denied-tool policy is malformed");
 	}
-	return { version: 1, owner, tools, deniedTools };
+	if (version === 1) {
+		return { version: 1, owner, tools, deniedTools, persistent: false };
+	}
+	if (
+		!isBoolean(value.persistent) ||
+		!isString(value.logicalId) ||
+		!isString(value.generationId) ||
+		!isString(value.policyHash) ||
+		!/^[a-f0-9]{64}$/.test(value.policyHash)
+	) {
+		throw policyError(
+			sessionFile,
+			"the saved persistent launch policy is malformed",
+		);
+	}
+	let worktree: PolicyWorktree | undefined;
+	const persistedWorktree = value.worktree;
+	if (persistedWorktree !== undefined) {
+		if (!isRecord(persistedWorktree))
+			throw policyError(
+				sessionFile,
+				"the saved persistent worktree policy is malformed",
+			);
+		const path = persistedWorktree.path;
+		const workspaceId = persistedWorktree.workspaceId;
+		const branch = persistedWorktree.branch;
+		const baseSha = persistedWorktree.baseSha;
+		if (
+			Object.keys(persistedWorktree).some(
+				(key) => !["path", "workspaceId", "branch", "baseSha"].includes(key),
+			) ||
+			!isString(path) ||
+			!path ||
+			!isString(workspaceId) ||
+			!workspaceId ||
+			!isString(branch) ||
+			!branch ||
+			!isString(baseSha) ||
+			!baseSha
+		) {
+			throw policyError(
+				sessionFile,
+				"the saved persistent worktree policy is malformed",
+			);
+		}
+		worktree = { path, workspaceId, branch, baseSha };
+	}
+	const unsigned: Omit<SubagentSessionPolicyV2, "policyHash"> = {
+		version: 2,
+		owner,
+		tools,
+		deniedTools,
+		persistent: value.persistent,
+		logicalId: value.logicalId,
+		generationId: value.generationId,
+	};
+	if (worktree) unsigned.worktree = worktree;
+	if (
+		createHash("sha256").update(canonicalPolicyJson(unsigned)).digest("hex") !==
+		value.policyHash
+	) {
+		throw policyError(
+			sessionFile,
+			"the saved persistent launch policy hash is invalid",
+		);
+	}
+	const policy: SubagentSessionPolicyV2 = {
+		...unsigned,
+		policyHash: value.policyHash,
+	};
+	return policy;
+}
+
+export function appendPersistentTaskEvent(
+	sessionFile: string,
+	event: Omit<PersistentTaskEvent, "version" | "at"> & { at?: string },
+): PersistentTaskEvent {
+	const value: PersistentTaskEvent = {
+		version: 1,
+		type: event.type,
+		task: event.task,
+		generation: event.generation,
+		at: event.at ?? new Date().toISOString(),
+	};
+	if (event.message !== undefined) value.message = event.message;
+	appendFileSync(
+		getPersistentTaskEventsFile(sessionFile),
+		`${JSON.stringify(value)}\n`,
+		"utf8",
+	);
+	return value;
+}
+
+export function readPersistentTaskEvents(
+	sessionFile: string,
+): PersistentTaskEvent[] {
+	if (!existsSync(getPersistentTaskEventsFile(sessionFile))) return [];
+	return readFileSync(getPersistentTaskEventsFile(sessionFile), "utf8")
+		.split("\n")
+		.flatMap((line) => {
+			if (!line.trim()) return [];
+			try {
+				const value: unknown = JSON.parse(line);
+				if (
+					!isRecord(value) ||
+					value.version !== 1 ||
+					(value.type !== "task-done" && value.type !== "help-request") ||
+					!isString(value.task) ||
+					!isString(value.generation) ||
+					!isString(value.at) ||
+					(value.message !== undefined && !isString(value.message))
+				)
+					return [];
+				const event: PersistentTaskEvent = {
+					version: 1,
+					type: value.type,
+					task: value.task,
+					generation: value.generation,
+					at: value.at,
+				};
+				if (value.message !== undefined) event.message = value.message;
+				return [event];
+			} catch {
+				return [];
+			}
+		});
+}
+
+export function appendPersistentDeliveryLedger(
+	sessionFile: string,
+	entry: Omit<PersistentDeliveryLedgerEntry, "at"> & { at?: string },
+): PersistentDeliveryLedgerEntry {
+	const value: PersistentDeliveryLedgerEntry = {
+		...entry,
+		at: entry.at ?? new Date().toISOString(),
+	};
+	appendFileSync(
+		getPersistentDeliveryLedgerFile(sessionFile),
+		`${JSON.stringify(value)}\n`,
+		"utf8",
+	);
+	return value;
+}
+
+function parsePersistentLedgerOutcome(
+	value: JsonValue | undefined,
+): PersistentDeliveryLedgerEntry["outcome"] | null {
+	if (value === "dispatched") return value;
+	if (value === "delivered") return value;
+	if (value === "rejected-busy") return value;
+	if (value === "help-requested") return value;
+	if (value === "stop-pending") return value;
+	if (value === "stopped") return value;
+	return null;
+}
+
+export function readPersistentDeliveryLedger(
+	sessionFile: string,
+): PersistentDeliveryLedgerEntry[] {
+	if (!existsSync(getPersistentDeliveryLedgerFile(sessionFile))) return [];
+	return readFileSync(getPersistentDeliveryLedgerFile(sessionFile), "utf8")
+		.split("\n")
+		.flatMap((line) => {
+			try {
+				const value: unknown = JSON.parse(line);
+				if (
+					!isRecord(value) ||
+					!isString(value.task) ||
+					!isString(value.generation) ||
+					!isString(value.logicalId) ||
+					!isString(value.policyHash) ||
+					!/^[a-f0-9]{64}$/.test(value.policyHash) ||
+					!isString(value.at)
+				)
+					return [];
+				const outcome = parsePersistentLedgerOutcome(value.outcome);
+				if (!outcome) return [];
+				return [
+					{
+						task: value.task,
+						outcome,
+						generation: value.generation,
+						logicalId: value.logicalId,
+						policyHash: value.policyHash,
+						at: value.at,
+					},
+				];
+			} catch {
+				return [];
+			}
+		});
+}
+
+export function writePersistentTaskInbox(
+	sessionFile: string,
+	sequence: number,
+	entry: Omit<PersistentTaskInboxEntry, "version" | "at"> & { at?: string },
+): string {
+	const path = `${sessionFile}.task-inbox.${String(sequence).padStart(12, "0")}.json`;
+	const temporary = `${path}.tmp`;
+	writeFileSync(
+		temporary,
+		`${JSON.stringify({ version: 1, type: "task", ...entry, at: entry.at ?? new Date().toISOString() })}\n`,
+		"utf8",
+	);
+	renameSync(temporary, path);
+	return path;
+}
+
+export function consumePersistentTaskInbox(
+	sessionFile: string,
+): PersistentTaskInboxEntry | null {
+	const directory = dirname(sessionFile);
+	const prefix = `${sessionFile.split("/").pop()}.task-inbox.`;
+	for (const name of readdirSync(directory)) {
+		if (!name.startsWith(prefix) || !name.endsWith(".json.consuming")) continue;
+		const claimed = join(directory, name);
+		try {
+			renameSync(claimed, claimed.slice(0, -".consuming".length));
+		} catch {
+			// Another poller owns this claim, or recovery cannot safely proceed.
+		}
+	}
+	const inbox = readdirSync(directory)
+		.filter((name) => name.startsWith(prefix) && name.endsWith(".json"))
+		.sort()[0];
+	if (!inbox) return null;
+	const path = join(directory, inbox);
+	const claimed = `${path}.consuming`;
+	try {
+		renameSync(path, claimed);
+	} catch {
+		return null;
+	}
+	try {
+		const value: unknown = JSON.parse(readFileSync(claimed, "utf8"));
+		if (
+			!isRecord(value) ||
+			value.version !== 1 ||
+			(value.type !== undefined &&
+				value.type !== "task" &&
+				value.type !== "stop") ||
+			!isString(value.task) ||
+			!isString(value.message) ||
+			!isString(value.at)
+		)
+			throw new Error("invalid persistent task inbox entry");
+		const entry: PersistentTaskInboxEntry = {
+			version: 1,
+			task: value.task,
+			message: value.message,
+			at: value.at,
+		};
+		if (value.type === "task" || value.type === "stop") entry.type = value.type;
+		rmSync(claimed, { force: true });
+		return entry;
+	} catch {
+		try {
+			renameSync(claimed, `${path}.invalid`);
+		} catch {
+			// Keep the claimed file when it cannot be moved; never silently delete it.
+		}
+		return null;
+	}
 }
 
 function getForkContentLines(parentSessionFile: string): string[] {

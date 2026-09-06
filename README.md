@@ -15,6 +15,7 @@ Delegate investigation, implementation, and review without blocking the parent s
 - **Conversation handoff** — continue the active Pi conversation in a new worktree with `/worktree` while preserving the parent session.
 - **Orchestrated reviews** — fan out fresh public reviewers and synthesize their evidence in the parent.
 - **Reusable roles** — use bundled agents, project or global definitions, and installable role packs.
+- **Persistent specialists** — retain one policy-bound Pi session for sequential, turn-based tasks.
 
 ## Requirements
 
@@ -118,18 +119,20 @@ Subagent tabs, panes, and worktree workspaces are created without stealing keybo
 
 ### Extensions
 
-**Subagents** — 5 main-session tools + 6 commands, plus 2 child-only tools:
+**Subagents** — 6 main-session tools + 6 commands, plus 2 child-only tools:
 
 | Tool                 | Description                                                                                 |
 | -------------------- | ------------------------------------------------------------------------------------------- |
 | `subagent`           | Spawn a sub-agent in a dedicated herdr pane (async — returns immediately)             |
 | `subagent_interrupt` | Interrupt a running Pi-backed subagent's current turn                                       |
+| `subagent_send`      | Deliver a follow-up task to an idle persistent specialist                                   |
+| `subagent_stop`      | Gracefully stop a persistent specialist after its active task settles                      |
 | `subagents_list`     | List available agent definitions                                                            |
 | `subagent_resume`    | Resume a previous Pi-backed sub-agent session in a new ordinary pane (async)                          |
 
 | Pi child-only tool | Description |
 | ---------------- | ------------------------------------------------------------------------- |
-| `caller_ping` | Exit and ask the parent for help |
+| `caller_ping` | Ask the parent for help; ordinary children exit, persistent specialists stay alive |
 | `subagent_done` | Mark an interactive child complete and exit; autonomous agents auto-exit |
 
 | Command                    | Description                          |
@@ -294,6 +297,9 @@ cp config.json.example config.json
   "roles": {
     "bundled": true
   },
+  "persistent": {
+    "maxAgents": 3
+  },
   "panes": {
     "mode": "tab",
     "direction": "right"
@@ -301,7 +307,7 @@ cp config.json.example config.json
 }
 ```
 
-If `config.json` is absent, status, role, and pane settings fall back to `config.json.example`.
+If `config.json` is absent, status, role, pane, and persistent-specialist settings fall back to `config.json.example`.
 Model routing does not read the example: no model overrides apply until a real
 `config.json` exists.
 
@@ -320,6 +326,8 @@ exact IDs from your authenticated model catalog:
   }
 }
 ```
+
+Set `persistent.maxAgents` to the maximum concurrently retained persistent specialists. It defaults to `3`; a persistent spawn at the cap is rejected before Herdr creates a pane or workspace, and no specialist is evicted.
 
 Set `roles.bundled` to `false` to exclude this package's bundled role definitions from listing and exact-name launch. It defaults to `true`. Registered role packs remain available, and global and project definitions keep their existing precedence. A role-pack name collides with a bundled role only while that bundled layer is enabled; when it is disabled, the role pack can supply that name.
 
@@ -348,7 +356,7 @@ model combination only when the request is made. The completion preserves each
 raw provider reason with its model and suggests checking account access,
 spawning a new subagent with a supported model, or choosing an appropriate
 configured fallback. `subagent_resume` does not select a model and should be
-used only after the session's stored model is usable. The completion does not
+used only after the session's stored model is usable. Persistent session sidecars fail closed: v1 does not resume or revive a stopped or crashed specialist; retain its evidence and spawn a new specialist. The completion does not
 claim a permanent failure or a retry count that Pi has not exposed. Reliable
 structured permanence and retry counts require an upstream Pi/ExtensionAPI
 diagnostics seam for final provider errors and retry outcomes.
@@ -394,6 +402,7 @@ subagent({
 | `task`                 | string  | required       | Task prompt for the sub-agent                                                                     |
 | `agent`                | string  | —              | Load defaults from agent definition                                                               |
 | `fork`                 | boolean | `false`        | Force the full-context fork mode for this spawn, overriding any agent `session-mode` frontmatter  |
+| `persistent`           | boolean | `false`        | Keep one specialist session alive for sequential tasks; follow-ups use `subagent_send` only       |
 | `interactive`          | boolean | derived        | Mark this spawn as interactive (don't wake the parent on stall/recovery). Defaults to the agent's `interactive` frontmatter, otherwise the inverse of `auto-exit`. |
 | `model`                | string  | configured or parent | Exact authenticated `provider/model-id`, or an ordered comma-separated Pi fallback list; fallback lists are unavailable for worktree spawns. Resolution is tool argument → agent frontmatter → per-agent config → global config → parent |
 | `thinking`             | string  | parent level   | Pick the model tier first, then set thinking within that model's range: minimal/low for bounded mechanical work, medium for ordinary implementation or review, high+ for architecture, security, or hard diagnosis. Omitting still inherits the parent level; this is a discouraged fallback for orchestrated children. |
@@ -427,6 +436,16 @@ An ownership manifest is written under the parent session's `artifacts/<session-
 The extension does **not** push, create a PR, merge, cherry-pick, or remove the worktree or branch automatically. For task selection, lifecycle states, review commands, failure recovery, and safe cleanup, read [Worktree subagents](docs/worktree-subagents.md). The [research report](docs/research/worktree-subagent-orchestration.md) records the rationale and deferred roadmap.
 
 ---
+
+## Persistent specialists
+
+Set `persistent: true` on a `subagent` launch to create one logical specialist with one v1 session generation. Its resolved tools, denied tools, model, thinking level, and optional worktree binding are snapshotted at launch and do not change when work is sent later. `subagents_list` shows each live specialist's logical ID, generation ID, state, completed-task count, and effective policy.
+
+The initial task and each `subagent_send({ id|name, message })` task are delivered exactly once with a task ID. A specialist accepts one task at a time. Sends while it is working are recorded as `rejected-busy`; no queue is retained. After a task result arrives, it is idle and accepts the next task. A persistent child's `caller_ping` records a help request but keeps the session alive; answer with `subagent_send`.
+
+Use `subagent_stop({ id|name })` to request graceful shutdown. If a task is active, stop becomes `stop-pending` and the task reaches its terminal outcome first. The parent reports `stopped` only after process-exit evidence is confirmed, then closes an ordinary pane it created and releases the name. If confirmation times out, the specialist is `stalled` in an unconfirmed-stop state: `subagent_send` rejects follow-up work while retaining evidence. Request `subagent_stop` again to make another bounded exit check, or spawn a new specialist. A pane or process disappearance without a stop directive produces one facts-only crash notice; persistent sessions cannot be resumed in v1, so spawn a new specialist. There is no automatic restart, replay, or revival.
+
+A persistent specialist with a worktree holds that lease for its entire lifetime. It cannot be re-bound to another checkout. Otherwise it runs in an ordinary pane.
 
 ## Interrupting a running subagent
 
@@ -466,7 +485,7 @@ malformed reports, failures, and unresolved serious candidates propagate
 
 ## caller_ping — Child-to-Parent Help Request
 
-The `caller_ping` tool lets a Pi-backed subagent request help from its parent agent. When called, the child session **exits** and the parent receives a notification with the help message. The parent can then **resume** the child session with a response using `subagent_resume`.
+The `caller_ping` tool lets a Pi-backed subagent request help from its parent agent. Ordinary children **exit** and the parent can resume them with `subagent_resume`. Persistent specialists record a help-request outcome, stay alive, and accept a reply through `subagent_send`.
 
 **`caller_ping` parameters:**
 
@@ -484,10 +503,10 @@ Each public child stores a session-adjacent versioned launch-policy sidecar. Pub
 **Interaction flow:**
 
 1. Child calls `caller_ping({ message: "Not sure which schema to use" })`
-2. Child session exits (like `subagent_done`)
+2. Ordinary child sessions exit (like `subagent_done`); persistent specialists stay alive.
 3. Parent receives a steer notification: *"Sub-agent Worker needs help: Not sure which schema to use"*
-4. Parent resumes the child session via `subagent_resume` with the response
-5. Child picks up where it left off with the parent's guidance
+4. The parent resumes an ordinary child with `subagent_resume`, or replies to a persistent specialist with `subagent_send`.
+5. The child picks up with the parent's guidance
 
 **Example:**
 
@@ -739,6 +758,7 @@ Compare definitions against the reference below and verify them with
 | `deny-tools`  | string  | One non-empty inline comma-separated `pi-herdr-agents` tool list to suppress under the exact unquoted key `deny-tools:`; this is not a universal cross-extension deny list. YAML lists, containers, multiline values, quotes, comments, noncanonical keys, and duplicates are rejected. |
 | `auto-exit`   | boolean | Auto-shutdown after Pi fully settles when the latest assistant turn does not end with `stopReason: "aborted"` — no `subagent_done` call needed. User input does not permanently disable auto-exit. Recommended for autonomous agents (scout, worker); not for interactive ones (planner). Also determines the default value of `interactive` (see below). |
 | `interactive` | boolean | Override whether stall/recovery transitions wake the parent session. Defaults to the inverse of `auto-exit`: autonomous agents (`auto-exit: true`) are non-interactive and get stall pings; agents without `auto-exit` are interactive and stay quiet. Explicit values take precedence. |
+| `persistent` | boolean | Keep this role's specialist session open between tasks. Follow-up work uses `subagent_send`; persistent specialists cannot be resumed in v1. |
 | `cwd`         | string  | Default working directory. Absolute paths are unambiguous; relative agent-frontmatter paths resolve from Pi's agent config directory (`PI_CODING_AGENT_DIR` or `~/.pi/agent`), not the project root                                                                                                                                                                                                            |
 | `disable-model-invocation` | boolean | Hide a role from discovery surfaces like `subagents_list`. The definition remains directly invocable by exact name via `subagent({ agent: "name", ... })`. |
 
@@ -822,7 +842,7 @@ Without a restrictive `tools` allowlist or spawning policy, a sub-agent can spaw
 
 ### `spawning: false`
 
-Denies all subagent lifecycle tools (`subagent`, `subagent_interrupt`, `subagents_list`, `subagent_resume`):
+Denies all subagent lifecycle tools (`subagent`, `subagent_interrupt`, `subagent_send`, `subagent_stop`, `subagents_list`, `subagent_resume`):
 
 ```yaml
 ---

@@ -56,3 +56,27 @@ A review outcome for drift, failure, missing or truncated evidence, malformed
 output, coverage gaps, or unresolved serious candidates. A child-reported
 `INCOMPLETE` propagates to the parent result.
 _Avoid_: Hidden missing coverage, certified uncertainty
+
+**Persistent specialist**:
+A logical subagent that retains one policy-bound Pi session between sequential
+tasks until it is stopped or crashes.
+_Avoid_: Immortal process, reusable pane
+
+**Session generation**:
+One concrete Pi session serving a persistent specialist's logical identity.
+_Avoid_: Logical specialist, revived session
+
+**Task outcome**:
+The recorded terminal result for one persistent-specialist task, including
+`delivered`, `rejected-busy`, or a stop-pending task's eventual terminal state.
+_Avoid_: Assumed completion, replay candidate
+
+**Delivery ledger**:
+The append-only evidence record of persistent task dispatch and terminal
+outcomes for one session generation.
+_Avoid_: Work queue, mutable task list
+
+**Worktree lease**:
+The lifetime-exclusive binding between a persistent specialist generation and
+one managed worktree, when that specialist writes in a worktree.
+_Avoid_: Rebindable checkout, shared worktree ownership

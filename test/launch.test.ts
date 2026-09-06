@@ -131,12 +131,12 @@ describe("Pi launch", () => {
 			assert.equal(running.surface, "pane-1");
 			assert.equal(running.launchScriptFile, scriptPath);
 			assert.ok(running.sessionFile.startsWith(join(agentDir, "sessions")));
-			assert.deepEqual(readSubagentSessionPolicy(running.sessionFile), {
-				version: 1,
-				owner: "public",
-				tools: ["read", "bash"],
-				deniedTools: ["subagent", "subagent_resume"],
-			});
+			const policy = readSubagentSessionPolicy(running.sessionFile);
+			assert.equal(policy.version, 2);
+			assert.equal(policy.owner, "public");
+			assert.deepEqual(policy.tools, ["read", "bash"]);
+			assert.deepEqual(policy.deniedTools, ["subagent", "subagent_resume"]);
+			assert.equal(policy.persistent, false);
 			assert.equal(command.includes(projectAgentDir), false);
 			assert.match(command, new RegExp(`^cd '${project}' && `));
 			assert.match(command, /--model 'fake\/worker'/);

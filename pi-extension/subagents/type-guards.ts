@@ -35,6 +35,10 @@ export function isBoolean(value: any): value is boolean {
 }
 
 export function isPlainObject(value: any): boolean {
+	return isRecord(value);
+}
+
+export function isRecord(value: any): value is JsonObject {
 	return (
 		value !== null &&
 		Object.prototype.toString.call(value) === "[object Object]"

@@ -8,6 +8,9 @@
   "roles": {
     "bundled": true
   },
+  "persistent": {
+    "maxAgents": 3
+  },
   "panes": {
     "mode": "tab",
     "direction": "right"
