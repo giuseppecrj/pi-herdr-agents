@@ -10,6 +10,7 @@ import { writeFileSync } from "node:fs";
 import {
 	appendPersistentTaskEvent,
 	consumePersistentTaskInbox,
+	readPersistentDeliveryLedger,
 	readPersistentTaskEvents,
 } from "./session.ts";
 import { createSubagentActivityRecorder } from "./activity.ts";
@@ -101,6 +102,27 @@ export function isPersistentStopDirective(
 	return inbox?.type === "stop";
 }
 
+function findUnsettledPersistentTask(
+	sessionFile: string,
+	generation: string,
+): string {
+	const settledTasks = new Set(
+		readPersistentTaskEvents(sessionFile)
+			.filter((event) => event.generation === generation)
+			.map((event) => event.task),
+	);
+	return (
+		readPersistentDeliveryLedger(sessionFile)
+			.filter(
+				(entry) =>
+					entry.generation === generation &&
+					entry.outcome === "dispatched" &&
+					!settledTasks.has(entry.task),
+			)
+			.at(-1)?.task ?? ""
+	);
+}
+
 export function parseDeniedTools(rawValue: string | undefined): string[] {
 	return (rawValue ?? "")
 		.split(",")
@@ -122,13 +144,16 @@ export default function (pi: ExtensionAPI) {
 	const generation = process.env.PI_SUBAGENT_GENERATION_ID ?? "";
 	const sessionFile = process.env.PI_SUBAGENT_SESSION;
 	const initialTask = process.env.PI_SUBAGENT_TASK_ID ?? "";
-	let currentTask =
-		initialTask &&
-		!readPersistentTaskEvents(sessionFile ?? "").some(
-			(event) => event.task === initialTask && event.generation === generation,
-		)
-			? initialTask
-			: "";
+	let currentTask = persistent
+		? findUnsettledPersistentTask(sessionFile ?? "", generation) ||
+			(initialTask &&
+			!readPersistentTaskEvents(sessionFile ?? "").some(
+				(event) =>
+					event.task === initialTask && event.generation === generation,
+			)
+				? initialTask
+				: "")
+		: "";
 	const recorder = createSubagentActivityRecorder({
 		runningChildId: process.env.PI_SUBAGENT_ID,
 		activityFile: process.env.PI_SUBAGENT_ACTIVITY_FILE,

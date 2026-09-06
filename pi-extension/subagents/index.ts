@@ -1776,7 +1776,7 @@ function persistentSpecialistState(
 		ensureLifecycle(running),
 		Date.now(),
 	).kind;
-	if (running.stopState)
+	if (running.stopState && running.stopState !== "failed")
 		return projection === "stalled" ? "stalled" : "working";
 	if (running.taskId) return projection === "stalled" ? "stalled" : "working";
 	// Persistent task completion is authoritative for logical specialist state.
@@ -1887,10 +1887,14 @@ function startPersistentStopTimeout(
 	api: Pick<ExtensionAPI, "sendMessage">,
 	stopTimeoutMs = 15_000,
 ): void {
-	if (running.stopTimeout || running.stopState === "failed") return;
+	if (
+		running.stopTimeout ||
+		(running.stopState !== "requested" && running.stopState !== "pending")
+	)
+		return;
 	running.stopTimeout = setTimeout(() => {
-		if (!runningSubagents.has(running.id) || running.stopState === "failed")
-			return;
+		running.stopTimeout = undefined;
+		if (!runningSubagents.has(running.id)) return;
 		if (running.stopState === "requested" || running.stopState === "pending") {
 			running.stopState = "failed";
 			running.stopFailure =
@@ -2218,6 +2222,7 @@ export const __test__ = {
 	resolveUnexpectedErrorPresentation,
 	shouldAdvanceToFallback,
 	deliverPersistentTaskEvent,
+	notifyPersistentCrash,
 	sendSubagentResult,
 	shouldRetainSubagentSurface,
 	resolveWorktreeLaunchWarning,
@@ -2456,7 +2461,6 @@ function deliverPersistentTaskEvent(
 	if (inFlightPersistentTaskDeliveries.has(deliveryKey)) return;
 	const ledger = readPersistentDeliveryLedger(running.sessionFile);
 	if (event.type === "help-request") {
-		if (running.taskId === event.task) running.taskId = undefined;
 		if (
 			ledger.some(
 				(entry) =>
@@ -2486,6 +2490,7 @@ function deliverPersistentTaskEvent(
 				logicalId: running.logicalId!,
 				policyHash: running.policyHash!,
 			});
+			if (running.taskId === event.task) running.taskId = undefined;
 		} finally {
 			inFlightPersistentTaskDeliveries.delete(deliveryKey);
 		}
@@ -2546,6 +2551,25 @@ function drainPersistentTaskEvents(
 		);
 	}
 	running.observedTaskEvents = events.length;
+}
+
+function notifyPersistentCrash(
+	running: RunningSubagent,
+	api: Pick<ExtensionAPI, "sendMessage">,
+): void {
+	drainPersistentTaskEvents(running, api);
+	if (running.crashNotified) return;
+	running.crashNotified = true;
+	const facts = persistentSpecialistFacts(running);
+	api.sendMessage(
+		{
+			customType: "subagent_result",
+			content: `Persistent specialist crashed. Evidence is retained. Persistent sessions cannot be resumed in v1; spawn a new specialist.\n\n${formatPersistentSpecialistFacts(facts)}`,
+			display: true,
+			details: { error: "persistent-crash", facts },
+		},
+		{ triggerTurn: true, deliverAs: "steer" },
+	);
 }
 
 function watchPersistentTaskEvents(
@@ -3084,21 +3108,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 									},
 									{ triggerTurn: true, deliverAs: "steer" },
 								);
-							} else if (
-								completedRunning.stopState !== "failed" &&
-								!completedRunning.crashNotified
-							) {
-								completedRunning.crashNotified = true;
-								const facts = persistentSpecialistFacts(completedRunning);
-								completionApi.sendMessage(
-									{
-										customType: "subagent_result",
-										content: `Persistent specialist crashed. Evidence is retained. Persistent sessions cannot be resumed in v1; spawn a new specialist.\n\n${formatPersistentSpecialistFacts(facts)}`,
-										display: true,
-										details: { error: "persistent-crash", facts },
-									},
-									{ triggerTurn: true, deliverAs: "steer" },
-								);
+							} else if (completedRunning.stopState !== "failed") {
+								notifyPersistentCrash(completedRunning, completionApi);
 							}
 							runningSubagents.delete(completedRunning.id);
 							updateWidget();
@@ -3184,15 +3195,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						runningSubagents.delete(running.id);
 						updateWidget();
 						if (running.persistent) {
-							const facts = persistentSpecialistFacts(running);
-							selectCompletionApi(pi, runtime.pi).sendMessage(
-								{
-									customType: "subagent_result",
-									content: `Persistent specialist crashed. Evidence is retained. Persistent sessions cannot be resumed in v1; spawn a new specialist.\n\n${formatPersistentSpecialistFacts(facts)}`,
-									display: true,
-									details: { error: "persistent-crash", facts },
-								},
-								{ triggerTurn: true, deliverAs: "steer" },
+							notifyPersistentCrash(
+								running,
+								selectCompletionApi(pi, runtime.pi),
 							);
 							return;
 						}

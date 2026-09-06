@@ -3377,6 +3377,69 @@ describe("subagent-done.ts", () => {
 		}
 	});
 
+	it("keeps polling paused after reload while a dispatched follow-up remains unsettled", async () => {
+		const dir = createTestDir();
+		const previousPersistent = process.env.PI_SUBAGENT_PERSISTENT;
+		const previousSession = process.env.PI_SUBAGENT_SESSION;
+		const previousTask = process.env.PI_SUBAGENT_TASK_ID;
+		const previousGeneration = process.env.PI_SUBAGENT_GENERATION_ID;
+		const previousAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+		const sessionFile = join(dir, "persistent-follow-up-reload.jsonl");
+		process.env.PI_SUBAGENT_PERSISTENT = "1";
+		process.env.PI_SUBAGENT_SESSION = sessionFile;
+		process.env.PI_SUBAGENT_TASK_ID = "initial-task";
+		process.env.PI_SUBAGENT_GENERATION_ID = "generation";
+		delete process.env.PI_SUBAGENT_AUTO_EXIT;
+		appendPersistentDeliveryLedger(sessionFile, {
+			task: "initial-task",
+			outcome: "dispatched",
+			generation: "generation",
+			logicalId: "logical",
+			policyHash: "a".repeat(64),
+		});
+		appendPersistentTaskEvent(sessionFile, {
+			type: "task-done",
+			task: "initial-task",
+			generation: "generation",
+		});
+		appendPersistentDeliveryLedger(sessionFile, {
+			task: "follow-up-task",
+			outcome: "dispatched",
+			generation: "generation",
+			logicalId: "logical",
+			policyHash: "a".repeat(64),
+		});
+		writePersistentTaskInbox(sessionFile, 2, {
+			task: "next-task",
+			message: "next",
+		});
+		let shutdown: Function | undefined;
+		try {
+			const { api, eventHandlers, registeredTools, sentUserMessages } =
+				createMockExtensionApi();
+			subagentDoneExtension(api);
+			shutdown = eventHandlers.get("session_shutdown")?.[0];
+			await new Promise((resolve) => setTimeout(resolve, 1_100));
+			assert.deepEqual(sentUserMessages, []);
+
+			const done = registeredTools.find(
+				(tool) => tool.name === "subagent_done",
+			);
+			assert.ok(done);
+			await done.execute("call", {}, undefined, undefined, {});
+			await new Promise((resolve) => setTimeout(resolve, 1_100));
+			assert.deepEqual(sentUserMessages, ["next"]);
+		} finally {
+			shutdown?.({ reason: "reload" });
+			restoreEnvVar("PI_SUBAGENT_PERSISTENT", previousPersistent);
+			restoreEnvVar("PI_SUBAGENT_SESSION", previousSession);
+			restoreEnvVar("PI_SUBAGENT_TASK_ID", previousTask);
+			restoreEnvVar("PI_SUBAGENT_GENERATION_ID", previousGeneration);
+			restoreEnvVar("PI_SUBAGENT_AUTO_EXIT", previousAutoExit);
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("registers subagent_done for interactive children", () => {
 		const previousAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
 		delete process.env.PI_SUBAGENT_AUTO_EXIT;
@@ -5234,6 +5297,72 @@ describe("persistent subagent send", () => {
 		});
 	});
 
+	it("keeps a help-request task active until its steer and ledger append succeed", () => {
+		withTempDir((dir) => {
+			const sessionFile = join(dir, "help-delivery.jsonl");
+			const policy = writeSubagentSessionPolicy(sessionFile, {
+				owner: "public",
+				tools: ["read"],
+				deniedTools: [],
+				persistent: true,
+				logicalId: "logical-help-delivery",
+				generationId: "generation-help-delivery",
+			});
+			const now = Date.now();
+			const running: any = {
+				id: "logical-help-delivery",
+				name: "Persistent help delivery",
+				task: "first",
+				surface: "pane",
+				startTime: now,
+				sessionFile,
+				interactive: false,
+				runtimePlan: undefined,
+				persistent: true,
+				logicalId: "logical-help-delivery",
+				generationId: "generation-help-delivery",
+				policyHash: policy.policyHash,
+				taskId: "task-1",
+				lifecycle: {
+					...createLifecycle(now),
+					turn: { kind: "waiting", startedAt: now },
+				},
+			};
+			const event = appendPersistentTaskEvent(sessionFile, {
+				type: "help-request",
+				task: "task-1",
+				generation: running.generationId,
+				message: "Need direction.",
+			});
+			assert.throws(
+				() =>
+					testApi.deliverPersistentTaskEvent(running, event, {
+						sendMessage() {
+							throw new Error("stale API");
+						},
+					}),
+				/stale API/,
+			);
+			assert.equal(running.taskId, "task-1");
+			assert.equal(readPersistentDeliveryLedger(sessionFile).length, 0);
+
+			const messages: any[] = [];
+			testApi.deliverPersistentTaskEvent(running, event, {
+				sendMessage(message: any) {
+					messages.push(message);
+				},
+			});
+			assert.equal(running.taskId, undefined);
+			assert.equal(
+				readPersistentDeliveryLedger(sessionFile).filter(
+					(entry) => entry.outcome === "help-requested",
+				).length,
+				1,
+			);
+			assert.equal(messages.length, 1);
+		});
+	});
+
 	it("records a task delivery only after its result steer succeeds", () => {
 		withTempDir((dir) => {
 			const sessionFile = join(dir, "delivery.jsonl");
@@ -5293,6 +5422,58 @@ describe("persistent subagent send", () => {
 			assert.equal(messages[0].details.logicalId, running.logicalId);
 			assert.equal(messages[0].details.generationId, running.generationId);
 			assert.equal(messages[0].details.policyHash, running.policyHash);
+		});
+	});
+
+	it("drains final task events before sending a persistent crash notice", () => {
+		withTempDir((dir) => {
+			const sessionFile = join(dir, "crash-drain.jsonl");
+			const policy = writeSubagentSessionPolicy(sessionFile, {
+				owner: "public",
+				tools: ["read"],
+				deniedTools: [],
+				persistent: true,
+				logicalId: "logical-crash-drain",
+				generationId: "generation-crash-drain",
+			});
+			const now = Date.now();
+			const running: any = {
+				id: "logical-crash-drain",
+				name: "Persistent crash drain",
+				task: "first",
+				surface: "pane",
+				startTime: now,
+				sessionFile,
+				interactive: false,
+				runtimePlan: undefined,
+				persistent: true,
+				logicalId: "logical-crash-drain",
+				generationId: "generation-crash-drain",
+				policyHash: policy.policyHash,
+				taskId: "task-1",
+				observedTaskEvents: 0,
+				lifecycle: {
+					...createLifecycle(now),
+					turn: { kind: "waiting", startedAt: now },
+				},
+			};
+			appendPersistentTaskEvent(sessionFile, {
+				type: "task-done",
+				task: "task-1",
+				generation: running.generationId,
+			});
+			const { api, sentMessages } = createMockExtensionApi();
+			subagentsModule.default(api);
+			testApi.notifyPersistentCrash(running, api);
+
+			assert.equal(
+				readPersistentDeliveryLedger(sessionFile).at(-1)?.outcome,
+				"delivered",
+			);
+			assert.equal(sentMessages.length, 2);
+			assert.equal(sentMessages[0].message.details.task, "task-1");
+			assert.equal(sentMessages[1].message.details.error, "persistent-crash");
+			assert.match(sentMessages[1].message.content, /task-1=delivered/);
 		});
 	});
 
@@ -5503,6 +5684,48 @@ describe("persistent subagent stop", () => {
 				).length,
 				1,
 			);
+		} finally {
+			testApi.runningSubagents.clear();
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("rearms a bounded stop timeout after a prior timeout fails", async () => {
+		const dir = createTestDir();
+		try {
+			const sessionFile = join(dir, "retry-stop-timeout.jsonl");
+			const policy = writeSubagentSessionPolicy(sessionFile, {
+				owner: "public",
+				tools: ["read"],
+				deniedTools: [],
+				persistent: true,
+				logicalId: "logical-stop",
+				generationId: "generation-stop",
+			});
+			testApi.runningSubagents.clear();
+			const running = persistentFixture(sessionFile, policy.policyHash);
+			running.taskId = undefined;
+			running.tasksCompleted = 1;
+			testApi.runningSubagents.set(running.id, running);
+			const messages: any[] = [];
+			const api = {
+				sendMessage(message: any) {
+					messages.push(message);
+				},
+			};
+
+			testApi.handleSubagentStop({ id: running.id }, api, 0);
+			await new Promise((resolve) => setTimeout(resolve, 5));
+			assert.equal(running.stopState, "failed");
+			assert.equal(running.stopTimeout, undefined);
+
+			testApi.handleSubagentStop({ id: running.id }, api, 0);
+			assert.equal(running.stopState, "requested");
+			assert.ok(running.stopTimeout);
+			await new Promise((resolve) => setTimeout(resolve, 5));
+			assert.equal(running.stopState, "failed");
+			assert.equal(running.stopTimeout, undefined);
+			assert.equal(messages.length, 2);
 		} finally {
 			testApi.runningSubagents.clear();
 			rmSync(dir, { recursive: true, force: true });
