@@ -97,7 +97,6 @@ describe("bundled orchestration skill", () => {
 			"agents/visual-tester.md",
 			"agents/worker.md",
 			"pi-extension/subagents/plan-skill.md",
-			"pi-extension/subagents/workflow-worker.js",
 		]) {
 			assert.equal(
 				packageFiles.has(path),
@@ -108,6 +107,10 @@ describe("bundled orchestration skill", () => {
 		for (const path of packageFiles) {
 			assert.doesNotMatch(path, /(^|\/)(?:claude\.ts|plugin)(?:\/|$)/);
 		}
+		assert.equal(
+			packageFiles.has("pi-extension/subagents/workflow-worker.js"),
+			false,
+		);
 		assert.equal(packageFiles.has("agents/claude-reviewer.md"), false);
 		assert.equal(packageFiles.has("oxlint.config.ts"), false);
 		for (const path of packageFiles) {
@@ -121,24 +124,23 @@ describe("bundled orchestration skill", () => {
 		}
 	});
 
-	it("keeps the approved review contract in the bundled skill", () => {
+	it("keeps the public subagent review contract in the bundled skill", () => {
 		for (const phrase of [
 			"local paths, URLs, tickets",
-			"Materialize the",
-			"Parent-only preflight",
-			".pi/plans/<run>/workflow.js",
-			"Promise.all",
-			"retryable === true",
-			"identity-stripped projection of every result",
-			"herdr_workflow",
-			"unmodified",
-			"APPROVE <8 lowercase hex characters>",
+			"deleted and base-only",
+			"at least two fresh discovery reviewers",
+			"exact authenticated `provider/model-id`",
+			"author families",
+			"tools:",
+			"`read,bash` is **not** read-only",
+			"untrusted review data",
 			"Do not poll",
-			"security boundary",
+			"parent synthesizes",
 		]) {
 			assert.ok(skill.includes(phrase), `missing skill contract: ${phrase}`);
 		}
-		assert.doesNotMatch(skill, /subagent\s*\(\s*\{/);
+		assert.match(skill, /subagent\s*\(\s*\)/);
+		assert.doesNotMatch(skill, /herdr_workflow|APPROVE <|\bWorker\b|\bvm\b/);
 	});
 
 	it("keeps generic reviewer findings evidence-backed and task-specific", () => {
@@ -170,54 +172,49 @@ describe("bundled orchestration skill", () => {
 		);
 	});
 
-	it("keeps adversarial review inside the approved runner contract", () => {
+	it("keeps adversarial review in the public-child topology", () => {
 		assert.match(
 			skill,
 			/\[the adversarial review procedure\]\(adversarial-review\.md\)/,
 		);
 		for (const phrase of [
 			"Routine",
-			"2 distinct eligible exact model IDs",
+			"2 fresh reviewers",
 			"High",
-			"3 distinct eligible IDs with distinct lenses",
-			"candidate-dependent",
-			"different from the report author",
+			"3 fresh reviewers with distinct lenses",
+			"cross-family verifier",
 			"P0–P3",
 			"reproduced",
 			"trace-backed",
 			"unverified",
 			"INCOMPLETE",
 			"untrusted review data",
-			"every original `AgentResult`",
-			"identity-stripped projection",
-			"16,000-character",
-			"catalog source",
-			"omitted, with reasons",
+			"public `subagent()`",
+			"parent synthesis",
 		]) {
 			assert.ok(
 				adversarialReview.includes(phrase),
 				`missing adversarial contract: ${phrase}`,
 			);
 		}
-		assert.match(adversarialReview, /at most five[\s\S]*at most seven/);
-		assert.match(adversarialReview, /agent\(prompt, \{ kind: "review", node:/);
-		assert.match(adversarialReview, /fresh\s+standalone session/i);
+		assert.match(adversarialReview, /fresh\s+standalone/i);
 		assert.match(
 			adversarialReview,
 			/name \| agent kind \| role \| model \| worktree/,
 		);
-		assert.match(adversarialReview, /unified diff/i);
 		assert.match(adversarialReview, /deleted or base-only/i);
-		assert.match(adversarialReview, /child `INCOMPLETE`[\s\S]*`ok: true`/i);
+		assert.match(adversarialReview, /child\s+`INCOMPLETE`/i);
 		assert.match(
 			adversarialReview,
-			/author-family exclusion[\s\S]*origin is\s+unknown/i,
+			/author-family exclusion[\s\S]*origin is unknown/i,
 		);
 		assert.match(adversarialExample, /function validateReviewReport/);
 		assert.match(adversarialExample, /function parseReviewResult/);
-		assert.match(adversarialExample, /sourceReviewerId/);
-		assert.match(adversarialExample, /synthesis_prompt_bound/);
-		assert.doesNotMatch(adversarialReview, /subagent\s*\(\s*\{/);
+		assert.match(adversarialExample, /function validatePublicReviewResults/);
+		assert.doesNotMatch(
+			adversarialReview,
+			/herdr_workflow|APPROVE <|runner-owned/,
+		);
 		assert.doesNotMatch(adversarialReview, /confidence\s*[><=]/i);
 	});
 

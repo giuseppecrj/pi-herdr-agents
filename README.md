@@ -2,7 +2,7 @@
 
 ![Pi Herdr Agents: parallel Pi agents running asynchronously in dedicated Herdr panes and managed worktrees.](https://raw.githubusercontent.com/giuseppecrj/pi-herdr-agents/main/docs/assets/pi-herdr-agents-gallery.png)
 
-Asynchronous subagents and approved review workflows for [Pi](https://github.com/earendil-works/pi), running exclusively in [Herdr](https://herdr.dev).
+Asynchronous subagents for [Pi](https://github.com/earendil-works/pi), running exclusively in [Herdr](https://herdr.dev).
 
 Delegate investigation, implementation, and review without blocking the parent session. Each child runs as a real Pi process in its own Herdr surface; results return automatically when the child finishes.
 
@@ -13,7 +13,7 @@ Delegate investigation, implementation, and review without blocking the parent s
 - **Live supervision** — track process and turn state in Pi's subagent widget; interrupt one child turn without destroying its session.
 - **Managed worktrees** — isolate writing agents in retained Herdr workspaces with explicit Git ownership and recovery details.
 - **Conversation handoff** — continue the active Pi conversation in a new worktree with `/worktree` while preserving the parent session.
-- **Approved review workflows** — prepare and run bounded, read-only multi-agent reviews with fresh evidence and one synthesized result.
+- **Orchestrated reviews** — fan out fresh public reviewers and synthesize their evidence in the parent.
 - **Reusable roles** — use bundled agents, project or global definitions, and installable role packs.
 
 ## Requirements
@@ -126,7 +126,6 @@ Subagent tabs, panes, and worktree workspaces are created without stealing keybo
 | `subagent_interrupt` | Interrupt a running Pi-backed subagent's current turn                                       |
 | `subagents_list`     | List available agent definitions                                                            |
 | `subagent_resume`    | Resume a previous Pi-backed sub-agent session in a new ordinary pane (async)                          |
-| `herdr_workflow`     | Prepare, start, or cancel one exact approved project-local review workflow                   |
 
 | Pi child-only tool | Description |
 | ---------------- | ------------------------------------------------------------------------- |
@@ -144,30 +143,23 @@ Subagent tabs, panes, and worktree workspaces are created without stealing keybo
 
 ### Taxonomy and discovery
 
-This package uses five distinct concepts:
+This package distinguishes directly runnable **agent roles**, Pi-native
+**skills**, and authenticated Pi **runtimes**. A multi-stage user outcome may
+be a command or skill that composes roles; it is not itself an agent role.
 
-- An **agent role** is a directly runnable responsibility such as scouting,
-  implementation, or review.
-- A **workflow** is a user-facing recipe that composes roles, ordering,
-  artifacts, and runtime policy.
-- A **skill** is a Pi-native procedure loaded into the current agent. Skills are
-  dependencies of roles or workflows, not subagent definitions.
-- A **runtime** is the authenticated Pi provider/model and thinking policy used
-  for one invocation.
+The current orchestration inventory is:
 
-See [ADR-0002](docs/adr/0002-agent-workflow-skill-runtime-taxonomy.md) for the
-accepted decision, rationale, migration boundaries, and evidence.
+| Surface | Entry point | Behavior |
+| --- | --- | --- |
+| Planning | `/plan` | Scout, interactive planner, workers, and reviewer; writes plan artifacts. |
+| Iteration | `/iterate` | Opens one interactive full-context Pi fork. |
+| Side question | `/btw`, `/btw-close` | Opens one replaceable interactive Pi side session. |
+| Worktree handoff | `/worktree <name> [task]`, `/worktree list` | Forks the active conversation into a managed worktree. |
+| Orchestrated review | `/skill:orchestrate` | Parent materializes evidence, fans out public reviewers, and synthesizes results. |
+| Adversarial review | `/skill:orchestrate`, `adversarial-reviewer` | Risk-based public discovery, cross-family verification, and parent synthesis. |
 
-The current workflow inventory is:
-
-| Workflow | Entry point | Composition, artifacts, and runtime |
-| -------- | ----------- | ----------------------------------- |
-| Planning | `/plan` | Autonomous scout → interactive planner → workers → reviewer; writes `.pi/plans/...` artifacts; runs on Pi. |
-| Iteration | `/iterate` | Opens one interactive full-context Pi fork and returns its completion summary. |
-| Side question | `/btw`, `/btw-close` | Opens one replaceable interactive Pi side session; its answer stays outside the parent transcript. |
-| Worktree handoff | `/worktree <name> [task]`, `/worktree list` | Forks the active conversation into a long-lived interactive Pi process in a new worktree created from committed `HEAD`; retains the parent session. |
-| Approved review runner | `herdr_workflow` (low-level control tool) | Validates and runs exact approved project-local JavaScript with bounded read-only Pi reviewers. The bundled `orchestrate` skill authors generic and adversarial review topologies. |
-| Adversarial review | `/skill:orchestrate` (preferred), `adversarial-reviewer` (compatibility) | The preferred procedure uses exact approval, a pinned runner-owned checkout, risk-based discovery, candidate-dependent verification, and fresh synthesis. The compatibility coordinator uses public asynchronous children when the hardened prerequisites are unavailable. |
+See [ADR-0002](docs/adr/0002-agent-workflow-skill-runtime-taxonomy.md) and
+[ADR-0009](docs/adr/0009-remove-workflow-subsystem.md).
 
 ### Bundled visible definitions
 
@@ -179,7 +171,7 @@ The current workflow inventory is:
 | **reviewer** | Leaf agent role | Config, then parent | Reviews changes for correctness, security, and maintainability. |
 | **visual-tester** | Leaf agent role | Config, then parent | Performs visual QA through the `chrome-cdp` skill. |
 | **poteto** | Coordinator agent role | Config, then parent | Autonomously investigates, edits minimally, delegates independent work, and verifies. |
-| **adversarial-reviewer** | Compatibility coordinator role | Exact eligible authenticated Pi models selected by risk and project policy | Runs two routine or three high-risk discovery reviewers, candidate-dependent cross-family verification, and fresh synthesis through public asynchronous children. |
+| **adversarial-reviewer** | Coordinator role | Exact eligible authenticated Pi models selected by risk and project policy | Runs two routine or three high-risk discovery reviewers, candidate-dependent cross-family verification, and parent synthesis through public asynchronous children. |
 
 All subagents execute through Pi. Claude models remain available through normal
 Pi provider/model routing. Legacy role definitions that contain `cli` fail before
@@ -189,7 +181,7 @@ authenticated Pi `provider/model-id`.
 Optional prerequisites fail closed and are not bundled:
 
 - `visual-tester` needs an external `chrome-cdp` skill that provides `scripts/cdp.mjs`.
-- Adversarial review needs a resolved standalone `reviewer` role, confirmed human-only authorship or known author model families, and enough distinct exact authenticated Pi models to satisfy project author-family exclusion and cross-family verification. Routine discovery uses two distinct IDs; concrete high-risk surfaces use three distinct lenses. The preferred `orchestrate` procedure fails closed when its pinned committed checkout, complete diff evidence, origin, or runtime prerequisites are unavailable. The compatibility coordinator can use a project-approved reduced topology only when it discloses the omitted coverage.
+- Adversarial review needs a resolved standalone `reviewer` role, confirmed human-only authorship or known author model families, and enough distinct exact authenticated Pi models to satisfy project author-family exclusion and cross-family verification. Routine discovery uses two distinct IDs; concrete high-risk surfaces use three distinct lenses. The parent materializes pinned evidence before public fan-out. A project-approved reduced topology must disclose omitted coverage.
 - `/plan` uses the bundled scout and planner roles and records ordered tasks in
   `plan.md`; it does not require a researcher role, todo tool, or `write-todos` skill.
 
@@ -331,7 +323,7 @@ exact IDs from your authenticated model catalog:
 
 Set `roles.bundled` to `false` to exclude this package's bundled role definitions from listing and exact-name launch. It defaults to `true`. Registered role packs remain available, and global and project definitions keep their existing precedence. A role-pack name collides with a bundled role only while that bundled layer is enabled; when it is disabled, the role pack can supply that name.
 
-Set `panes.mode` to `"split"` to open ordinary public `subagent` and `subagent_resume` launches, including bare forks and `/iterate`, as splits of the stable parent pane. Set `panes.direction` to `"right"` or `"down"`; it defaults to `"right"` and is ignored when mode is `"tab"`. The default `"tab"` mode preserves existing behavior. Managed worktrees still use separate workspaces, while approved workflow readers and `/btw` keep their existing tab behavior.
+Set `panes.mode` to `"split"` to open ordinary public `subagent` and `subagent_resume` launches, including bare forks and `/iterate`, as splits of the stable parent pane. Set `panes.direction` to `"right"` or `"down"`; it defaults to `"right"` and is ignored when mode is `"tab"`. The default `"tab"` mode preserves existing behavior. Managed worktrees still use separate workspaces, while `/btw` keeps its existing tab behavior.
 
 Run `/reload` after changing role, model, or pane settings.
 
@@ -348,8 +340,7 @@ retrying inside that child; the extension does not infer retry counts or
 permanence from the error text. A completed child result, including a negative
 task result, never switches models. Completion metadata reports the requested
 candidate, every attempted candidate, the model actually used, and each raw
-model failure in attempt order when fallbacks are tried. Workflow metadata accepts one exact
-model only, to keep approved workflow runtimes deterministic.
+model failure in attempt order when fallbacks are tried.
 
 A catalog-listed model and configured authentication do not prove that the
 active provider account can use that model. Providers may reject an account /
@@ -425,7 +416,7 @@ prompts, handoffs, and results.
 
 Use one worktree per parallel independent writing task; a single or sequential writer can work in the parent checkout, and read-only agents use ordinary panes. `cwd` selects the source Git repository, `branch` must be unique, and `base` is resolved to an exact commit before creation. If `base` is omitted, the source checkout's committed `HEAD` is used. Parent-checkout changes that have not been committed are not copied.
 
-A launch with `worktree` and an effective bundled `scout`, `reviewer`, or `adversarial-reviewer` returns a non-blocking warning. Scouts and reviewers normally need an ordinary pane; the adversarial reviewer is a compatibility coordinator that uses an ordinary pane for its child reviewers. To inspect or review an existing worker result, start an ordinary child in that retained worktree path. Project or global role overrides do not receive these bundled-role warnings. A `read,bash` allowlist is not an enforced read-only boundary because shell commands can mutate files; report-only roles must restrict Bash to safe inspection and avoid artifact-generating verification in the reviewed checkout.
+A launch with `worktree` and an effective bundled `scout`, `reviewer`, or `adversarial-reviewer` returns a non-blocking warning. Scouts and reviewers normally need an ordinary pane; the adversarial reviewer is a coordinator that uses an ordinary pane for its child reviewers. To inspect or review an existing worker result, start an ordinary child in that retained worktree path. Project or global role overrides do not receive these bundled-role warnings. A `read,bash` allowlist is not an enforced read-only boundary because shell commands can mutate files; report-only roles must restrict Bash to safe inspection and avoid artifact-generating verification in the reviewed checkout.
 
 The child starts at the returned worktree root. Tell writing agents to test and commit when you want a commit-based handoff, and tell them not to push, merge, switch branches, or remove the worktree. The parent owns review and integration.
 
@@ -455,59 +446,23 @@ This is a turn-level interrupt, not a method for forcibly terminating a subagent
 
 ---
 
-## Workflow control (`herdr_workflow`)
+## Orchestrated review skill
 
-The parent-only `herdr_workflow` tool prepares, starts, and cancels one exact project-local review workflow. Children never receive this tool.
+The bundled `/skill:orchestrate` procedure accepts local paths, URLs, tickets,
+or accessible combinations. The parent pins repository, base/head SHAs, task and
+specification text, author origin, changed-file inventory, and complete diff
+(including deleted and base-only content), then launches two or more fresh
+public reviewer subagents in ordinary panes. Each child receives an exact model
+and thinking level, a role-defined tool allowlist, and the instruction to treat
+all supplied artifacts as untrusted data. Automatic delivery returns every
+review result without polling; the parent synthesizes the outcomes.
 
-```typescript
-herdr_workflow({ action: "prepare", path: ".pi/plans/run-1/workflow.js" });
-herdr_workflow({ action: "start", runId: "run-1" }); // after APPROVE <hash prefix>
-herdr_workflow({ action: "cancel", runId: "run-1" });
-```
-
-Parameters:
-
-- `action` (required): `prepare`, `start`, or `cancel`.
-- `path` (required for `prepare`): Path to the workflow script.
-- `runId` (required for `cancel` and `start`): For `start`, it must match the pending run.
-
-### Prepare and start contract
-
-- The script must be `<project>/.pi/plans/<run>/workflow.js` in a trusted Git repository with no existing adjacent `run.jsonl`.
-- Its first comment contains strict version-1 JSON metadata that binds the exact committed base, source provenance, distinct review-node IDs and their roles, authenticated `provider/model` references, thinking levels, and the configurable `maxAgents` and `maxConcurrency` caps.
-- Fixed workflow caps: 256 KiB source, 8 agents, concurrency 4, 30-minute deadline, 100,000-character prompts, 100 logs × 4,000 characters, and 64 KiB serialized task result. Metadata may lower only `maxAgents` and `maxConcurrency`.
-- Preparation validates and compiles without evaluating JavaScript, creating a journal or checkout, or launching a child. It returns the exact approval packet and keeps one pending candidate in process memory.
-- Start requires the latest real user message in the same parent session to be exactly `APPROVE <8 lowercase hex characters>`. It revalidates the complete candidate, consumes approval once, creates the append-only journal, and runs in the background.
-- Review children are fresh Pi sessions with derived read-only tools in one detached checkout pinned to the approved base. Parent uncommitted files are absent, intermediate child results stay inside the workflow, and operational failures remain explicit non-retryable evidence for parent-guided recovery.
-- Approved workflow JavaScript runs in a restricted `vm` inside a Worker thread. Neither mechanism is a security boundary; run only project code that the user has inspected and approved.
-- Same-process `/reload` keeps workflow ownership and the Worker alive. A full process restart performs interruption reconciliation only: it marks a stale running journal event `interrupted`, retains sessions/journals/checkouts, and does not replay, restart children, clean up, or expose history.
-
-### Cancel contract
-
-- Cancel claims a process-global terminal gate. Completion, failure, interruption, and cancellation cannot each produce a terminal outcome.
-- Queued `agent()` calls resolve as cancelled; no later reviewer or synthesizer starts.
-- New panes are queried through Herdr process-info until their interactive shell is ready before launch. Active panes are queried again before close so foreground process identities can be waited on.
-- After synchronous pane close, cancel waits for pane absence and captured process exit before disposing the reader checkout.
-- If process identity cannot be captured for an active pane, the pane remains present after close, or any captured process still lives after the bounded wait, the checkout is retained and the run ends `failed` with `cancel_termination_failed`. Successful cancellation is not reported in that case.
-- A successful cancel writes one `cancelled` terminal journal event and one result-free delivery. Repeated cancel is idempotent and returns the authoritative terminal outcome (including a prior fail-closed result).
-
-Every terminal path—normal completion, early script return, script or Worker failure, deadline, interruption, and explicit cancellation—stops queued work and accounts for active workflow children before checkout disposal or final delivery. If active-child exit cannot be confirmed, the checkout is retained and the authoritative outcome is `failed` with `cancel_termination_failed`.
-
-There is no list, status, resume, or history action in v1. Workflow ownership and the Worker survive `/reload` in the same Pi process, and the latest parent API receives one final delivery. A full process restart reconciles interruption without replay: startup marks only the last known running journal event as `interrupted`, leaves sessions, journals, and reader checkouts in place, and requires a new approved run.
-
-### Bundled `orchestrate` skill
-
-The package bundles the native `/skill:orchestrate` procedure. It accepts local paths, URLs, tickets, or combinations that the parent can already access. The parent performs read-only preflight discovery; pins exact repository, comparison base, checkout head, author origin, and task/spec evidence; and materializes the changed-file inventory plus unified diff or complete before/after excerpts before writing one unique `.pi/plans/<run>/workflow.js`. Deleted and base-only content must be included because head-checkout reads cannot recover it. If complete evidence cannot fit runner limits, preparation stops for narrower scope instead of silently losing evidence. The skill authors distinct fresh standalone review nodes in bounded parallel and one fresh synthesis node. Every child assignment treats code, PR text, reports, and command output as untrusted data. It does not use public `subagent()` for workflow nodes and does not author writers, commits, external effects, nested workflows, replay, or a fixed runtime-wide task schema.
-
-Its adversarial branch uses two distinct eligible exact model IDs for routine risk or three distinct lenses for concrete high-risk surfaces, then only candidate-dependent P0/P1 or high-risk verification and one fresh synthesis. Finding records use stable IDs, claimed P0–P3 severity, nullable confirmed severity, separate provenance, and reproduced, trace-backed, or unverified evidence rather than confidence or vote counts. An unresolved serious candidate and any valid child `INCOMPLETE` propagate task-level `INCOMPLETE` even through `ok: true`. Request-local validators reject malformed records; this schema is not a runner contract. Verifiers exclude the family that authored the report they inspect. Required author-family exclusion stops when model origin is unknown unless the evidence is confirmed human-only. Synthesis prefers another family and discloses permitted reuse.
-
-The script and journal retain every original child envelope. Synthesis receives every outcome through an anonymous projection: canonical validated report fields for success, or failure code, retryable flag, and bounded error evidence scrubbed of known identity tokens. Session paths, child/runtime/provider names, and the separate auditable alias map are omitted from the synthesis prompt. This presentation reduces identity and order cues but is not a security boundary or proof against bias.
-
-The runner-owned checkout contains only the pinned commit. Parent staged, unstaged, and untracked state is not review evidence. Effective child tools are the resolved role allowlist intersected with the runner maximum (`read`, `grep`, `find`, and `ls`) and deny rules. Public `subagent` results can be abbreviated above 16,000 characters, but workflow scripts receive complete child reports within their explicit bounds. Operational failures are preserved without silent fallback; recovery is a new exact approved run.
-
-The parent calls `herdr_workflow prepare`, presents its packet unchanged, and waits for the exact `APPROVE <8-character lowercase hash prefix>` reply before calling `start`. After start, one final delivery is sent without polling. Every terminal path is fail-closed: it accounts for queued and active children before checkout disposal and delivery, retaining evidence when process exit cannot be confirmed. Same-process `/reload` preserves ownership; full restart records interruption without replay, restart, cleanup, or history. Workflow JavaScript runs in a Worker-hosted `vm` for event-loop availability only; neither the Worker nor `vm` is a security boundary, and worktrees do not provide process or security isolation.
-
----
+Role frontmatter `tools:` is the only enforced allowlist. `read,bash` is not a
+read-only boundary because Bash can mutate files. The skill uses ordinary public child launches only; it does not create a private
+checkout, execute scripts, or request approval.
+Its adversarial branch adds risk-based discovery and cross-family verification;
+malformed reports, failures, and unresolved serious candidates propagate
+`INCOMPLETE`.
 
 ## caller_ping — Child-to-Parent Help Request
 
@@ -524,7 +479,7 @@ The `caller_ping` tool lets a Pi-backed subagent request help from its parent ag
 - `message` (optional): Follow-up prompt to send after resuming
 - `autoExit` (optional): Whether the resumed session should auto-exit after its next response fully settles. Defaults to `true` for autonomous follow-up work; set `false` when resuming for an interactive handoff.
 
-Each public child stores a session-adjacent versioned launch-policy sidecar. Public resume restores its resolved tool allowlist and denied subagent tools rather than looking up the current role, so later role changes cannot widen a child. An intentionally unrestricted launch remains unrestricted (no `--tools` argument); a restricted launch restores its exact allowlist. The `autoExit` override still controls whether `subagent_done` is available, while `caller_ping` remains available. Missing, malformed, or unsupported policy fails closed before a pane is created with recovery guidance. Public resume also rejects workflow-owned and managed-worktree child sessions; use their retained workflow evidence or workspace instead.
+Each public child stores a session-adjacent versioned launch-policy sidecar. Public resume restores its resolved tool allowlist and denied subagent tools rather than looking up the current role, so later role changes cannot widen a child. An intentionally unrestricted launch remains unrestricted (no `--tools` argument); a restricted launch restores its exact allowlist. The `autoExit` override still controls whether `subagent_done` is available, while `caller_ping` remains available. Missing, malformed, or unsupported policy fails closed before a pane is created with recovery guidance. Public resume rejects managed-worktree child sessions; use their retained workspace instead. Unknown policy owners, including legacy workflow sidecars, fail closed.
 
 **Interaction flow:**
 

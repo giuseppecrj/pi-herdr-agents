@@ -105,7 +105,6 @@ import {
 	projectLifecycle,
 	type SubagentLifecycle,
 } from "../pi-extension/subagents/lifecycle.ts";
-import type { PendingWorkflow } from "../pi-extension/subagents/workflow.ts";
 import { launchPiSubagent } from "../pi-extension/subagents/launch.ts";
 
 // Tool-registration behavior is environment-sensitive for child subagents.
@@ -1068,7 +1067,7 @@ describe("subagent resume launch policy", () => {
 		}
 	});
 
-	it("rejects absent, malformed, workflow, and worktree policies before pane creation", async () => {
+	it("rejects absent, malformed, unknown-owner, and worktree policies before pane creation", async () => {
 		const dir = createTestDir();
 		try {
 			const sessionFile = join(dir, "resume.jsonl");
@@ -1104,14 +1103,23 @@ describe("subagent resume launch policy", () => {
 				);
 				await assert.rejects(resume, /saved launch tool policy is malformed/);
 			}
-			for (const owner of ["workflow", "managed-worktree"] as const) {
-				writeSubagentSessionPolicy(sessionFile, {
-					owner,
+			writeFileSync(
+				getSubagentSessionPolicyFile(sessionFile),
+				JSON.stringify({
+					version: 1,
+					owner: "workflow",
 					tools: ["read"],
 					deniedTools: [],
-				});
-				await assert.rejects(resume, new RegExp(`Cannot resume ${owner}`));
-			}
+				}),
+				"utf8",
+			);
+			await assert.rejects(resume, /saved launch policy owner is invalid/);
+			writeSubagentSessionPolicy(sessionFile, {
+				owner: "managed-worktree",
+				tools: ["read"],
+				deniedTools: [],
+			});
+			await assert.rejects(resume, /Cannot resume managed-worktree/);
 			assert.equal(panes, 0);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
@@ -4738,58 +4746,6 @@ describe("subagent parent lifecycle", () => {
 		// SAFETY: intentionally simulates legacy data missing the (typed as
 		// required) `lifecycle` field; the implementation reads it optionally.
 		assert.equal(shouldDeliverSubagentCompletion({} as any), true);
-	});
-
-	it("runs the registered shutdown handler for session transitions", async () => {
-		const pending: PendingWorkflow = {
-			runId: "pending-run",
-			path: "/tmp/pending-workflow.js",
-			scriptHash: "a".repeat(64),
-			bytes: "",
-			metadata: {
-				version: 1,
-				name: "pending",
-				sources: [],
-				baseSha: "a".repeat(40),
-				maxAgents: 1,
-				maxConcurrency: 1,
-				roles: [],
-			},
-			repository: { root: "/tmp", commonDir: "/tmp/.git" },
-			baseSha: "a".repeat(40),
-			sources: [],
-			rolePolicies: [],
-			parentSession: {
-				id: "parent-session",
-				file: "/tmp/parent.jsonl",
-				prepareLeafId: "leaf",
-			},
-		};
-		const testApi = subagentsModule.__test__;
-
-		try {
-			for (const [reason, clearsPending] of [
-				["new", true],
-				["reload", false],
-				["quit", false],
-			] as const) {
-				testApi.setPendingWorkflowForTest(pending);
-				const { api, eventHandlers } = createMockExtensionApi();
-				subagentsModule.default(api);
-				const shutdown = eventHandlers.get("session_shutdown")?.[0];
-				assert.ok(shutdown, "expected session shutdown handler");
-
-				await assert.doesNotReject(() =>
-					shutdown({ type: "session_shutdown", reason }, {}),
-				);
-				assert.equal(
-					testApi.getPendingWorkflow(),
-					clearsPending ? undefined : pending,
-				);
-			}
-		} finally {
-			testApi.setPendingWorkflowForTest(undefined);
-		}
 	});
 
 	it("delivers completion through the reloaded extension API", () => {

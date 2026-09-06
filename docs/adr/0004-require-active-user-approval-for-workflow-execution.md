@@ -1,5 +1,7 @@
 # ADR-0004: Require active user approval for workflow-script execution
 
+**Status: superseded by ADR-0009**
+
 - **Status:** Accepted
 - **Date:** 2026-08-03
 - **Scope:** `giuseppecrj/pi-herdr-agents`

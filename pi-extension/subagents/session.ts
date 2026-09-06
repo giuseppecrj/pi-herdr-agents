@@ -49,7 +49,7 @@ export interface WorktreeSessionFork {
 const SUBAGENT_POLICY_VERSION = 1;
 const SUBAGENT_POLICY_SUFFIX = ".pi-herdr-subagent-policy.json";
 
-export type SubagentSessionOwner = "public" | "managed-worktree" | "workflow";
+export type SubagentSessionOwner = "public" | "managed-worktree";
 
 export interface SubagentSessionPolicy {
 	version: 1;
@@ -138,11 +138,7 @@ export function readSubagentSessionPolicy(
 		);
 	}
 	const owner = value.owner;
-	if (
-		owner !== "public" &&
-		owner !== "managed-worktree" &&
-		owner !== "workflow"
-	) {
+	if (owner !== "public" && owner !== "managed-worktree") {
 		throw policyError(sessionFile, "the saved launch policy owner is invalid");
 	}
 	const validateTools = (
@@ -381,7 +377,7 @@ export interface FinalAssistantMessage {
 	stopReason?: string;
 }
 
-/** Inspect only the final assistant message for workflow completion evidence. */
+/** Inspect only the final assistant message for completion evidence. */
 export function inspectFinalAssistantMessage(
 	entries: SessionEntry[],
 ): FinalAssistantMessage {

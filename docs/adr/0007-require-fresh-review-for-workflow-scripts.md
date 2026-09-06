@@ -1,5 +1,7 @@
 # ADR-0007: Require fresh review in skill-authored review workflows
 
+**Status: superseded by ADR-0009**
+
 - **Status:** Accepted
 - **Date:** 2026-08-03
 - **Scope:** `giuseppecrj/pi-herdr-agents`
