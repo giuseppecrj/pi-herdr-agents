@@ -5519,6 +5519,61 @@ describe("persistent subagent send", () => {
 		});
 	});
 
+	it("fails closed after an unconfirmed stop without dispatching", () => {
+		withTempDir((dir) => {
+			const sessionFile = join(dir, "unconfirmed-stop.jsonl");
+			const policy = writeSubagentSessionPolicy(sessionFile, {
+				owner: "public",
+				tools: ["read"],
+				deniedTools: [],
+				persistent: true,
+				logicalId: "logical-unconfirmed-stop",
+				generationId: "generation-unconfirmed-stop",
+			});
+			const now = Date.now();
+			testApi.runningSubagents.clear();
+			testApi.runningSubagents.set("logical-unconfirmed-stop", {
+				id: "logical-unconfirmed-stop",
+				name: "Persistent unconfirmed stop",
+				task: "first",
+				surface: "pane",
+				startTime: now,
+				sessionFile,
+				interactive: false,
+				runtimePlan: undefined,
+				persistent: true,
+				logicalId: "logical-unconfirmed-stop",
+				generationId: "generation-unconfirmed-stop",
+				policyHash: policy.policyHash,
+				tasksCompleted: 1,
+				stopState: "failed",
+				lifecycle: {
+					...createLifecycle(now),
+					turn: { kind: "waiting", startedAt: now },
+				},
+			});
+
+			const result = testApi.handleSubagentSend({
+				id: "logical-unconfirmed-stop",
+				message: "next",
+			});
+
+			assert.equal(result.details.outcome, "rejected-busy");
+			assert.match(result.details.error!, /unconfirmed-stop state/);
+			assert.match(result.details.error!, new RegExp(sessionFile));
+			assert.match(result.details.error!, /subagent_stop again/);
+			assert.match(result.details.error!, /spawn a new specialist/);
+			assert.equal(consumePersistentTaskInbox(sessionFile), null);
+			assert.equal(
+				readPersistentDeliveryLedger(sessionFile).some(
+					(entry) => entry.outcome === "dispatched",
+				),
+				false,
+			);
+			testApi.runningSubagents.clear();
+		});
+	});
+
 	it("records one busy rejection without creating an inbox", () => {
 		withTempDir((dir) => {
 			const sessionFile = join(dir, "persistent.jsonl");
@@ -5730,6 +5785,74 @@ describe("persistent subagent stop", () => {
 			testApi.runningSubagents.clear();
 			rmSync(dir, { recursive: true, force: true });
 		}
+	});
+
+	it("retries a failed stop after an active task settles", () => {
+		withTempDir((dir) => {
+			const sessionFile = join(dir, "retry-active-stop.jsonl");
+			const policy = writeSubagentSessionPolicy(sessionFile, {
+				owner: "public",
+				tools: ["read"],
+				deniedTools: [],
+				persistent: true,
+				logicalId: "logical-stop",
+				generationId: "generation-stop",
+			});
+			testApi.runningSubagents.clear();
+			const running = persistentFixture(sessionFile, policy.policyHash, true);
+			running.stopState = "failed";
+			testApi.runningSubagents.set(running.id, running);
+
+			const result = testApi.handleSubagentStop(
+				{ id: running.id },
+				{ sendMessage() {} },
+				60_000,
+			);
+
+			assert.equal(result.details.status, "stop_pending");
+			assert.equal(running.stopState, "pending");
+			assert.equal(running.stopTimeout, undefined);
+			assert.equal(
+				readPersistentDeliveryLedger(sessionFile).at(-1)?.outcome,
+				"stop-pending",
+			);
+			const event = appendPersistentTaskEvent(sessionFile, {
+				type: "task-done",
+				task: "task-1",
+				generation: running.generationId!,
+			});
+			testApi.deliverPersistentTaskEvent(running, event, { sendMessage() {} });
+			assert.ok(running.stopTimeout);
+			clearTimeout(running.stopTimeout);
+			running.stopTimeout = undefined;
+			testApi.runningSubagents.clear();
+		});
+	});
+
+	it("projects an unconfirmed stop as stalled instead of idle", () => {
+		withTempDir((dir) => {
+			const sessionFile = join(dir, "failed-stop-state.jsonl");
+			const policy = writeSubagentSessionPolicy(sessionFile, {
+				owner: "public",
+				tools: ["read"],
+				deniedTools: [],
+				persistent: true,
+				logicalId: "logical-stop",
+				generationId: "generation-stop",
+			});
+			testApi.runningSubagents.clear();
+			const running = persistentFixture(sessionFile, policy.policyHash);
+			running.taskId = undefined;
+			running.tasksCompleted = 1;
+			running.stopState = "failed";
+			testApi.runningSubagents.set(running.id, running);
+			assert.equal(testApi.persistentSpecialistState(running), "stalled");
+			assert.match(
+				testApi.formatLivePersistentSpecialists().join("\n"),
+				/Persistent stop .*\| stalled \|/,
+			);
+			testApi.runningSubagents.clear();
+		});
 	});
 
 	it("fails closed when bounded stop exit confirmation is unavailable", async () => {

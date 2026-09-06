@@ -1776,7 +1776,8 @@ function persistentSpecialistState(
 		ensureLifecycle(running),
 		Date.now(),
 	).kind;
-	if (running.stopState && running.stopState !== "failed")
+	if (running.stopState === "failed") return "stalled";
+	if (running.stopState)
 		return projection === "stalled" ? "stalled" : "working";
 	if (running.taskId) return projection === "stalled" ? "stalled" : "working";
 	// Persistent task completion is authoritative for logical specialist state.
@@ -1941,7 +1942,7 @@ function handleSubagentStop(
 		};
 	}
 	const task = running.taskId ?? "stop";
-	const pending = state !== "idle";
+	const pending = running.taskId != null;
 	running.stopState = pending ? "pending" : "requested";
 	running.stopTimeoutMs = stopTimeoutMs;
 	if (pending) {
@@ -1988,8 +1989,22 @@ function handleSubagentSend(params: {
 			details: { error: resolved.error },
 		};
 	const running = resolved.running;
-	const state = persistentSpecialistState(running);
 	const task = randomUUID();
+	if (running.stopState === "failed") {
+		appendPersistentDeliveryLedger(running.sessionFile, {
+			task,
+			outcome: "rejected-busy",
+			generation: running.generationId!,
+			logicalId: running.logicalId!,
+			policyHash: running.policyHash!,
+		});
+		const error = `Persistent specialist "${running.name}" is in an unconfirmed-stop state; task ${task} was rejected-busy. Process exit is unconfirmed and evidence is retained at session ${running.sessionFile}. Request subagent_stop again or spawn a new specialist.`;
+		return {
+			content: [{ type: "text", text: error }],
+			details: { error, task, outcome: "rejected-busy" },
+		};
+	}
+	const state = persistentSpecialistState(running);
 	if (state !== "idle") {
 		appendPersistentDeliveryLedger(running.sessionFile, {
 			task,
