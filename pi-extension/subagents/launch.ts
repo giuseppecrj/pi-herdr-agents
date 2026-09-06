@@ -652,8 +652,12 @@ function buildPiCommand(
 		env.push(`PI_SUBAGENT_AUTO_EXIT=${request.behavior.autoExit ? "1" : "0"}`);
 		if (request.behavior.persistent) {
 			env.push("PI_SUBAGENT_PERSISTENT=1");
-			env.push(`PI_SUBAGENT_GENERATION_ID=${shellQuote(request.behavior.generationId ?? "")}`);
-			env.push(`PI_SUBAGENT_TASK_ID=${shellQuote(request.behavior.taskId ?? "")}`);
+			env.push(
+				`PI_SUBAGENT_GENERATION_ID=${shellQuote(request.behavior.generationId ?? "")}`,
+			);
+			env.push(
+				`PI_SUBAGENT_TASK_ID=${shellQuote(request.behavior.taskId ?? "")}`,
+			);
 		}
 		env.push(`PI_SUBAGENT_SESSION=${shellQuote(artifacts.sessionFile)}`);
 		env.push(`PI_SUBAGENT_ID=${shellQuote(resolved.id)}`);

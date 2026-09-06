@@ -617,7 +617,12 @@ describe("session.ts", () => {
 		const legacy = join(dir, "legacy-policy.jsonl");
 		writeFileSync(
 			getSubagentSessionPolicyFile(legacy),
-			JSON.stringify({ version: 1, owner: "public", tools: null, deniedTools: [] }),
+			JSON.stringify({
+				version: 1,
+				owner: "public",
+				tools: null,
+				deniedTools: [],
+			}),
 		);
 		assert.deepEqual(readSubagentSessionPolicy(legacy), {
 			version: 1,
@@ -635,10 +640,11 @@ describe("session.ts", () => {
 			task: "task-1",
 			generation: "generation-1",
 		});
-		writeFileSync(`${sessionFile}.tasks`, "{\"version\":1", { flag: "a" });
-		assert.deepEqual(readPersistentTaskEvents(sessionFile).map((event) => event.task), [
-			"task-1",
-		]);
+		writeFileSync(`${sessionFile}.tasks`, '{"version":1', { flag: "a" });
+		assert.deepEqual(
+			readPersistentTaskEvents(sessionFile).map((event) => event.task),
+			["task-1"],
+		);
 	});
 
 	it("records delivery outcomes and atomically consumes each inbox task once", () => {
@@ -650,7 +656,10 @@ describe("session.ts", () => {
 			logicalId: "logical-1",
 			policyHash: "a".repeat(64),
 		});
-		assert.equal(readPersistentDeliveryLedger(sessionFile)[0].outcome, "dispatched");
+		assert.equal(
+			readPersistentDeliveryLedger(sessionFile)[0].outcome,
+			"dispatched",
+		);
 		const inbox = writePersistentTaskInbox(sessionFile, 1, {
 			task: "task-2",
 			message: "next task",
@@ -5007,6 +5016,56 @@ describe("subagent activity snapshots", () => {
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("persistent subagent send", () => {
+	const testApi = subagentsModule.__test__;
+
+	it("records one busy rejection without creating an inbox", () => {
+		withTempDir((dir) => {
+			const sessionFile = join(dir, "persistent.jsonl");
+			const policy = writeSubagentSessionPolicy(sessionFile, {
+				owner: "public",
+				tools: ["read"],
+				deniedTools: [],
+				persistent: true,
+				logicalId: "logical-1",
+				generationId: "generation-1",
+			});
+			testApi.runningSubagents.clear();
+			testApi.runningSubagents.set("logical-1", {
+				id: "logical-1",
+				name: "Persistent",
+				task: "first",
+				surface: "pane",
+				startTime: Date.now(),
+				sessionFile,
+				interactive: false,
+				runtimePlan: undefined,
+				persistent: true,
+				logicalId: "logical-1",
+				generationId: "generation-1",
+				policyHash: policy.policyHash,
+				lifecycle: {
+					...createLifecycle(Date.now()),
+					turn: { kind: "active", startedAt: Date.now(), source: "fallback" },
+				},
+			});
+			const result = testApi.handleSubagentSend({
+				id: "logical-1",
+				message: "second",
+			});
+			assert.equal(result.details.outcome, "rejected-busy");
+			assert.equal(
+				readPersistentDeliveryLedger(sessionFile).filter(
+					(entry) => entry.outcome === "rejected-busy",
+				).length,
+				1,
+			);
+			assert.equal(consumePersistentTaskInbox(sessionFile), null);
+			testApi.runningSubagents.clear();
+		});
 	});
 });
 

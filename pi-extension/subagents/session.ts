@@ -137,7 +137,9 @@ function normalizePolicyToolNames(
 	return normalized.length > 0 ? normalized : null;
 }
 
-function canonicalPolicyJson(policy: Omit<SubagentSessionPolicyV2, "policyHash">): string {
+function canonicalPolicyJson(
+	policy: Omit<SubagentSessionPolicyV2, "policyHash">,
+): string {
 	const canonical = {
 		version: policy.version,
 		owner: policy.owner,
@@ -176,9 +178,15 @@ export function writeSubagentSessionPolicy(
 	if (policy.worktree) unsigned.worktree = policy.worktree;
 	const value: SubagentSessionPolicyV2 = {
 		...unsigned,
-		policyHash: createHash("sha256").update(canonicalPolicyJson(unsigned)).digest("hex"),
+		policyHash: createHash("sha256")
+			.update(canonicalPolicyJson(unsigned))
+			.digest("hex"),
 	};
-	writeFileSync(getSubagentSessionPolicyFile(sessionFile), `${JSON.stringify(value)}\n`, "utf8");
+	writeFileSync(
+		getSubagentSessionPolicyFile(sessionFile),
+		`${JSON.stringify(value)}\n`,
+		"utf8",
+	);
 	return value;
 }
 
@@ -211,7 +219,10 @@ export function readSubagentSessionPolicy(
 		throw policyError(sessionFile, "the saved launch policy is malformed");
 	const version = value.version;
 	if (version !== 1 && version !== SUBAGENT_POLICY_VERSION) {
-		throw policyError(sessionFile, "the saved launch policy version is unsupported");
+		throw policyError(
+			sessionFile,
+			"the saved launch policy version is unsupported",
+		);
 	}
 	const expected =
 		version === 1
@@ -228,7 +239,10 @@ export function readSubagentSessionPolicy(
 					"worktree",
 				]);
 	if (Object.keys(value).some((key) => !expected.has(key))) {
-		throw policyError(sessionFile, "the saved launch policy has unsupported fields");
+		throw policyError(
+			sessionFile,
+			"the saved launch policy has unsupported fields",
+		);
 	}
 	const owner = value.owner;
 	if (owner !== "public" && owner !== "managed-worktree") {
@@ -288,13 +302,19 @@ export function readSubagentSessionPolicy(
 		!isString(value.policyHash) ||
 		!/^[a-f0-9]{64}$/.test(value.policyHash)
 	) {
-		throw policyError(sessionFile, "the saved persistent launch policy is malformed");
+		throw policyError(
+			sessionFile,
+			"the saved persistent launch policy is malformed",
+		);
 	}
 	let worktree: PolicyWorktree | undefined;
 	const persistedWorktree = value.worktree;
 	if (persistedWorktree !== undefined) {
 		if (!isPlainObject(persistedWorktree))
-			throw policyError(sessionFile, "the saved persistent worktree policy is malformed");
+			throw policyError(
+				sessionFile,
+				"the saved persistent worktree policy is malformed",
+			);
 		const path = persistedWorktree.path;
 		const workspaceId = persistedWorktree.workspaceId;
 		const branch = persistedWorktree.branch;
@@ -303,10 +323,19 @@ export function readSubagentSessionPolicy(
 			Object.keys(persistedWorktree).some(
 				(key) => !["path", "workspaceId", "branch", "baseSha"].includes(key),
 			) ||
-			!isString(path) || !path || !isString(workspaceId) || !workspaceId ||
-			!isString(branch) || !branch || !isString(baseSha) || !baseSha
+			!isString(path) ||
+			!path ||
+			!isString(workspaceId) ||
+			!workspaceId ||
+			!isString(branch) ||
+			!branch ||
+			!isString(baseSha) ||
+			!baseSha
 		) {
-			throw policyError(sessionFile, "the saved persistent worktree policy is malformed");
+			throw policyError(
+				sessionFile,
+				"the saved persistent worktree policy is malformed",
+			);
 		}
 		worktree = { path, workspaceId, branch, baseSha };
 	}
@@ -320,10 +349,19 @@ export function readSubagentSessionPolicy(
 		generationId: value.generationId,
 	};
 	if (worktree) unsigned.worktree = worktree;
-	if (createHash("sha256").update(canonicalPolicyJson(unsigned)).digest("hex") !== value.policyHash) {
-		throw policyError(sessionFile, "the saved persistent launch policy hash is invalid");
+	if (
+		createHash("sha256").update(canonicalPolicyJson(unsigned)).digest("hex") !==
+		value.policyHash
+	) {
+		throw policyError(
+			sessionFile,
+			"the saved persistent launch policy hash is invalid",
+		);
 	}
-	const policy: SubagentSessionPolicyV2 = { ...unsigned, policyHash: value.policyHash };
+	const policy: SubagentSessionPolicyV2 = {
+		...unsigned,
+		policyHash: value.policyHash,
+	};
 	return policy;
 }
 
@@ -339,11 +377,17 @@ export function appendPersistentTaskEvent(
 		at: event.at ?? new Date().toISOString(),
 	};
 	if (event.message !== undefined) value.message = event.message;
-	appendFileSync(getPersistentTaskEventsFile(sessionFile), `${JSON.stringify(value)}\n`, "utf8");
+	appendFileSync(
+		getPersistentTaskEventsFile(sessionFile),
+		`${JSON.stringify(value)}\n`,
+		"utf8",
+	);
 	return value;
 }
 
-export function readPersistentTaskEvents(sessionFile: string): PersistentTaskEvent[] {
+export function readPersistentTaskEvents(
+	sessionFile: string,
+): PersistentTaskEvent[] {
 	if (!existsSync(getPersistentTaskEventsFile(sessionFile))) return [];
 	return readFileSync(getPersistentTaskEventsFile(sessionFile), "utf8")
 		.split("\n")
@@ -355,12 +399,18 @@ export function readPersistentTaskEvents(sessionFile: string): PersistentTaskEve
 					!isPlainObject(value) ||
 					value.version !== 1 ||
 					(value.type !== "task-done" && value.type !== "help-request") ||
-					!isString(value.task) || !isString(value.generation) || !isString(value.at) ||
+					!isString(value.task) ||
+					!isString(value.generation) ||
+					!isString(value.at) ||
 					(value.message !== undefined && !isString(value.message))
-				) return [];
+				)
+					return [];
 				const event: PersistentTaskEvent = {
-					version: 1, type: value.type, task: value.task,
-					generation: value.generation, at: value.at,
+					version: 1,
+					type: value.type,
+					task: value.task,
+					generation: value.generation,
+					at: value.at,
 				};
 				if (value.message !== undefined) event.message = value.message;
 				return [event];
@@ -374,8 +424,15 @@ export function appendPersistentDeliveryLedger(
 	sessionFile: string,
 	entry: Omit<PersistentDeliveryLedgerEntry, "at"> & { at?: string },
 ): PersistentDeliveryLedgerEntry {
-	const value: PersistentDeliveryLedgerEntry = { ...entry, at: entry.at ?? new Date().toISOString() };
-	appendFileSync(getPersistentDeliveryLedgerFile(sessionFile), `${JSON.stringify(value)}\n`, "utf8");
+	const value: PersistentDeliveryLedgerEntry = {
+		...entry,
+		at: entry.at ?? new Date().toISOString(),
+	};
+	appendFileSync(
+		getPersistentDeliveryLedgerFile(sessionFile),
+		`${JSON.stringify(value)}\n`,
+		"utf8",
+	);
 	return value;
 }
 
@@ -389,27 +446,39 @@ function parsePersistentLedgerOutcome(
 	return null;
 }
 
-export function readPersistentDeliveryLedger(sessionFile: string): PersistentDeliveryLedgerEntry[] {
+export function readPersistentDeliveryLedger(
+	sessionFile: string,
+): PersistentDeliveryLedgerEntry[] {
 	if (!existsSync(getPersistentDeliveryLedgerFile(sessionFile))) return [];
 	return readFileSync(getPersistentDeliveryLedgerFile(sessionFile), "utf8")
 		.split("\n")
 		.flatMap((line) => {
 			try {
 				const value: unknown = JSON.parse(line);
-				if (!isPlainObject(value) || !isString(value.task) || !isString(value.generation) ||
-					!isString(value.logicalId) || !/^[a-f0-9]{64}$/.test(value.policyHash) ||
-					!isString(value.at)) return [];
+				if (
+					!isPlainObject(value) ||
+					!isString(value.task) ||
+					!isString(value.generation) ||
+					!isString(value.logicalId) ||
+					!/^[a-f0-9]{64}$/.test(value.policyHash) ||
+					!isString(value.at)
+				)
+					return [];
 				const outcome = parsePersistentLedgerOutcome(value.outcome);
 				if (!outcome) return [];
-				return [{
-					task: value.task,
-					outcome,
-					generation: value.generation,
-					logicalId: value.logicalId,
-					policyHash: value.policyHash,
-					at: value.at,
-				}];
-			} catch { return []; }
+				return [
+					{
+						task: value.task,
+						outcome,
+						generation: value.generation,
+						logicalId: value.logicalId,
+						policyHash: value.policyHash,
+						at: value.at,
+					},
+				];
+			} catch {
+				return [];
+			}
 		});
 }
 
@@ -420,24 +489,50 @@ export function writePersistentTaskInbox(
 ): string {
 	const path = `${sessionFile}.task-inbox.${String(sequence).padStart(12, "0")}.json`;
 	const temporary = `${path}.tmp`;
-	writeFileSync(temporary, `${JSON.stringify({ version: 1, ...entry, at: entry.at ?? new Date().toISOString() })}\n`, "utf8");
+	writeFileSync(
+		temporary,
+		`${JSON.stringify({ version: 1, ...entry, at: entry.at ?? new Date().toISOString() })}\n`,
+		"utf8",
+	);
 	renameSync(temporary, path);
 	return path;
 }
 
-export function consumePersistentTaskInbox(sessionFile: string): PersistentTaskInboxEntry | null {
+export function consumePersistentTaskInbox(
+	sessionFile: string,
+): PersistentTaskInboxEntry | null {
 	const directory = dirname(sessionFile);
 	const prefix = `${sessionFile.split("/").pop()}.task-inbox.`;
-	const inbox = readdirSync(directory).filter((name) => name.startsWith(prefix) && name.endsWith(".json")).sort()[0];
+	const inbox = readdirSync(directory)
+		.filter((name) => name.startsWith(prefix) && name.endsWith(".json"))
+		.sort()[0];
 	if (!inbox) return null;
 	const path = join(directory, inbox);
 	const claimed = `${path}.consuming`;
-	try { renameSync(path, claimed); } catch { return null; }
+	try {
+		renameSync(path, claimed);
+	} catch {
+		return null;
+	}
 	try {
 		const value: unknown = JSON.parse(readFileSync(claimed, "utf8"));
-		if (!isPlainObject(value) || value.version !== 1 || !isString(value.task) || !isString(value.message) || !isString(value.at)) return null;
-		return { version: 1, task: value.task, message: value.message, at: value.at };
-	} finally { rmSync(claimed, { force: true }); }
+		if (
+			!isPlainObject(value) ||
+			value.version !== 1 ||
+			!isString(value.task) ||
+			!isString(value.message) ||
+			!isString(value.at)
+		)
+			return null;
+		return {
+			version: 1,
+			task: value.task,
+			message: value.message,
+			at: value.at,
+		};
+	} finally {
+		rmSync(claimed, { force: true });
+	}
 }
 
 function getForkContentLines(parentSessionFile: string): string[] {

@@ -227,13 +227,18 @@ export default function (pi: ExtensionAPI) {
 			try {
 				const branchMessages = ctx.sessionManager
 					.getBranch()
-					.flatMap((entry) => (entry.type === "message" ? [entry.message] : []));
+					.flatMap((entry) =>
+						entry.type === "message" ? [entry.message] : [],
+					);
 				if (branchMessages.length > 0) messages = branchMessages;
 			} catch {
-			// Fall back to the latest low-level run when session evidence is unavailable.
-		}
+				// Fall back to the latest low-level run when session evidence is unavailable.
+			}
 			if (currentTask && shouldAutoExitOnAgentEnd(userTookOver, messages)) {
-				appendPersistentTaskEvent(process.env.PI_SUBAGENT_SESSION ?? "", buildPersistentTaskEvent(currentTask, generation));
+				appendPersistentTaskEvent(
+					process.env.PI_SUBAGENT_SESSION ?? "",
+					buildPersistentTaskEvent(currentTask, generation),
+				);
 				currentTask = "";
 				recorder.agentEndWaiting();
 			}
@@ -356,7 +361,12 @@ export default function (pi: ExtensionAPI) {
 					message: params.message,
 				});
 				return {
-					content: [{ type: "text", text: "Help request sent. Stay available for subagent_send." }],
+					content: [
+						{
+							type: "text",
+							text: "Help request sent. Stay available for subagent_send.",
+						},
+					],
 					details: {},
 				};
 			}
@@ -370,7 +380,12 @@ export default function (pi: ExtensionAPI) {
 
 			ctx.shutdown();
 			return {
-				content: [{ type: "text", text: "Ping sent. Session will exit and parent will be notified." }],
+				content: [
+					{
+						type: "text",
+						text: "Ping sent. Session will exit and parent will be notified.",
+					},
+				],
 				details: {},
 			};
 		},
@@ -402,9 +417,20 @@ export default function (pi: ExtensionAPI) {
 			const sessionFile = process.env.PI_SUBAGENT_SESSION;
 			recorder.subagentDone();
 			if (persistent && sessionFile && currentTask) {
-				appendPersistentTaskEvent(sessionFile, buildPersistentTaskEvent(currentTask, generation));
+				appendPersistentTaskEvent(
+					sessionFile,
+					buildPersistentTaskEvent(currentTask, generation),
+				);
 				currentTask = "";
-				return { content: [{ type: "text", text: "Task complete. Staying available for subagent_send." }], details: {} };
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Task complete. Staying available for subagent_send.",
+						},
+					],
+					details: {},
+				};
 			}
 			if (sessionFile) {
 				writeFileSync(`${sessionFile}.exit`, JSON.stringify({ type: "done" }));

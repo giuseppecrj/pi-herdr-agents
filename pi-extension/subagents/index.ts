@@ -255,7 +255,8 @@ const SubagentParams = Type.Object({
 	),
 	persistent: Type.Optional(
 		Type.Boolean({
-			description: "Keep this stable specialist session alive between turn-based tasks. Persistent agents accept follow-up work only through subagent_send.",
+			description:
+				"Keep this stable specialist session alive between turn-based tasks. Persistent agents accept follow-up work only through subagent_send.",
 		}),
 	),
 	interactive: Type.Optional(
@@ -411,7 +412,12 @@ function getCapabilityDeclarations(
 function validateCapabilityDeclarations(
 	frontmatter: string,
 ): string | undefined {
-	for (const field of ["tools", "deny-tools", "spawning", "persistent"] as const) {
+	for (const field of [
+		"tools",
+		"deny-tools",
+		"spawning",
+		"persistent",
+	] as const) {
 		const declarations = getCapabilityDeclarations(frontmatter, field);
 		if (declarations.hasNoncanonical) {
 			return `${field} must use an unquoted, unindented key written exactly as ${field}:`;
@@ -830,14 +836,15 @@ function formatVisibleAgentDefinitions(
 }
 
 function formatLivePersistentSpecialists(): string[] {
-	const specialists = Array.from(runningSubagents.values()).filter((running) => running.persistent);
+	const specialists = Array.from(runningSubagents.values()).filter(
+		(running) => running.persistent,
+	);
 	if (specialists.length === 0) return [];
 	return [
 		"Live persistent specialists:",
 		...specialists.map((running) => {
-			const policy = readSubagentSessionPolicy(running.sessionFile);
-			const allowlist = policy.tools?.join(",") ?? "unrestricted";
-			return `• ${running.name} | ${running.logicalId} | ${running.generationId} | ${running.agent ?? "bare"} | ${persistentSpecialistState(running)} | ${running.tasksCompleted ?? 0} completed | tools: ${allowlist}; denied: ${policy.deniedTools.join(",") || "none"}; persistent: ${policy.persistent}`;
+			const allowlist = running.policyTools?.join(",") ?? "unrestricted";
+			return `• ${running.name} | ${running.logicalId} | ${running.generationId} | ${running.agent ?? "bare"} | ${persistentSpecialistState(running)} | ${running.tasksCompleted ?? 0} completed | tools: ${allowlist}; denied: ${running.policyDeniedTools?.join(",") || "none"}; persistent: true`;
 		}),
 	];
 }
@@ -1330,6 +1337,8 @@ interface RunningSubagent {
 	logicalId?: string;
 	generationId?: string;
 	policyHash?: string;
+	policyTools?: string[] | null;
+	policyDeniedTools?: string[];
 	tasksCompleted?: number;
 	taskId?: string;
 	inboxSequence?: number;
@@ -1747,11 +1756,27 @@ function resolvePersistentTarget(params: { id?: string; name?: string }) {
 	return resolved;
 }
 
-function persistentSpecialistState(running: RunningSubagent): "idle" | "working" | "stalled" | "stopped" {
-	const projection = projectLifecycle(ensureLifecycle(running), Date.now()).kind;
+function persistentSpecialistState(
+	running: RunningSubagent,
+): "idle" | "working" | "stalled" | "stopped" {
+	const projection = projectLifecycle(
+		ensureLifecycle(running),
+		Date.now(),
+	).kind;
 	if (projection === "stalled") return "stalled";
-	if (projection === "active" || projection === "blocked" || projection === "starting" || projection === "running") return "working";
-	if (projection === "completed" || projection === "failed" || projection === "finalizing") return "stopped";
+	if (
+		projection === "active" ||
+		projection === "blocked" ||
+		projection === "starting" ||
+		projection === "running"
+	)
+		return "working";
+	if (
+		projection === "completed" ||
+		projection === "failed" ||
+		projection === "finalizing"
+	)
+		return "stopped";
 	return "idle";
 }
 
@@ -1763,26 +1788,55 @@ interface SubagentSendDetails {
 	outcome?: "dispatched" | "rejected-busy";
 }
 
-function handleSubagentSend(params: { id?: string; name?: string; message: string }): AgentToolResult<SubagentSendDetails> {
+function handleSubagentSend(params: {
+	id?: string;
+	name?: string;
+	message: string;
+}): AgentToolResult<SubagentSendDetails> {
 	const resolved = resolvePersistentTarget(params);
-	if ("error" in resolved) return { content: [{ type: "text", text: resolved.error }], details: { error: resolved.error } };
+	if ("error" in resolved)
+		return {
+			content: [{ type: "text", text: resolved.error }],
+			details: { error: resolved.error },
+		};
 	const running = resolved.running;
 	const state = persistentSpecialistState(running);
 	const task = randomUUID();
 	if (state !== "idle") {
 		appendPersistentDeliveryLedger(running.sessionFile, {
-			task, outcome: "rejected-busy", generation: running.generationId!,
-			logicalId: running.logicalId!, policyHash: running.policyHash!,
+			task,
+			outcome: "rejected-busy",
+			generation: running.generationId!,
+			logicalId: running.logicalId!,
+			policyHash: running.policyHash!,
 		});
 		const error = `Persistent specialist "${running.name}" is ${state}; task ${task} was rejected-busy. Resend after the pending result.`;
-		return { content: [{ type: "text", text: error }], details: { error, task, outcome: "rejected-busy" } };
+		return {
+			content: [{ type: "text", text: error }],
+			details: { error, task, outcome: "rejected-busy" },
+		};
 	}
-	const inbox = writePersistentTaskInbox(running.sessionFile, (running.inboxSequence = (running.inboxSequence ?? 0) + 1), { task, message: params.message });
+	const inbox = writePersistentTaskInbox(
+		running.sessionFile,
+		(running.inboxSequence = (running.inboxSequence ?? 0) + 1),
+		{ task, message: params.message },
+	);
 	appendPersistentDeliveryLedger(running.sessionFile, {
-		task, outcome: "dispatched", generation: running.generationId!,
-		logicalId: running.logicalId!, policyHash: running.policyHash!,
+		task,
+		outcome: "dispatched",
+		generation: running.generationId!,
+		logicalId: running.logicalId!,
+		policyHash: running.policyHash!,
 	});
-	return { content: [{ type: "text", text: `Task ${task} dispatched to persistent specialist "${running.name}".` }], details: { id: running.id, task, inbox, outcome: "dispatched" } };
+	return {
+		content: [
+			{
+				type: "text",
+				text: `Task ${task} dispatched to persistent specialist "${running.name}".`,
+			},
+		],
+		details: { id: running.id, task, inbox, outcome: "dispatched" },
+	};
 }
 
 function requestSubagentInterrupt(
@@ -2102,11 +2156,14 @@ async function launchSubagent(
 	});
 	if (persistent) {
 		const policy = readSubagentSessionPolicy(running.sessionFile);
-		if (policy.version !== 2) throw new Error("Persistent launch policy was not written as v2.");
+		if (policy.version !== 2)
+			throw new Error("Persistent launch policy was not written as v2.");
 		running.persistent = true;
 		running.logicalId = policy.logicalId;
 		running.generationId = policy.generationId;
 		running.policyHash = policy.policyHash;
+		running.policyTools = policy.tools;
+		running.policyDeniedTools = policy.deniedTools;
 		running.tasksCompleted = 0;
 		running.taskId = taskId;
 		running.inboxSequence = 0;
@@ -2207,39 +2264,78 @@ function deliverPersistentTaskEvent(
 	if (!running.persistent || event.generation !== running.generationId) return;
 	const ledger = readPersistentDeliveryLedger(running.sessionFile);
 	if (event.type === "help-request") {
-		if (ledger.some((entry) => entry.task === event.task && entry.outcome === "help-requested")) return;
+		if (
+			ledger.some(
+				(entry) =>
+					entry.task === event.task && entry.outcome === "help-requested",
+			)
+		)
+			return;
 		appendPersistentDeliveryLedger(running.sessionFile, {
-			task: event.task, outcome: "help-requested", generation: running.generationId!,
-			logicalId: running.logicalId!, policyHash: running.policyHash!,
+			task: event.task,
+			outcome: "help-requested",
+			generation: running.generationId!,
+			logicalId: running.logicalId!,
+			policyHash: running.policyHash!,
 		});
-		api.sendMessage({
-			customType: "subagent_ping",
-			content: `Persistent specialist "${running.name}" requests help for task ${event.task}:\n\n${event.message ?? ""}\n\nReply with subagent_send to ${running.name}.`,
-			display: true,
-			details: { name: running.name, task: event.task, sessionFile: running.sessionFile },
-		}, { triggerTurn: true, deliverAs: "steer" });
+		api.sendMessage(
+			{
+				customType: "subagent_ping",
+				content: `Persistent specialist "${running.name}" requests help for task ${event.task}:\n\n${event.message ?? ""}\n\nReply with subagent_send to ${running.name}.`,
+				display: true,
+				details: {
+					name: running.name,
+					task: event.task,
+					sessionFile: running.sessionFile,
+				},
+			},
+			{ triggerTurn: true, deliverAs: "steer" },
+		);
 		return;
 	}
-	if (ledger.some((entry) => entry.task === event.task && entry.outcome === "delivered")) return;
+	if (
+		ledger.some(
+			(entry) => entry.task === event.task && entry.outcome === "delivered",
+		)
+	)
+		return;
 	appendPersistentDeliveryLedger(running.sessionFile, {
-		task: event.task, outcome: "delivered", generation: running.generationId!,
-		logicalId: running.logicalId!, policyHash: running.policyHash!,
+		task: event.task,
+		outcome: "delivered",
+		generation: running.generationId!,
+		logicalId: running.logicalId!,
+		policyHash: running.policyHash!,
 	});
 	running.tasksCompleted = (running.tasksCompleted ?? 0) + 1;
 	const summary = existsSync(running.sessionFile)
-		? findLastAssistantMessage(getNewEntries(running.sessionFile, 0)) ?? "Persistent specialist completed without output."
+		? (findLastAssistantMessage(getNewEntries(running.sessionFile, 0)) ??
+			"Persistent specialist completed without output.")
 		: "Persistent specialist session is unavailable.";
-	sendSubagentResult(api, `Persistent specialist "${running.name}" completed task ${event.task} (${running.tasksCompleted} tasks completed) and is idle and accepting subagent_send.\n\n${summary}`, {
-		name: running.name, task: event.task, agent: running.agent, sessionFile: running.sessionFile,
-	});
+	sendSubagentResult(
+		api,
+		`Persistent specialist "${running.name}" completed task ${event.task} (${running.tasksCompleted} tasks completed) and is idle and accepting subagent_send.\n\n${summary}`,
+		{
+			name: running.name,
+			task: event.task,
+			agent: running.agent,
+			sessionFile: running.sessionFile,
+		},
+	);
 }
 
-function watchPersistentTaskEvents(running: RunningSubagent, api: Pick<ExtensionAPI, "sendMessage">): ReturnType<typeof setInterval> {
+function watchPersistentTaskEvents(
+	running: RunningSubagent,
+	api: Pick<ExtensionAPI, "sendMessage">,
+): ReturnType<typeof setInterval> {
 	return setInterval(() => {
-		for (const event of readPersistentTaskEvents(running.sessionFile).slice(running.observedTaskEvents ?? 0)) {
+		for (const event of readPersistentTaskEvents(running.sessionFile).slice(
+			running.observedTaskEvents ?? 0,
+		)) {
 			deliverPersistentTaskEvent(running, event, api);
 		}
-		running.observedTaskEvents = readPersistentTaskEvents(running.sessionFile).length;
+		running.observedTaskEvents = readPersistentTaskEvents(
+			running.sessionFile,
+		).length;
 	}, 1000);
 }
 
@@ -2698,7 +2794,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				// Persistent specialists deliver task events while the normal watcher remains
 				// responsible for a real process exit or pane disappearance.
 				const persistentTaskPoller = running.persistent
-					? watchPersistentTaskEvents(running, selectCompletionApi(pi, runtime.pi))
+					? watchPersistentTaskEvents(
+							running,
+							selectCompletionApi(pi, runtime.pi),
+						)
 					: undefined;
 
 				// Fire-and-forget: start watching in background
@@ -2927,6 +3026,31 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			},
 		});
 
+	// ── subagent_send tool ──
+	if (shouldRegister("subagent_send"))
+		pi.registerTool({
+			name: "subagent_send",
+			label: "Send Persistent Task",
+			description:
+				"Deliver one follow-up task to an idle persistent specialist. Busy specialists reject tasks; no queue is kept.",
+			parameters: Type.Object({
+				id: Type.Optional(
+					Type.String({
+						description: "Exact persistent specialist logical ID",
+					}),
+				),
+				name: Type.Optional(
+					Type.String({
+						description: "Exact unambiguous persistent specialist name",
+					}),
+				),
+				message: Type.String({ description: "The next task" }),
+			}),
+			async execute(_toolCallId, params) {
+				return handleSubagentSend(params);
+			},
+		});
+
 	// ── subagent_interrupt tool ──
 	if (shouldRegister("subagent_interrupt"))
 		pi.registerTool({
@@ -3008,6 +3132,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				);
 				const lines = [
 					...formatVisibleAgentDefinitions(list),
+					...formatLivePersistentSpecialists(),
 					...formatAgentDiagnostics(catalog.diagnostics),
 				];
 
