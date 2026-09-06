@@ -1767,20 +1767,17 @@ function resolvePersistentTarget(params: { id?: string; name?: string }) {
 function persistentSpecialistState(
 	running: RunningSubagent,
 ): "idle" | "working" | "stalled" | "stopped" {
-	// Persistent task completion is authoritative for logical specialist state.
-	// Herdr can continue reporting the long-lived Pi pane as working while the
-	// process remains open between turns.
-	if (
-		running.persistent &&
-		running.tasksCompleted != null &&
-		!running.taskId &&
-		!running.stopState
-	)
-		return "idle";
 	const projection = projectLifecycle(
 		ensureLifecycle(running),
 		Date.now(),
 	).kind;
+	if (running.stopState)
+		return projection === "stalled" ? "stalled" : "working";
+	if (running.taskId) return projection === "stalled" ? "stalled" : "working";
+	// Persistent task completion is authoritative for logical specialist state.
+	// Herdr can continue reporting the long-lived Pi pane as working while the
+	// process remains open between turns.
+	if (running.persistent && running.tasksCompleted != null) return "idle";
 	if (projection === "stalled") return "stalled";
 	if (
 		projection === "active" ||
@@ -1993,6 +1990,7 @@ function handleSubagentSend(params: {
 		(running.inboxSequence = (running.inboxSequence ?? 0) + 1),
 		{ task, message: params.message },
 	);
+	running.taskId = task;
 	appendPersistentDeliveryLedger(running.sessionFile, {
 		task,
 		outcome: "dispatched",
@@ -2204,6 +2202,7 @@ export const __test__ = {
 	resolveResultPresentation,
 	resolveUnexpectedErrorPresentation,
 	shouldAdvanceToFallback,
+	deliverPersistentTaskEvent,
 	sendSubagentResult,
 	shouldRetainSubagentSurface,
 	resolveWorktreeLaunchWarning,
@@ -2438,6 +2437,7 @@ function deliverPersistentTaskEvent(
 	if (!running.persistent || event.generation !== running.generationId) return;
 	const ledger = readPersistentDeliveryLedger(running.sessionFile);
 	if (event.type === "help-request") {
+		if (running.taskId === event.task) running.taskId = undefined;
 		if (
 			ledger.some(
 				(entry) =>

@@ -5056,6 +5056,163 @@ describe("subagent activity snapshots", () => {
 describe("persistent subagent send", () => {
 	const testApi = subagentsModule.__test__;
 
+	it("rejects a follow-up while its dispatched task is logically active", () => {
+		withTempDir((dir) => {
+			const sessionFile = join(dir, "active-task.jsonl");
+			const policy = writeSubagentSessionPolicy(sessionFile, {
+				owner: "public",
+				tools: ["read"],
+				deniedTools: [],
+				persistent: true,
+				logicalId: "logical-active",
+				generationId: "generation-active",
+			});
+			const now = Date.now();
+			testApi.runningSubagents.clear();
+			testApi.runningSubagents.set("logical-active", {
+				id: "logical-active",
+				name: "Persistent active",
+				task: "first",
+				surface: "pane",
+				startTime: now,
+				sessionFile,
+				interactive: false,
+				runtimePlan: undefined,
+				persistent: true,
+				logicalId: "logical-active",
+				generationId: "generation-active",
+				policyHash: policy.policyHash,
+				tasksCompleted: 1,
+				taskId: "task-1",
+				lifecycle: {
+					...createLifecycle(now),
+					turn: { kind: "waiting", startedAt: now },
+				},
+			});
+			const first = testApi.handleSubagentSend({
+				id: "logical-active",
+				message: "second",
+			});
+			const second = testApi.handleSubagentSend({
+				id: "logical-active",
+				message: "third",
+			});
+			assert.equal(first.details.outcome, "rejected-busy");
+			assert.equal(second.details.outcome, "rejected-busy");
+			assert.equal(consumePersistentTaskInbox(sessionFile), null);
+			testApi.runningSubagents.clear();
+		});
+	});
+
+	it("marks a dispatched follow-up busy and accepts sends after help", () => {
+		withTempDir((dir) => {
+			const sessionFile = join(dir, "dispatch.jsonl");
+			const policy = writeSubagentSessionPolicy(sessionFile, {
+				owner: "public",
+				tools: ["read"],
+				deniedTools: [],
+				persistent: true,
+				logicalId: "logical-dispatch",
+				generationId: "generation-dispatch",
+			});
+			const now = Date.now();
+			testApi.runningSubagents.clear();
+			const running = {
+				id: "logical-dispatch",
+				name: "Persistent dispatch",
+				task: "first",
+				surface: "pane",
+				startTime: now,
+				sessionFile,
+				interactive: false,
+				runtimePlan: undefined,
+				persistent: true,
+				logicalId: "logical-dispatch",
+				generationId: "generation-dispatch",
+				policyHash: policy.policyHash,
+				tasksCompleted: 1,
+				lifecycle: {
+					...createLifecycle(now),
+					turn: { kind: "waiting" as const, startedAt: now },
+				},
+			};
+			testApi.runningSubagents.set(running.id, running);
+			const dispatched = testApi.handleSubagentSend({
+				id: running.id,
+				message: "second",
+			});
+			assert.equal(dispatched.details.outcome, "dispatched");
+			assert.equal(
+				testApi.runningSubagents.get(running.id)?.taskId,
+				dispatched.details.task,
+			);
+			assert.equal(
+				testApi.handleSubagentSend({ id: running.id, message: "third" }).details
+					.outcome,
+				"rejected-busy",
+			);
+			appendPersistentTaskEvent(sessionFile, {
+				type: "help-request",
+				task: dispatched.details.task!,
+				generation: running.generationId,
+			});
+			testApi.deliverPersistentTaskEvent(
+				testApi.runningSubagents.get(running.id),
+				readPersistentTaskEvents(sessionFile)[0],
+				{ sendMessage() {} },
+			);
+			assert.equal(testApi.runningSubagents.get(running.id)?.taskId, undefined);
+			assert.equal(
+				testApi.handleSubagentSend({ id: running.id, message: "reply" }).details
+					.outcome,
+				"dispatched",
+			);
+			testApi.runningSubagents.clear();
+		});
+	});
+
+	it("rejects sends after a stop request", () => {
+		withTempDir((dir) => {
+			const sessionFile = join(dir, "stopping.jsonl");
+			const policy = writeSubagentSessionPolicy(sessionFile, {
+				owner: "public",
+				tools: ["read"],
+				deniedTools: [],
+				persistent: true,
+				logicalId: "logical-stopping",
+				generationId: "generation-stopping",
+			});
+			const now = Date.now();
+			testApi.runningSubagents.clear();
+			testApi.runningSubagents.set("logical-stopping", {
+				id: "logical-stopping",
+				name: "Persistent stopping",
+				task: "first",
+				surface: "pane",
+				startTime: now,
+				sessionFile,
+				interactive: false,
+				runtimePlan: undefined,
+				persistent: true,
+				logicalId: "logical-stopping",
+				generationId: "generation-stopping",
+				policyHash: policy.policyHash,
+				tasksCompleted: 1,
+				stopState: "requested",
+				lifecycle: {
+					...createLifecycle(now),
+					turn: { kind: "waiting", startedAt: now },
+				},
+			});
+			assert.equal(
+				testApi.handleSubagentSend({ id: "logical-stopping", message: "nope" })
+					.details.outcome,
+				"rejected-busy",
+			);
+			testApi.runningSubagents.clear();
+		});
+	});
+
 	it("records one busy rejection without creating an inbox", () => {
 		withTempDir((dir) => {
 			const sessionFile = join(dir, "persistent.jsonl");
@@ -5225,8 +5382,10 @@ describe("persistent subagent stop", () => {
 		testApi.runningSubagents.clear();
 		try {
 			for (let index = 0; index < 3; index++) {
+				const fixture = persistentFixture(`session-${index}`, "a".repeat(64));
+				fixture.taskId = undefined;
 				testApi.runningSubagents.set(`logical-${index}`, {
-					...persistentFixture(`session-${index}`, "a".repeat(64)),
+					...fixture,
 					id: `logical-${index}`,
 					name: `Specialist ${index}`,
 					tasksCompleted: index,
