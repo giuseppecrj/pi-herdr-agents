@@ -37,6 +37,7 @@ Herdr integration is a manual release gate run from inside Herdr.
 | [`0007`](adr/0007-require-fresh-review-for-workflow-scripts.md) | Superseded by 0009 | Historical workflow-review decision. |
 | [`0008`](adr/0008-adopt-pi-only-subagent-execution.md) | Accepted; implemented | Remove the external CLI adapter and make subagent execution Pi-only. |
 | [`0009`](adr/0009-remove-workflow-subsystem.md) | Accepted | Remove the workflow subsystem; use public subagent fan-out and parent synthesis. |
+| [`0010`](adr/0010-persistent-specialists-as-session-generations.md) | Accepted | Define persistent specialists as logical identities with policy-bound session generations. |
 
 ## Historical material
 

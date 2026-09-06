@@ -25,6 +25,7 @@ Bundled role prompts live in [`agents/`](agents/). The native `/skill:orchestrat
 - `pi-extension/subagents/herdr.ts` — Herdr CLI argument construction and response parsing
 - `pi-extension/subagents/terminal.ts` — terminal adapter used by the lifecycle
 - `pi-extension/subagents/lifecycle.ts`, `status.ts`, `activity.ts` — process/turn state and widget projection
+- `pi-extension/subagents/persistent-config.ts` — strict persistent-specialist cap configuration
 - `pi-extension/subagents/completion.ts`, `session.ts`, `subagent-done.ts` — child completion, transcript handling, `caller_ping`, and `subagent_done`
 - `CONTEXT.md` — orchestration-domain glossary
 - `docs/adr/` — hard-to-reverse architectural decisions
