@@ -4,8 +4,7 @@ import {
 	type ServerResponse,
 } from "node:http";
 import { once } from "node:events";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
 import {
 	isPlainObject,
 	isString,
@@ -356,84 +355,9 @@ async function planResponse(request: ChatRequest): Promise<ResponsePlan> {
 		};
 	}
 
-	const workflowPrompt =
-		names.has("herdr_workflow") &&
-		/herdr_workflow|prepare this workflow|start with this run ID|cancel(?: with)? this run ID/i.test(
-			source,
-		);
-
 	await waitForIntegrationGate(source);
 
-	if (lastRole === "tool") {
-		if (workflowPrompt) {
-			const runId =
-				source.match(
-					/(?:start with this run ID|cancel(?: with)? this run ID):\s*([\w-]+)/i,
-				)?.[1] ?? source.match(/run ID:\s*([\w-]+)/i)?.[1];
-			const toolText = (request.messages ?? [])
-				.filter((message) => message.role === "tool")
-				.map((message) => messageText(message.content))
-				.join("\n");
-			const started = /started in the background/i.test(toolText);
-			const cancelled = /cancelled\.|ended as /i.test(toolText);
-			if (
-				started &&
-				!cancelled &&
-				runId &&
-				/cancel(?: with)? this run ID/i.test(source)
-			) {
-				// Wait for observed journal evidence that a reviewer started so cancel
-				// claims the gate after at least one active child, not after a fixed sleep.
-				const journalPath =
-					source.match(/journal path:\s*([^\s]+)/i)?.[1] ??
-					join(process.cwd(), ".pi", "plans", runId, "run.jsonl");
-				const deadline = Date.now() + 30_000;
-				while (Date.now() < deadline) {
-					if (existsSync(journalPath)) {
-						const body = readFileSync(journalPath, "utf8");
-						if (body.includes('"type":"agent_started"')) break;
-					}
-					await new Promise((resolve) => setTimeout(resolve, 50));
-				}
-				return {
-					toolCalls: [
-						{ name: "herdr_workflow", arguments: { action: "cancel", runId } },
-					],
-				};
-			}
-			return {
-				text:
-					/\bAPPROVE\s+[a-f0-9]{8}\b/i.test(user) || cancelled
-						? "WORKFLOW_PARENT_COMPLETE"
-						: // Keep runId on the final assistant line so viewport waits still match
-							// after a long approval packet scrolls the tool result off-screen.
-							runId
-							? `Prepared workflow ${runId}`
-							: "Prepared workflow",
-			};
-		}
-		return { text: "completed" };
-	}
-
-	if (workflowPrompt) {
-		if (/\bAPPROVE\s+[a-f0-9]{8}\b/i.test(user)) {
-			const runId = source.match(/start with this run ID:\s*([\w-]+)/i)?.[1];
-			if (runId)
-				return {
-					toolCalls: [
-						{ name: "herdr_workflow", arguments: { action: "start", runId } },
-					],
-				};
-		}
-		const path = source.match(/prepare this workflow:\s*([^\s]+)/i)?.[1];
-		if (path)
-			return {
-				toolCalls: [
-					{ name: "herdr_workflow", arguments: { action: "prepare", path } },
-				],
-			};
-		return { text: "WORKFLOW_PARENT_COMPLETE" };
-	}
+	if (lastRole === "tool") return { text: "completed" };
 
 	if (
 		names.has("subagent_resume") &&

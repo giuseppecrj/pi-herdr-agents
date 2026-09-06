@@ -14,13 +14,10 @@ import {
 } from "@earendil-works/pi-tui";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
 import {
 	readdirSync,
 	readFileSync,
-	realpathSync,
 	existsSync,
-	mkdirSync,
 	rmSync,
 	statSync,
 } from "node:fs";
@@ -35,10 +32,7 @@ import {
 	shellQuote,
 	readPaneAsync,
 	inspectPane,
-	getPaneProcessInfo,
 	waitForShellReady,
-	waitForPaneAbsence,
-	waitForProcessesExit,
 } from "./terminal.ts";
 import { waitForCompletion } from "./completion.ts";
 import {
@@ -54,36 +48,10 @@ import {
 import { loadModelConfig, resolveModelDefault } from "./model-config.ts";
 import { loadRoleConfig, type RoleConfig } from "./role-config.ts";
 import {
-	beginWorkflowCancellation,
-	cancelTerminationResult,
-	claimWorkflowTerminal,
-	createWorkflowJournal,
-	createWorkflowReaderCheckout,
-	createWorkflowTerminalGate,
-	disposeWorkflowReaderCheckout,
-	executeWorkflow,
-	formatApprovalPacket,
-	prepareWorkflow,
-	recoverWorkflowStartup,
-	sameWorkflowCandidate,
-	validateWorkflowApproval,
-	type CancelTerminationResult,
-	type PendingWorkflow,
-	type WorkflowReaderCheckout,
-	type WorkflowRole,
-	type WorkflowRolePolicy,
-	type WorkflowTerminalGate,
-	type WorkflowTerminalOutcome,
-	type WorkflowTerminalState,
-} from "./workflow.ts";
-
-import {
 	findLastAssistantMessage,
-	inspectFinalAssistantMessage,
 	findObservedSessionRuntime,
 	getNewEntries,
 	createBtwSessionSnapshot,
-	writeSubagentSessionPolicy,
 } from "./session.ts";
 import {
 	type SubagentStatusState,
@@ -99,13 +67,7 @@ import {
 	type ActivityReadResult,
 	type SubagentActivityState,
 } from "./activity.ts";
-import {
-	isFiniteNumber,
-	isPlainObject,
-	isString,
-	type JsonObject,
-	type JsonValue,
-} from "./type-guards.ts";
+import { isFiniteNumber, isPlainObject, isString } from "./type-guards.ts";
 import {
 	createLifecycle,
 	formatLifecycleTransitionLine,
@@ -831,26 +793,6 @@ function discoverAgentDefinitions(
 	return discoverAgentCatalog(pi).agents;
 }
 
-function workflowRoles(catalog: AgentCatalog): WorkflowRole[] {
-	return catalog.agents.map((agent) => ({
-		name: agent.name,
-		source: agent.source,
-		path: agent.path,
-		body: agent.body,
-		model: agent.model,
-		thinking: agent.thinking,
-		tools: agent.tools,
-		skills: agent.skills,
-		denyTools: agent.denyTools,
-		spawning: agent.spawning,
-		autoExit: agent.autoExit,
-		interactive: agent.interactive,
-		sessionMode: agent.sessionMode,
-		cwd: agent.cwd,
-		disableModelInvocation: agent.disableModelInvocation,
-	}));
-}
-
 function formatAgentSource(agent: ListedAgentDefinition): string {
 	return agent.source === "package" && agent.provider
 		? `package:${agent.provider}`
@@ -1133,26 +1075,6 @@ interface SubagentResultDetails {
 	runtimePlan?: ResolvedRuntimePlan;
 }
 
-interface WorkflowAgentCompletedDetails extends JsonObject {
-	id: string;
-	node: string;
-	role: string;
-	sessionFile: string;
-	sessionExists: boolean;
-	exitCode: number;
-	finalAssistantContentLength: number;
-	errorMessage?: string;
-	finalAssistantStopReason?: string;
-}
-
-interface WorkflowResultEnvelope extends JsonObject {
-	runId: string;
-	state: WorkflowTerminalState;
-	result?: JsonValue;
-	error?: { code: string; message: string };
-	checkout?: JsonObject;
-}
-
 interface SubagentPingDetails {
 	name: string;
 	message: string;
@@ -1367,38 +1289,8 @@ interface RunningSubagent {
 	worktree?: WorktreeLaunch;
 }
 
-interface WorkflowChildHandle {
-	controller: AbortController;
-	surface?: string;
-}
-
-interface WorkflowOwner {
-	runId: string;
-	candidate: PendingWorkflow;
-	children: Map<string, WorkflowChildHandle>;
-	controller: AbortController;
-	worker?: { terminate(): Promise<number> };
-	gate: WorkflowTerminalGate;
-	checkout?: string;
-	journal?: ReturnType<typeof createWorkflowJournal>;
-	cancelPromise?: Promise<WorkflowTerminalOutcome>;
-	termination?: CancelTerminationResult;
-}
-
-interface WorkflowCancelHooks {
-	getProcessInfo?: typeof getPaneProcessInfo;
-	closeSurface?: typeof closePane;
-	waitAbsence?: typeof waitForPaneAbsence;
-	waitExit?: typeof waitForProcessesExit;
-}
-
 interface SubagentRuntime {
 	runningSubagents: Map<string, RunningSubagent>;
-	pendingWorkflow?: PendingWorkflow;
-	activeWorkflow?: WorkflowOwner;
-	workflowOutcomes: Map<string, WorkflowTerminalOutcome>;
-	workflowStartupScanned: boolean;
-	workflowCancelHooks?: WorkflowCancelHooks;
 	pi?: ExtensionAPI;
 	latestCtx?: ExtensionContext;
 	modelCatalog?: string;
@@ -1407,8 +1299,6 @@ interface SubagentRuntime {
 function createSubagentRuntime(): SubagentRuntime {
 	return {
 		runningSubagents: new Map<string, RunningSubagent>(),
-		workflowOutcomes: new Map<string, WorkflowTerminalOutcome>(),
-		workflowStartupScanned: false,
 	};
 }
 
@@ -1416,12 +1306,6 @@ function createSubagentRuntime(): SubagentRuntime {
 const runtime: SubagentRuntime =
 	readGlobalSlot<SubagentRuntime>(RUNTIME_KEY) ?? createSubagentRuntime();
 writeGlobalSlot(RUNTIME_KEY, runtime);
-if (!runtime.workflowOutcomes) {
-	runtime.workflowOutcomes = new Map<string, WorkflowTerminalOutcome>();
-}
-if (runtime.workflowStartupScanned === undefined) {
-	runtime.workflowStartupScanned = false;
-}
 const runningSubagents = runtime.runningSubagents;
 
 export function shouldPreserveSubagentsOnShutdown(
@@ -1974,75 +1858,6 @@ function buildBtwLaunchCommand(params: {
 	return `cd ${shellQuote(params.cwd)} && ${envPrefix}${parts.join(" ")}`;
 }
 
-function buildWorkflowChildCommand(params: {
-	checkout: string;
-	sessionFile: string;
-	id: string;
-	name: string;
-	model: string;
-	thinking: ThinkingLevel;
-	tools: string[];
-	rolePrompt?: string;
-	task: string;
-}): string {
-	const parts = [
-		"pi",
-		"--no-extensions",
-		"--no-skills",
-		"--no-prompt-templates",
-		"--no-context-files",
-		"--no-approve",
-		"--session",
-		shellQuote(params.sessionFile),
-		"-e",
-		shellQuote(join(SUBAGENTS_DIR, "subagent-done.ts")),
-		"--model",
-		shellQuote(params.model),
-		"--thinking",
-		shellQuote(params.thinking),
-		"--tools",
-		shellQuote(params.tools.join(",")),
-	];
-	if (params.rolePrompt)
-		parts.push("--system-prompt", shellQuote(params.rolePrompt));
-	parts.push(shellQuote(params.task));
-	const denied =
-		"caller_ping,subagent_done,subagent,subagent_interrupt,subagent_resume,subagents_list,herdr_workflow";
-	const env = [
-		`PI_DENY_TOOLS=${shellQuote(denied)}`,
-		`PI_SUBAGENT_AUTO_EXIT=1`,
-		`PI_SUBAGENT_NAME=${shellQuote(params.name)}`,
-		`PI_SUBAGENT_ID=${shellQuote(params.id)}`,
-		`PI_SUBAGENT_SESSION=${shellQuote(params.sessionFile)}`,
-		// Inherit the parent agent dir so workflow children resolve the same
-		// deterministic/test provider configuration as the approving parent.
-		...(process.env.PI_CODING_AGENT_DIR
-			? [`PI_CODING_AGENT_DIR=${shellQuote(process.env.PI_CODING_AGENT_DIR)}`]
-			: []),
-	].join(" ");
-	return `cd ${shellQuote(params.checkout)} && ${env} ${parts.join(" ")}; echo '__SUBAGENT_DONE_'$?'__'`;
-}
-
-function resolveWorkflowReviewNode(
-	rolePolicies: WorkflowRolePolicy[],
-	node: string | undefined,
-	legacyRole: string | undefined,
-): { policy: WorkflowRolePolicy } | { error: string } {
-	const target = node ?? legacyRole ?? "";
-	const matches = rolePolicies.filter((value) =>
-		node === undefined ? value.role === legacyRole : value.id === node,
-	);
-	if (matches.length === 1) return { policy: matches[0] };
-	if (node === undefined && matches.length > 1) {
-		return {
-			error: `Workflow role ${JSON.stringify(legacyRole)} is ambiguous; use a review node ID.`,
-		};
-	}
-	return {
-		error: `Workflow review node ${JSON.stringify(target)} is unavailable.`,
-	};
-}
-
 export const __test__ = {
 	borderLine,
 	renderSubagentWidgetLines,
@@ -2056,8 +1871,6 @@ export const __test__ = {
 	buildSubagentToolAllowlist,
 	buildPiPromptArgs,
 	buildBtwLaunchCommand,
-	buildWorkflowChildCommand,
-	resolveWorkflowReviewNode,
 	observeRunningSubagent,
 	resolveDenyTools,
 	resolveInterruptTarget,
@@ -2074,18 +1887,6 @@ export const __test__ = {
 	writeWorktreeManifest,
 	runningSubagents,
 	formatElapsed,
-	setWorkflowCancelHooks(hooks: WorkflowCancelHooks | undefined) {
-		runtime.workflowCancelHooks = hooks;
-	},
-	getActiveWorkflow() {
-		return runtime.activeWorkflow;
-	},
-	getPendingWorkflow() {
-		return runtime.pendingWorkflow;
-	},
-	setPendingWorkflowForTest(pending: PendingWorkflow | undefined) {
-		runtime.pendingWorkflow = pending;
-	},
 };
 
 function startWidgetRefresh() {
@@ -2544,23 +2345,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	// subagents whose watchers survived a reload.
 	pi.on("session_start", (_event, ctx) => {
 		runtime.latestCtx = ctx;
-		if (!runtime.workflowStartupScanned) {
-			runtime.workflowStartupScanned = true;
-			recoverWorkflowStartup(
-				ctx.cwd,
-				runtime.activeWorkflow
-					? new Set([runtime.activeWorkflow.runId])
-					: new Set(),
-			);
-		}
-		const pendingSession = runtime.pendingWorkflow?.parentSession;
-		if (
-			pendingSession &&
-			(ctx.sessionManager.getSessionId() !== pendingSession.id ||
-				ctx.sessionManager.getSessionFile() !== pendingSession.file)
-		) {
-			runtime.pendingWorkflow = undefined;
-		}
 		runtime.modelCatalog = buildAuthenticatedModelCatalog(
 			wrapPiModelRegistry(ctx.modelRegistry),
 		);
@@ -2599,13 +2383,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		}
 
 		cleanupSubagentsForShutdown(event.reason, runningSubagents);
-		if (
-			event.reason === "new" ||
-			event.reason === "resume" ||
-			event.reason === "fork"
-		) {
-			runtime.pendingWorkflow = undefined;
-		}
 		try {
 			await closeBtw();
 		} catch {
@@ -2622,803 +2399,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	);
 
 	const shouldRegister = (name: string) => !deniedTools.has(name);
-	const prepareCandidate = (
-		ctx: ExtensionContext,
-		path: string,
-		parentSession: PendingWorkflow["parentSession"],
-		roles = workflowRoles(discoverAgentCatalog(pi)),
-	) =>
-		prepareWorkflow({
-			cwd: ctx.cwd,
-			path,
-			roles,
-			modelRegistry: wrapPiModelRegistry(ctx.modelRegistry),
-			parentSession,
-		});
-	const workflowFailure = (
-		code: string,
-		message: string,
-		retryable = false,
-	) => ({
-		ok: false,
-		code,
-		message,
-		retryable,
-	});
-	const runWorkflowAgent = async (
-		owner: WorkflowOwner,
-		candidate: PendingWorkflow,
-		checkout: string,
-		journal: ReturnType<typeof createWorkflowJournal>,
-		roles: WorkflowRole[],
-		prompt: string,
-		options: any,
-	) => {
-		if (owner.controller.signal.aborted || owner.gate.phase !== "running") {
-			return workflowFailure("cancelled", "Workflow cancelled.");
-		}
-		if (!isPlainObject(options)) {
-			return workflowFailure(
-				"workflow_agent_options",
-				"Workflow agent options must contain kind: review and one declared review node.",
-			);
-		}
-		const entries = Object.entries(options);
-		const { kind, node, role: legacyRole } = options;
-		if (
-			entries.length !== 2 ||
-			kind !== "review" ||
-			(!isString(node) && !isString(legacyRole))
-		) {
-			return workflowFailure(
-				"workflow_agent_options",
-				"Workflow agent options must contain only kind: review and one declared review node.",
-			);
-		}
-		const resolved = resolveWorkflowReviewNode(
-			candidate.rolePolicies,
-			isString(node) ? node : undefined,
-			isString(legacyRole) ? legacyRole : undefined,
-		);
-		if ("error" in resolved)
-			return workflowFailure("policy_error", resolved.error);
-		const { policy } = resolved;
-		const nodeId = policy.id;
-		const role = roles.find((value) => value.name === policy.role);
-		if (!role || role.disableModelInvocation || policy.tools.length === 0) {
-			return workflowFailure(
-				"policy_error",
-				`Workflow review node ${JSON.stringify(nodeId)} is unavailable.`,
-			);
-		}
-		const id = `workflow-${candidate.runId}-${Math.random().toString(16).slice(2, 10)}`;
-		const sessionFile = join(
-			dirname(candidate.path),
-			"sessions",
-			`${id}.jsonl`,
-		);
-		let surface: string | undefined;
-		let launched = false;
-		const childController = new AbortController();
-		const onOwnerAbort = () => childController.abort();
-		if (owner.controller.signal.aborted) childController.abort();
-		else
-			owner.controller.signal.addEventListener("abort", onOwnerAbort, {
-				once: true,
-			});
-		try {
-			if (childController.signal.aborted)
-				return workflowFailure("cancelled", "Workflow cancelled.");
-			mkdirSync(dirname(sessionFile), { recursive: true });
-			writeSubagentSessionPolicy(sessionFile, {
-				owner: "workflow",
-				tools: policy.tools,
-				deniedTools: [
-					"caller_ping",
-					"subagent_done",
-					"subagent",
-					"subagent_interrupt",
-					"subagent_resume",
-					"subagents_list",
-					"herdr_workflow",
-				],
-			});
-			surface = createSubagentPane(`${candidate.runId}: ${nodeId}`);
-			owner.children.set(id, { controller: childController, surface });
-			await waitForShellReady(surface, { signal: childController.signal });
-			if (childController.signal.aborted)
-				return workflowFailure("cancelled", "Workflow cancelled.");
-			const command = buildWorkflowChildCommand({
-				checkout,
-				sessionFile,
-				id,
-				name: nodeId,
-				model: policy.model,
-				thinking: policy.thinking,
-				tools: policy.tools,
-				rolePrompt: role.body,
-				task: prompt,
-			});
-			journal.append("agent_started", {
-				id,
-				node: nodeId,
-				role: role.name,
-				sessionFile,
-				tools: policy.tools,
-			});
-			runScriptInPane(surface, command, {
-				scriptPath: join(dirname(candidate.path), "launch", `${id}.sh`),
-			});
-			launched = true;
-			const watched = await watchSubagent(
-				{
-					id,
-					name: nodeId,
-					task: prompt,
-					surface,
-					startTime: Date.now(),
-					sessionFile,
-					interactive: false,
-					runtimePlan: undefined,
-					lifecycle: createLifecycle(Date.now()),
-				},
-				childController.signal,
-			);
-			surface = undefined;
-			if (childController.signal.aborted || watched.error === "cancelled") {
-				return workflowFailure("cancelled", "Workflow cancelled.");
-			}
-			const sessionExists = existsSync(sessionFile);
-			const childEntries = sessionExists ? getNewEntries(sessionFile, 0) : [];
-			const finalAssistant = inspectFinalAssistantMessage(childEntries);
-			const completedDetails: WorkflowAgentCompletedDetails = {
-				id,
-				node: nodeId,
-				role: role.name,
-				sessionFile,
-				sessionExists,
-				exitCode: watched.exitCode,
-				finalAssistantContentLength: finalAssistant.contentLength,
-			};
-			if (watched.errorMessage)
-				completedDetails.errorMessage = watched.errorMessage;
-			if (finalAssistant.stopReason) {
-				completedDetails.finalAssistantStopReason = finalAssistant.stopReason;
-			}
-			journal.append("agent_completed", completedDetails);
-			if (watched.exitCode !== 0 || watched.errorMessage) {
-				return workflowFailure(
-					"child_error",
-					watched.errorMessage ??
-						`Workflow child exited with code ${watched.exitCode}`,
-				);
-			}
-			if (!finalAssistant.text) {
-				return workflowFailure(
-					"empty_completion",
-					`Workflow child completed without assistant text${
-						finalAssistant.stopReason
-							? ` (stopReason: ${finalAssistant.stopReason})`
-							: ""
-					}.`,
-				);
-			}
-			const summary = finalAssistant.text;
-			const observed = findObservedSessionRuntime(childEntries);
-			const observedModel =
-				observed.provider && observed.modelId
-					? `${observed.provider}/${observed.modelId}`
-					: undefined;
-			if (
-				observedModel !== policy.model ||
-				observed.thinking !== policy.thinking
-			) {
-				return workflowFailure(
-					"workflow_runtime_mismatch",
-					"Workflow child did not report the approved provider/model and thinking.",
-				);
-			}
-			return { ok: true, value: summary, sessionFile };
-		} catch (error) {
-			if (childController.signal.aborted)
-				return workflowFailure("cancelled", "Workflow cancelled.");
-			const message = error instanceof Error ? error.message : String(error);
-			return workflowFailure(
-				launched ? "child_error" : "launch_error",
-				message,
-			);
-		} finally {
-			owner.controller.signal.removeEventListener("abort", onOwnerAbort);
-			owner.children.delete(id);
-			if (surface) {
-				try {
-					closePane(surface);
-				} catch (error) {
-					journal.append("pane_close_failed", {
-						surface,
-						error: error instanceof Error ? error.message : String(error),
-					});
-				}
-			}
-		}
-	};
-	const deliverWorkflowOutcome = (
-		candidate: PendingWorkflow,
-		journal: ReturnType<typeof createWorkflowJournal>,
-		outcome: WorkflowTerminalOutcome,
-		checkoutResult?: WorkflowReaderCheckout,
-	) => {
-		const envelope: WorkflowResultEnvelope = {
-			runId: candidate.runId,
-			state: outcome.state,
-		};
-		if (outcome.result !== undefined) envelope.result = outcome.result;
-		if (outcome.error) envelope.error = outcome.error;
-		if (checkoutResult) envelope.checkout = { ...checkoutResult };
-		const terminalEventId = journal.append(outcome.state, { envelope });
-		const content =
-			outcome.state === "cancelled"
-				? `Workflow ${candidate.runId} cancelled.\n\nJournal: ${journal.path}`
-				: `Workflow ${candidate.runId} ${outcome.state}.\n\nResult:\n${JSON.stringify(envelope)}\n\nJournal: ${journal.path}`;
-		try {
-			selectCompletionApi(pi, runtime.pi).sendMessage(
-				{
-					customType: "herdr_workflow_result",
-					content,
-					display: true,
-					details: { ...envelope, journal: journal.path },
-				},
-				{ triggerTurn: true, deliverAs: "steer" },
-			);
-			journal.append("delivery", {
-				terminalEventId,
-				state: outcome.state,
-				targetSession: candidate.parentSession.file,
-				status: "sent",
-			});
-		} catch {
-			journal.append("delivery", {
-				terminalEventId,
-				state: outcome.state,
-				targetSession: candidate.parentSession.file,
-				status: "failed",
-			});
-		}
-		return outcome;
-	};
-	const finalizeWorkflow = (
-		owner: WorkflowOwner,
-		outcome: WorkflowTerminalOutcome,
-		checkoutResult?: WorkflowReaderCheckout,
-	) => {
-		if (!claimWorkflowTerminal(owner.gate, outcome)) {
-			return (
-				owner.gate.outcome ??
-				runtime.workflowOutcomes.get(owner.runId) ??
-				outcome
-			);
-		}
-		runtime.workflowOutcomes.set(owner.runId, outcome);
-		const journal = owner.journal;
-		if (journal)
-			deliverWorkflowOutcome(owner.candidate, journal, outcome, checkoutResult);
-		if (runtime.activeWorkflow?.runId === owner.runId)
-			runtime.activeWorkflow = undefined;
-		return outcome;
-	};
-	const terminateWorkflowChildren = async (
-		owner: WorkflowOwner,
-		options: WorkflowCancelHooks = {},
-	): Promise<CancelTerminationResult> => {
-		const hooks = { ...runtime.workflowCancelHooks, ...options };
-		const getProcessInfo = hooks.getProcessInfo ?? getPaneProcessInfo;
-		const closeSurface = hooks.closeSurface ?? closePane;
-		const waitAbsence = hooks.waitAbsence ?? waitForPaneAbsence;
-		const waitExit = hooks.waitExit ?? waitForProcessesExit;
-		try {
-			owner.controller.abort();
-			const children = [...owner.children.values()];
-			const captured: Array<{
-				surface?: string;
-				pids: number[];
-				identityUnconfirmed: boolean;
-			}> = [];
-			for (const child of children) {
-				child.controller.abort();
-				const pids: number[] = [];
-				let identityUnconfirmed = false;
-				if (child.surface) {
-					try {
-						const info = getProcessInfo(child.surface);
-						pids.push(...info.pids);
-						owner.journal?.append("cancel_process_info", {
-							surface: child.surface,
-							pids: info.pids,
-						});
-						if (info.pids.length === 0) identityUnconfirmed = true;
-					} catch (error) {
-						identityUnconfirmed = true;
-						owner.journal?.append("cancel_process_info_failed", {
-							surface: child.surface,
-							error: error instanceof Error ? error.message : String(error),
-						});
-					}
-				}
-				captured.push({
-					surface: child.surface,
-					pids,
-					identityUnconfirmed,
-				});
-			}
-			for (const child of captured) {
-				if (!child.surface) continue;
-				try {
-					closeSurface(child.surface);
-				} catch (error) {
-					owner.journal?.append("pane_close_failed", {
-						surface: child.surface,
-						error: error instanceof Error ? error.message : String(error),
-					});
-				}
-			}
-			const surviving: number[] = [];
-			let identityUnconfirmed = false;
-			for (const child of captured) {
-				if (child.identityUnconfirmed) identityUnconfirmed = true;
-				if (child.surface) {
-					const gone = await waitAbsence(child.surface, {
-						timeoutMs: 5_000,
-						intervalMs: 50,
-					});
-					if (!gone) {
-						identityUnconfirmed = true;
-						owner.journal?.append("cancel_pane_still_present", {
-							surface: child.surface,
-						});
-					}
-				}
-				if (child.pids.length > 0) {
-					surviving.push(
-						...(await waitExit(child.pids, {
-							timeoutMs: 5_000,
-							intervalMs: 50,
-						})),
-					);
-				}
-			}
-			const uniqueSurvivors = [...new Set(surviving)];
-			const termination = cancelTerminationResult(
-				uniqueSurvivors,
-				owner.checkout,
-				{ identityUnconfirmed },
-			);
-			if (termination.retainCheckout && owner.checkout) {
-				owner.journal?.append("reader_checkout_retained", {
-					path: owner.checkout,
-					reason: "cancel_termination_failed",
-					survivingPids: uniqueSurvivors,
-					identityUnconfirmed,
-				});
-			}
-			owner.termination = termination;
-			return termination;
-		} catch (error) {
-			const termination = cancelTerminationResult([], owner.checkout, {
-				identityUnconfirmed: true,
-			});
-			termination.outcome.error!.message =
-				error instanceof Error ? error.message : String(error);
-			if (owner.checkout) {
-				owner.journal?.append("reader_checkout_retained", {
-					path: owner.checkout,
-					reason: "cancel_termination_failed",
-				});
-			}
-			owner.termination = termination;
-			return termination;
-		}
-	};
-	const cancelWorkflow = async (
-		owner: WorkflowOwner,
-		options: WorkflowCancelHooks = {},
-	): Promise<WorkflowTerminalOutcome> => {
-		if (owner.cancelPromise) return owner.cancelPromise;
-
-		// Claim the gate first. Only the claimer creates cancelPromise, and it is
-		// assigned before any await so concurrent callers await the real outcome.
-		const begin = beginWorkflowCancellation(owner.gate);
-		if (!begin.claimed) {
-			if (begin.outcome) return begin.outcome;
-			while (!owner.cancelPromise && owner.gate.phase === "cancelling") {
-				await new Promise((resolve) => setImmediate(resolve));
-			}
-			if (owner.cancelPromise) return owner.cancelPromise;
-			const previous =
-				owner.gate.outcome ?? runtime.workflowOutcomes.get(owner.runId);
-			if (previous) return previous;
-			return {
-				state: "failed" as const,
-				error: {
-					code: "cancel_termination_failed",
-					message:
-						"Workflow cancellation lost its in-flight waiter without a terminal outcome.",
-				},
-			};
-		}
-
-		// Publish the waiter immediately so concurrent cancel callers never invent success.
-		let settle!: (outcome: WorkflowTerminalOutcome) => void;
-		const deferred = new Promise<WorkflowTerminalOutcome>((resolve) => {
-			settle = resolve;
-		});
-		owner.cancelPromise = deferred;
-
-		void (async () => {
-			const termination = await terminateWorkflowChildren(owner, options);
-			let checkoutResult: WorkflowReaderCheckout | undefined =
-				termination.checkout;
-			if (termination.retainCheckout) {
-				settle(finalizeWorkflow(owner, termination.outcome, checkoutResult));
-				return;
-			}
-			if (owner.checkout && owner.journal) {
-				checkoutResult = disposeWorkflowReaderCheckout(
-					owner.candidate,
-					owner.checkout,
-					owner.journal,
-				);
-				owner.checkout = undefined;
-			}
-			settle(finalizeWorkflow(owner, termination.outcome, checkoutResult));
-		})();
-		return deferred;
-	};
-	const deliverWorkflow = async (
-		owner: WorkflowOwner,
-		candidate: PendingWorkflow,
-		journal: ReturnType<typeof createWorkflowJournal>,
-		roles: WorkflowRole[],
-	) => {
-		owner.journal = journal;
-		journal.append("started");
-		let execution: WorkflowTerminalOutcome;
-		try {
-			owner.checkout = createWorkflowReaderCheckout(candidate, journal);
-			execution = await executeWorkflow(candidate, {
-				signal: owner.controller.signal,
-				onWorker: (worker) => {
-					owner.worker = worker;
-				},
-				onLog: (message) => journal.append("workflow_log", { message }),
-				onTerminal: async () => {
-					if (owner.gate.phase !== "running") {
-						if (owner.cancelPromise) await owner.cancelPromise;
-						return undefined;
-					}
-					const termination = await terminateWorkflowChildren(owner);
-					return termination.retainCheckout
-						? { state: "failed" as const, error: termination.outcome.error! }
-						: undefined;
-				},
-				onAgent: async (prompt, options) => {
-					const result = await runWorkflowAgent(
-						owner,
-						candidate,
-						owner.checkout!,
-						journal,
-						roles,
-						prompt,
-						options,
-					);
-					// Cancel may already have written the terminal + delivery; do not
-					// append late agent results after the journal has terminalized.
-					if (owner.gate.phase === "running") {
-						journal.append("agent_result", { result });
-					}
-					return result;
-				},
-			});
-		} catch (error) {
-			execution = {
-				state: "failed",
-				error: {
-					code: "workflow_runner_error",
-					message: error instanceof Error ? error.message : String(error),
-				},
-			};
-		}
-		if (owner.gate.phase === "cancelling" || owner.gate.phase === "terminal") {
-			if (owner.cancelPromise) await owner.cancelPromise;
-			return;
-		}
-		let checkoutResult = owner.termination?.checkout;
-		if (owner.termination?.retainCheckout) {
-			finalizeWorkflow(owner, execution, checkoutResult);
-			return;
-		}
-		if (owner.checkout) {
-			checkoutResult = disposeWorkflowReaderCheckout(
-				candidate,
-				owner.checkout,
-				journal,
-			);
-			owner.checkout = undefined;
-		}
-		finalizeWorkflow(owner, execution, checkoutResult);
-	};
-
-	// Workflow control is parent-only. Workflow children must not be able to
-	// prepare a revision or acquire approval for any later execution slice.
-	if (!process.env.PI_SUBAGENT_ID)
-		pi.registerTool({
-			name: "herdr_workflow",
-			label: "Herdr Workflow",
-			description:
-				"Prepare, start, or cancel one exact project-local workflow. Preparation validates and compiles the script without evaluating it. Start requires the matching user approval. Cancel stops queued and active children under the process-global terminal gate.",
-			parameters: Type.Object({
-				action: Type.Union([
-					Type.Literal("prepare"),
-					Type.Literal("start"),
-					Type.Literal("cancel"),
-				]),
-				path: Type.Optional(Type.String()),
-				runId: Type.Optional(Type.String()),
-			}),
-			async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-				if (params.action === "prepare") {
-					if (runtime.activeWorkflow) {
-						return {
-							content: [
-								{
-									type: "text",
-									text: "Error: a workflow is already active in this Pi process.",
-								},
-							],
-							details: { error: "workflow_active" },
-						};
-					}
-					if (!isTerminalAvailable()) return muxUnavailableResult();
-					if (!params.path) {
-						return {
-							content: [
-								{
-									type: "text",
-									text: "Error: workflow preparation requires path.",
-								},
-							],
-							details: { error: "workflow_path_required" },
-						};
-					}
-					const sessionFile = ctx.sessionManager.getSessionFile();
-					const leafId = ctx.sessionManager.getLeafId();
-					if (!sessionFile || !leafId) {
-						return {
-							content: [
-								{
-									type: "text",
-									text: "Error: start pi with a persistent session before preparing a workflow.",
-								},
-							],
-							details: { error: "workflow_persistent_session_required" },
-						};
-					}
-					runtime.pendingWorkflow = undefined;
-					try {
-						const candidate = prepareCandidate(ctx, params.path, {
-							id: ctx.sessionManager.getSessionId(),
-							file: sessionFile,
-							prepareLeafId: leafId,
-						});
-						runtime.pendingWorkflow = candidate;
-						return {
-							content: [
-								{ type: "text", text: formatApprovalPacket(candidate) },
-							],
-							details: {
-								runId: candidate.runId,
-								scriptHash: candidate.scriptHash,
-								repository: candidate.repository,
-								baseSha: candidate.baseSha,
-								sources: candidate.sources,
-								rolePolicies: candidate.rolePolicies,
-							},
-						};
-					} catch (error) {
-						return {
-							content: [
-								{
-									type: "text",
-									text: `Workflow preparation failed: ${error instanceof Error ? error.message : String(error)}`,
-								},
-							],
-							details: { error: "workflow_prepare_failed" },
-						};
-					}
-				}
-				if (params.action === "start") {
-					const candidate = runtime.pendingWorkflow;
-					if (
-						!candidate ||
-						params.runId !== candidate.runId ||
-						runtime.activeWorkflow
-					) {
-						return {
-							content: [
-								{
-									type: "text",
-									text: "Error: no matching pending workflow can be started.",
-								},
-							],
-							details: { error: "workflow_start_rejected" },
-						};
-					}
-					try {
-						const sessionFile = ctx.sessionManager.getSessionFile();
-						if (!sessionFile)
-							throw new Error("No persistent parent session is available");
-						const approval = validateWorkflowApproval(candidate, {
-							sessionId: ctx.sessionManager.getSessionId(),
-							sessionFile,
-							branch: ctx.sessionManager.getBranch(),
-						});
-						const approvedRoles = workflowRoles(discoverAgentCatalog(pi));
-						const revalidated = prepareCandidate(
-							ctx,
-							candidate.path,
-							candidate.parentSession,
-							approvedRoles,
-						);
-						if (!sameWorkflowCandidate(candidate, revalidated)) {
-							throw new Error("Workflow candidate changed after preparation");
-						}
-						const journal = createWorkflowJournal(candidate, approval);
-						runtime.pendingWorkflow = undefined;
-						runtime.workflowOutcomes.delete(candidate.runId);
-						const owner: WorkflowOwner = {
-							runId: candidate.runId,
-							candidate,
-							children: new Map(),
-							controller: new AbortController(),
-							gate: createWorkflowTerminalGate(),
-							journal,
-						};
-						runtime.activeWorkflow = owner;
-						void deliverWorkflow(owner, candidate, journal, approvedRoles);
-						return {
-							content: [
-								{
-									type: "text",
-									text: `Workflow ${candidate.runId} started in the background.`,
-								},
-							],
-							details: {
-								runId: candidate.runId,
-								journal: journal.path,
-								status: "started",
-							},
-						};
-					} catch (error) {
-						return {
-							content: [
-								{
-									type: "text",
-									text: `Workflow start failed: ${error instanceof Error ? error.message : String(error)}`,
-								},
-							],
-							details: { error: "workflow_start_failed" },
-						};
-					}
-				}
-				if (params.action === "cancel") {
-					if (!params.runId) {
-						return {
-							content: [
-								{
-									type: "text",
-									text: "Error: workflow cancellation requires runId.",
-								},
-							],
-							details: { error: "workflow_run_id_required" },
-						};
-					}
-					const owner = runtime.activeWorkflow;
-					if (!owner || owner.runId !== params.runId) {
-						const previous = runtime.workflowOutcomes.get(params.runId);
-						if (previous) {
-							return {
-								content: [
-									{
-										type: "text",
-										text: `Workflow ${params.runId} already ended as ${previous.state}.`,
-									},
-								],
-								details: {
-									runId: params.runId,
-									status: previous.state,
-									outcome: previous,
-								},
-							};
-						}
-						return {
-							content: [
-								{
-									type: "text",
-									text: "Error: no matching active workflow can be cancelled.",
-								},
-							],
-							details: { error: "workflow_cancel_rejected" },
-						};
-					}
-					try {
-						const root = realpathSync(
-							execFileSync(
-								"git",
-								["-C", ctx.cwd, "rev-parse", "--show-toplevel"],
-								{
-									encoding: "utf8",
-								},
-							).trim(),
-						);
-						const commonDir = realpathSync(
-							execFileSync(
-								"git",
-								[
-									"-C",
-									ctx.cwd,
-									"rev-parse",
-									"--path-format=absolute",
-									"--git-common-dir",
-								],
-								{ encoding: "utf8" },
-							).trim(),
-						);
-						if (
-							root !== owner.candidate.repository.root ||
-							commonDir !== owner.candidate.repository.commonDir
-						) {
-							return {
-								content: [
-									{
-										type: "text",
-										text: "Error: workflow cancellation must use the approved repository identity.",
-									},
-								],
-								details: { error: "workflow_cancel_identity_mismatch" },
-							};
-						}
-					} catch (error) {
-						return {
-							content: [
-								{
-									type: "text",
-									text: `Workflow cancellation failed: ${error instanceof Error ? error.message : String(error)}`,
-								},
-							],
-							details: { error: "workflow_cancel_identity_failed" },
-						};
-					}
-					const outcome = await cancelWorkflow(owner);
-					return {
-						content: [
-							{
-								type: "text",
-								text:
-									outcome.state === "cancelled"
-										? `Workflow ${owner.runId} cancelled.`
-										: `Workflow ${owner.runId} ended as ${outcome.state}${outcome.error ? `: ${outcome.error.message}` : "."}`,
-							},
-						],
-						details: { runId: owner.runId, status: outcome.state, outcome },
-					};
-				}
-				return {
-					content: [
-						{ type: "text", text: "Error: unsupported workflow action." },
-					],
-					details: { error: "workflow_action_unavailable" },
-				};
-			},
-		});
 
 	// ── subagent tool ──
 	if (shouldRegister("subagent"))

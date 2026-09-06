@@ -697,7 +697,7 @@ async function launchResumedPiSubagent(
 	if (policy.owner !== "public") {
 		throw new Error(
 			`Cannot resume ${policy.owner} session through subagent_resume. ` +
-				"Use its retained workspace or workflow evidence instead.",
+				"Use its retained managed-worktree workspace instead.",
 		);
 	}
 	const autoExit = request.behavior?.autoExit ?? true;

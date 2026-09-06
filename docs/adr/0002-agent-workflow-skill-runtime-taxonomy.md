@@ -1,5 +1,7 @@
 # ADR-0002: Adopt the agent, workflow, skill, and runtime taxonomy
 
+**Status:** Partially superseded by ADR-0009 for workflow-runner taxonomy; retained for agent, skill, and runtime terminology.
+
 - **Status:** Accepted in part; external CLI provisions superseded
 - **Date:** 2026-08-02
 - **Decision owners:** `acrnm`

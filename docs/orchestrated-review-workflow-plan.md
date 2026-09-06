@@ -1,6 +1,10 @@
+# Superseded historical design
+
+> **Superseded by [ADR-0009](adr/0009-remove-workflow-subsystem.md).** This document describes the removed workflow subsystem and is retained only as historical design evidence. It is not shipped behavior.
+
 # Orchestrated review workflow implementation plan
 
-- **Status:** Shipped first-flow implementation; verification and deferred writer work remain separate
+- **Status:** Historical removed design; not shipped behavior
 - **Scope:** First review-only workflow
 - **Spec origin:** legacy issue #6 (not carried into the clean repository)
 - **Reviewed spec revision:** `2026-08-04T11:57:03Z`, SHA-256 `20a0d529770bbfd0b693d67856d04aa5e4b3e627270cb78c46232cf000739e65`

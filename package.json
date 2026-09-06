@@ -1,7 +1,7 @@
 {
   "name": "pi-herdr-agents",
   "version": "1.5.1",
-  "description": "Asynchronous Pi subagents and approved review workflows in Herdr, with optional isolated Git worktrees",
+  "description": "Asynchronous Pi subagents in Herdr, with optional isolated Git worktrees",
   "keywords": [
     "pi-package",
     "pi",
@@ -33,7 +33,7 @@
     "format": "biome format --write pi-extension test skills/orchestrate/adversarial-review-example.js",
     "format:check": "biome format pi-extension test skills/orchestrate/adversarial-review-example.js",
     "lint": "oxlint pi-extension test skills/orchestrate/adversarial-review-example.js",
-    "test": "node --experimental-strip-types --test test/test.ts test/launch.test.ts test/runtime-routing.test.ts test/release-workflow.test.ts test/workflow.test.ts test/package-skill.test.js test/evals/*.test.mjs",
+    "test": "node --experimental-strip-types --test test/test.ts test/launch.test.ts test/runtime-routing.test.ts test/release-workflow.test.ts test/package-skill.test.js test/evals/*.test.mjs",
     "test:integration": "node --experimental-strip-types --test --test-concurrency=1 test/integration/*.test.ts",
     "test:integration:live": "PI_TEST_LIVE=1 node --experimental-strip-types --test --test-concurrency=1 test/integration/*.test.ts",
     "version": "auto-changelog --package && git add CHANGELOG.md"

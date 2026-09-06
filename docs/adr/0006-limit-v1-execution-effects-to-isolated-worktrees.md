@@ -1,5 +1,7 @@
 # ADR-0006: Limit the first workflow to read-only effects
 
+**Status:** Partially superseded by ADR-0009 for the workflow runner; managed-worktree ownership remains active.
+
 - **Status:** Accepted
 - **Date:** 2026-08-03
 - **Scope:** `giuseppecrj/pi-herdr-agents`

@@ -4,7 +4,7 @@ These instructions apply to humans and coding agents changing `pi-herdr-agents`.
 
 ## What this package is
 
-`pi-herdr-agents` (Pi Herdr Agents) is a Pi extension that launches asynchronous Pi child agents and approved read-only review workflows exclusively in Herdr. Ordinary runs use dedicated Herdr panes/tabs. Writing tasks may opt into one isolated Herdr-managed Git worktree per branch. Legacy role definitions that request an external CLI fail before Herdr creates resources.
+`pi-herdr-agents` (Pi Herdr Agents) is a Pi extension that launches asynchronous Pi child agents exclusively in Herdr. Ordinary runs use dedicated Herdr panes/tabs. Writing tasks may opt into one isolated Herdr-managed Git worktree per branch. Legacy role definitions that request an external CLI fail before Herdr creates resources.
 
 The extension is fire-and-forget: `subagent` returns an acknowledgement, and completion is delivered to the parent automatically. Never add polling guidance that tells callers to sleep, tail sessions, or repeatedly check status.
 
@@ -12,12 +12,12 @@ The extension is fire-and-forget: `subagent` returns an acknowledgement, and com
 
 - [`README.md`](./README.md) — canonical installation, API, configuration, lifecycle, and agent-authoring reference
 - [`docs/README.md`](docs/README.md) — map of shipped contracts, active design, ADRs, and background research
-- [`CONTEXT.md`](CONTEXT.md) — workflow domain language and prototype evidence; read it before changing workflow design
+- [`CONTEXT.md`](CONTEXT.md) — workflow-domain glossary; read it before changing orchestration design
 - [`docs/adr/0003-installable-role-packs.md`](docs/adr/0003-installable-role-packs.md) — installable role-pack discovery, precedence, and collision contract
 - [`docs/worktree-subagents.md`](docs/worktree-subagents.md) — canonical worktree operating, review, recovery, and cleanup guide
 - [`RELEASING.md`](RELEASING.md) — release checks and publishing procedure
 
-Bundled role prompts live in [`agents/`](agents/). The native `/skill:orchestrate` workflow authoring skill lives at [`skills/orchestrate/SKILL.md`](skills/orchestrate/SKILL.md). The `/plan` orchestration prompt lives at [`pi-extension/subagents/plan-skill.md`](pi-extension/subagents/plan-skill.md).
+Bundled role prompts live in [`agents/`](agents/). The native `/skill:orchestrate` public-review fan-out skill lives at [`skills/orchestrate/SKILL.md`](skills/orchestrate/SKILL.md). The `/plan` orchestration prompt lives at [`pi-extension/subagents/plan-skill.md`](pi-extension/subagents/plan-skill.md).
 
 ## Code map
 
@@ -26,12 +26,10 @@ Bundled role prompts live in [`agents/`](agents/). The native `/skill:orchestrat
 - `pi-extension/subagents/terminal.ts` — terminal adapter used by the lifecycle
 - `pi-extension/subagents/lifecycle.ts`, `status.ts`, `activity.ts` — process/turn state and widget projection
 - `pi-extension/subagents/completion.ts`, `session.ts`, `subagent-done.ts` — child completion, transcript handling, `caller_ping`, and `subagent_done`
-- `pi-extension/subagents/workflow.ts`, `workflow-worker.js` — workflow preparation, ownership, journal, lifecycle, and Worker execution
-- `CONTEXT.md` — domain glossary and validated prototype evidence for active design
+- `CONTEXT.md` — orchestration-domain glossary
 - `docs/adr/` — hard-to-reverse architectural decisions
 - `docs/research/` — evidence and alternatives, never the shipped contract
 - `test/test.ts` — unit tests for public subagent extension seams
-- `test/workflow.test.ts` — unit tests for workflow preparation, execution, and cancellation
 - `test/package-skill.test.js` — bundled skill and package manifest contract test
 - `test/integration/` — real Herdr and Pi lifecycle tests using the deterministic provider by default
 
@@ -72,8 +70,7 @@ When behavior changes, update every affected surface in the same commit:
 - `/plan` orchestration policy → `pi-extension/subagents/plan-skill.md`
 - contributor/release verification → this file, `.pi/skills/run-integration-tests/SKILL.md`, or `RELEASING.md`
 - domain terminology → `CONTEXT.md`
-- hard-to-reverse workflow trade-offs → the relevant ADR; do not create an ADR for every design question
-- active orchestrated-review design → `docs/orchestrated-review-workflow-plan.md`
+- hard-to-reverse orchestration trade-offs → the relevant ADR; do not create an ADR for every design question
 - architectural evidence and alternatives only → research docs, clearly marked when later decisions supersede them
 
 Do not copy the full worktree guide into every role prompt. Keep canonical detail in the guide and add only the role-specific rule an agent needs while running.
@@ -105,7 +102,7 @@ Use `PI_TEST_MODEL="openai-codex/gpt-5.6-luna" PI_TEST_TIMEOUT=180000 npm run te
 Before committing:
 
 - inspect `git status` and the final diff;
-- confirm the package preview includes `CHANGELOG.md`, `skills/orchestrate/SKILL.md`, `skills/orchestrate/adversarial-review.md`, `skills/orchestrate/adversarial-review-example.js`, and `pi-extension/subagents/workflow-worker.js`, while excluding plans, journals, sessions, prototypes, generated evidence, and local config;
+- confirm the package preview includes `CHANGELOG.md`, `skills/orchestrate/SKILL.md`, `skills/orchestrate/adversarial-review.md`, and `skills/orchestrate/adversarial-review-example.js`, while excluding `pi-extension/subagents/workflow-worker.js`, plans, journals, sessions, prototypes, generated evidence, and local config;
 - run `npm pack --dry-run` when package contents or documentation paths changed;
 - confirm that no generated plans, journals, sessions, provider configuration, test scripts, or review artifacts are staged; and
 - confirm that no accidental empty directory exists at the repository root:

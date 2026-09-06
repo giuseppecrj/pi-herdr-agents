@@ -1,5 +1,7 @@
 # ADR-0005: Keep workflow-script authority with the parent
 
+**Status: superseded by ADR-0009**
+
 - **Status:** Accepted
 - **Date:** 2026-08-03
 - **Scope:** `giuseppecrj/pi-herdr-agents`
