@@ -119,7 +119,7 @@ Subagent tabs, panes, and worktree workspaces are created without stealing keybo
 
 ### Extensions
 
-**Subagents** — 7 main-session tools + 6 commands, plus 2 child-only tools:
+**Subagents** — 6 main-session tools + 6 commands, plus 2 child-only tools:
 
 | Tool                 | Description                                                                                 |
 | -------------------- | ------------------------------------------------------------------------------------------- |
@@ -132,7 +132,7 @@ Subagent tabs, panes, and worktree workspaces are created without stealing keybo
 
 | Pi child-only tool | Description |
 | ---------------- | ------------------------------------------------------------------------- |
-| `caller_ping` | Exit and ask the parent for help |
+| `caller_ping` | Ask the parent for help; ordinary children exit, persistent specialists stay alive |
 | `subagent_done` | Mark an interactive child complete and exit; autonomous agents auto-exit |
 
 | Command                    | Description                          |
@@ -485,7 +485,7 @@ malformed reports, failures, and unresolved serious candidates propagate
 
 ## caller_ping — Child-to-Parent Help Request
 
-The `caller_ping` tool lets a Pi-backed subagent request help from its parent agent. When called, the child session **exits** and the parent receives a notification with the help message. The parent can then **resume** the child session with a response using `subagent_resume`.
+The `caller_ping` tool lets a Pi-backed subagent request help from its parent agent. Ordinary children **exit** and the parent can resume them with `subagent_resume`. Persistent specialists record a help-request outcome, stay alive, and accept a reply through `subagent_send`.
 
 **`caller_ping` parameters:**
 
@@ -842,7 +842,7 @@ Without a restrictive `tools` allowlist or spawning policy, a sub-agent can spaw
 
 ### `spawning: false`
 
-Denies all subagent lifecycle tools (`subagent`, `subagent_interrupt`, `subagents_list`, `subagent_resume`):
+Denies all subagent lifecycle tools (`subagent`, `subagent_interrupt`, `subagent_send`, `subagent_stop`, `subagents_list`, `subagent_resume`):
 
 ```yaml
 ---

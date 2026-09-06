@@ -10,6 +10,7 @@ import { writeFileSync } from "node:fs";
 import {
 	appendPersistentTaskEvent,
 	consumePersistentTaskInbox,
+	readPersistentTaskEvents,
 } from "./session.ts";
 import { createSubagentActivityRecorder } from "./activity.ts";
 import { isString } from "./type-guards.ts";
@@ -119,7 +120,15 @@ export default function (pi: ExtensionAPI) {
 	const autoExit = process.env.PI_SUBAGENT_AUTO_EXIT === "1";
 	const persistent = process.env.PI_SUBAGENT_PERSISTENT === "1";
 	const generation = process.env.PI_SUBAGENT_GENERATION_ID ?? "";
-	let currentTask = process.env.PI_SUBAGENT_TASK_ID ?? "";
+	const sessionFile = process.env.PI_SUBAGENT_SESSION;
+	const initialTask = process.env.PI_SUBAGENT_TASK_ID ?? "";
+	let currentTask =
+		initialTask &&
+		!readPersistentTaskEvents(sessionFile ?? "").some(
+			(event) => event.task === initialTask && event.generation === generation,
+		)
+			? initialTask
+			: "";
 	const recorder = createSubagentActivityRecorder({
 		runningChildId: process.env.PI_SUBAGENT_ID,
 		activityFile: process.env.PI_SUBAGENT_ACTIVITY_FILE,
@@ -402,26 +411,30 @@ export default function (pi: ExtensionAPI) {
 	let inboxPoller: ReturnType<typeof setInterval> | undefined;
 	if (persistent) {
 		inboxPoller = setInterval(() => {
-			const sessionFile = process.env.PI_SUBAGENT_SESSION;
-			if (!sessionFile || currentTask) return;
-			const inbox = consumePersistentTaskInbox(sessionFile);
-			if (!inbox) return;
-			if (isPersistentStopDirective(inbox)) {
-				try {
-					writeFileSync(
-						`${sessionFile}.exit`,
-						JSON.stringify({ type: "done" }),
-					);
-				} catch {
-					// The parent can still confirm the shell exit marker.
+			try {
+				const sessionFile = process.env.PI_SUBAGENT_SESSION;
+				if (!sessionFile || currentTask) return;
+				const inbox = consumePersistentTaskInbox(sessionFile);
+				if (!inbox) return;
+				if (isPersistentStopDirective(inbox)) {
+					try {
+						writeFileSync(
+							`${sessionFile}.exit`,
+							JSON.stringify({ type: "done" }),
+						);
+					} catch {
+						// The parent can still confirm the shell exit marker.
+					}
+					completionFinalized = true;
+					recorder.subagentDone();
+					sessionContext?.shutdown();
+					return;
 				}
-				completionFinalized = true;
-				recorder.subagentDone();
-				sessionContext?.shutdown();
-				return;
+				currentTask = inbox.task;
+				pi.sendUserMessage(inbox.message);
+			} catch {
+				// A malformed or transiently unavailable inbox must not kill the poller.
 			}
-			currentTask = inbox.task;
-			pi.sendUserMessage(inbox.message);
 		}, 1000);
 	}
 

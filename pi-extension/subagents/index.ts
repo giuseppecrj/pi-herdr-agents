@@ -1118,6 +1118,9 @@ interface SubagentResultDetails {
 	exitCode?: number;
 	elapsed?: number;
 	sessionFile?: string;
+	logicalId?: string;
+	generationId?: string;
+	policyHash?: string;
 	error?: string;
 	errorMessage?: string;
 	fallbackAttempts?: string[];
@@ -1350,6 +1353,8 @@ interface RunningSubagent {
 	observedTaskEvents?: number;
 	stopState?: "requested" | "pending" | "failed";
 	stopFailure?: string;
+	stopTimeout?: ReturnType<typeof setTimeout>;
+	stopTimeoutMs?: number;
 	crashNotified?: boolean;
 }
 
@@ -1877,6 +1882,25 @@ function sendPersistentStopFailure(
 	);
 }
 
+function startPersistentStopTimeout(
+	running: RunningSubagent,
+	api: Pick<ExtensionAPI, "sendMessage">,
+	stopTimeoutMs = 15_000,
+): void {
+	if (running.stopTimeout || running.stopState === "failed") return;
+	running.stopTimeout = setTimeout(() => {
+		if (!runningSubagents.has(running.id) || running.stopState === "failed")
+			return;
+		if (running.stopState === "requested" || running.stopState === "pending") {
+			running.stopState = "failed";
+			running.stopFailure =
+				"process exit was not confirmed within the bounded stop wait";
+			sendPersistentStopFailure(api, running);
+		}
+	}, stopTimeoutMs);
+	running.stopTimeout.unref();
+}
+
 interface SubagentStopDetails {
 	error?: string;
 	id?: string;
@@ -1915,6 +1939,7 @@ function handleSubagentStop(
 	const task = running.taskId ?? "stop";
 	const pending = state !== "idle";
 	running.stopState = pending ? "pending" : "requested";
+	running.stopTimeoutMs = stopTimeoutMs;
 	if (pending) {
 		appendPersistentDeliveryLedger(running.sessionFile, {
 			task,
@@ -1929,17 +1954,7 @@ function handleSubagentStop(
 		(running.inboxSequence = (running.inboxSequence ?? 0) + 1),
 		{ type: "stop", task, message: "" },
 	);
-	const stopTimeout = setTimeout(() => {
-		if (!runningSubagents.has(running.id) || running.stopState === "failed")
-			return;
-		if (running.stopState === "requested" || running.stopState === "pending") {
-			running.stopState = "failed";
-			running.stopFailure =
-				"process exit was not confirmed within the bounded stop wait";
-			sendPersistentStopFailure(api, running);
-		}
-	}, stopTimeoutMs);
-	stopTimeout.unref();
+	if (!pending) startPersistentStopTimeout(running, api, stopTimeoutMs);
 	return {
 		content: [
 			{
@@ -2429,12 +2444,16 @@ async function launchSubagentWithFallbacks(
 	);
 }
 
+const inFlightPersistentTaskDeliveries = new Set<string>();
+
 function deliverPersistentTaskEvent(
 	running: RunningSubagent,
 	event: ReturnType<typeof readPersistentTaskEvents>[number],
 	api: Pick<ExtensionAPI, "sendMessage">,
 ): void {
 	if (!running.persistent || event.generation !== running.generationId) return;
+	const deliveryKey = `${running.id}:${event.type}:${event.task}`;
+	if (inFlightPersistentTaskDeliveries.has(deliveryKey)) return;
 	const ledger = readPersistentDeliveryLedger(running.sessionFile);
 	if (event.type === "help-request") {
 		if (running.taskId === event.task) running.taskId = undefined;
@@ -2445,26 +2464,31 @@ function deliverPersistentTaskEvent(
 			)
 		)
 			return;
-		appendPersistentDeliveryLedger(running.sessionFile, {
-			task: event.task,
-			outcome: "help-requested",
-			generation: running.generationId!,
-			logicalId: running.logicalId!,
-			policyHash: running.policyHash!,
-		});
-		api.sendMessage(
-			{
-				customType: "subagent_ping",
-				content: `Persistent specialist "${running.name}" requests help for task ${event.task}:\n\n${event.message ?? ""}\n\nReply with subagent_send to ${running.name}.`,
-				display: true,
-				details: {
-					name: running.name,
-					task: event.task,
-					sessionFile: running.sessionFile,
+		inFlightPersistentTaskDeliveries.add(deliveryKey);
+		try {
+			api.sendMessage(
+				{
+					customType: "subagent_ping",
+					content: `Persistent specialist "${running.name}" requests help for task ${event.task}:\n\n${event.message ?? ""}\n\nReply with subagent_send to ${running.name}.`,
+					display: true,
+					details: {
+						name: running.name,
+						task: event.task,
+						sessionFile: running.sessionFile,
+					},
 				},
-			},
-			{ triggerTurn: true, deliverAs: "steer" },
-		);
+				{ triggerTurn: true, deliverAs: "steer" },
+			);
+			appendPersistentDeliveryLedger(running.sessionFile, {
+				task: event.task,
+				outcome: "help-requested",
+				generation: running.generationId!,
+				logicalId: running.logicalId!,
+				policyHash: running.policyHash!,
+			});
+		} finally {
+			inFlightPersistentTaskDeliveries.delete(deliveryKey);
+		}
 		return;
 	}
 	if (
@@ -2473,29 +2497,55 @@ function deliverPersistentTaskEvent(
 		)
 	)
 		return;
-	appendPersistentDeliveryLedger(running.sessionFile, {
-		task: event.task,
-		outcome: "delivered",
-		generation: running.generationId!,
-		logicalId: running.logicalId!,
-		policyHash: running.policyHash!,
-	});
-	running.tasksCompleted = (running.tasksCompleted ?? 0) + 1;
-	if (running.taskId === event.task) running.taskId = undefined;
-	const summary = existsSync(running.sessionFile)
-		? (findLastAssistantMessage(getNewEntries(running.sessionFile, 0)) ??
-			"Persistent specialist completed without output.")
-		: "Persistent specialist session is unavailable.";
-	sendSubagentResult(
-		api,
-		`Persistent specialist "${running.name}" completed task ${event.task} (${running.tasksCompleted} tasks completed) and is idle and accepting subagent_send.\n\n${summary}`,
-		{
-			name: running.name,
+	inFlightPersistentTaskDeliveries.add(deliveryKey);
+	try {
+		const completed = (running.tasksCompleted ?? 0) + 1;
+		const summary = existsSync(running.sessionFile)
+			? (findLastAssistantMessage(getNewEntries(running.sessionFile, 0)) ??
+				"Persistent specialist completed without output.")
+			: "Persistent specialist session is unavailable.";
+		sendSubagentResult(
+			api,
+			`Persistent specialist "${running.name}" completed task ${event.task} (${completed} tasks completed) and is idle and accepting subagent_send.\n\n${summary}`,
+			{
+				name: running.name,
+				task: event.task,
+				agent: running.agent,
+				sessionFile: running.sessionFile,
+				logicalId: running.logicalId!,
+				generationId: running.generationId!,
+				policyHash: running.policyHash!,
+			},
+		);
+		appendPersistentDeliveryLedger(running.sessionFile, {
 			task: event.task,
-			agent: running.agent,
-			sessionFile: running.sessionFile,
-		},
-	);
+			outcome: "delivered",
+			generation: running.generationId!,
+			logicalId: running.logicalId!,
+			policyHash: running.policyHash!,
+		});
+		running.tasksCompleted = completed;
+		if (running.taskId === event.task) running.taskId = undefined;
+		if (running.stopState === "pending")
+			startPersistentStopTimeout(running, api, running.stopTimeoutMs);
+	} finally {
+		inFlightPersistentTaskDeliveries.delete(deliveryKey);
+	}
+}
+
+function drainPersistentTaskEvents(
+	running: RunningSubagent,
+	api: Pick<ExtensionAPI, "sendMessage">,
+): void {
+	const events = readPersistentTaskEvents(running.sessionFile);
+	for (const event of events.slice(running.observedTaskEvents ?? 0)) {
+		deliverPersistentTaskEvent(
+			running,
+			event,
+			selectCompletionApi(api, runtime.pi),
+		);
+	}
+	running.observedTaskEvents = events.length;
 }
 
 function watchPersistentTaskEvents(
@@ -2503,14 +2553,11 @@ function watchPersistentTaskEvents(
 	api: Pick<ExtensionAPI, "sendMessage">,
 ): ReturnType<typeof setInterval> {
 	return setInterval(() => {
-		for (const event of readPersistentTaskEvents(running.sessionFile).slice(
-			running.observedTaskEvents ?? 0,
-		)) {
-			deliverPersistentTaskEvent(running, event, api);
+		try {
+			drainPersistentTaskEvents(running, api);
+		} catch {
+			// Leave the event unread so the next poll can retry delivery.
 		}
-		running.observedTaskEvents = readPersistentTaskEvents(
-			running.sessionFile,
-		).length;
 	}, 1000);
 }
 
@@ -2661,8 +2708,9 @@ async function watchSubagent(
 export function shouldAdvanceToFallback(
 	result: Pick<SubagentResult, "errorMessage">,
 	remainingPlans: number,
+	persistent = false,
 ): boolean {
-	return !!result.errorMessage && remainingPlans > 0;
+	return !persistent && result.errorMessage !== undefined && remainingPlans > 0;
 }
 
 async function watchSubagentWithFallbacks(
@@ -2687,6 +2735,7 @@ async function watchSubagentWithFallbacks(
 		const shouldRetry = shouldAdvanceToFallback(
 			result,
 			plans.length - nextPlan,
+			running.persistent,
 		);
 		if (result.errorMessage) {
 			modelFailures.push({
@@ -2999,9 +3048,15 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					initialLaunchFailures,
 				)
 					.then(({ running: completedRunning, result }) => {
+						if (completedRunning.persistent)
+							drainPersistentTaskEvents(
+								completedRunning,
+								selectCompletionApi(pi, runtime.pi),
+							);
 						if (persistentTaskPoller) clearInterval(persistentTaskPoller);
+						if (completedRunning.stopTimeout)
+							clearTimeout(completedRunning.stopTimeout);
 						if (completedRunning.persistent) {
-							if (completedRunning.stopState === "failed") return;
 							if (!shouldDeliverSubagentCompletion(completedRunning)) return;
 							completedRunning.lifecycle = markDelivery(
 								completedRunning.lifecycle,
@@ -3012,13 +3067,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 								completedRunning.stopState === "requested" ||
 								completedRunning.stopState === "pending"
 							) {
-								// A confirmed persistent stop owns pane cleanup; ordinary
-								// turn delivery intentionally leaves this pane alive.
-								finalizeSubagentSurface(
-									completedRunning,
-									"ready_for_review",
-									true,
-								);
 								appendPersistentDeliveryLedger(completedRunning.sessionFile, {
 									task: "stop",
 									outcome: "stopped",
@@ -3036,7 +3084,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 									},
 									{ triggerTurn: true, deliverAs: "steer" },
 								);
-							} else if (!completedRunning.crashNotified) {
+							} else if (
+								completedRunning.stopState !== "failed" &&
+								!completedRunning.crashNotified
+							) {
 								completedRunning.crashNotified = true;
 								const facts = persistentSpecialistFacts(completedRunning);
 								completionApi.sendMessage(
@@ -3080,7 +3131,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 								name: result.ping.name,
 								message: result.ping.message,
 								agent: running.agent,
-								sessionFile: result.sessionFile,
+								sessionFile: result.sessionFile!,
 							};
 							if (result.worktree) pingDetails.worktree = result.worktree;
 							completionApi.sendMessage(
@@ -3115,7 +3166,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 							resultDetails.fallbackAttempts = result.fallbackAttempts;
 						if (result.fallbackFailures)
 							resultDetails.fallbackFailures = result.fallbackFailures;
-						if (result.worktree) resultDetails.worktree = result.worktree;
+						if (result.worktree)
+							resultDetails.worktree = captureWorktreeHandoff(result.worktree);
 						if (completedRunning.runtimePlan)
 							resultDetails.runtimePlan = completedRunning.runtimePlan;
 						sendSubagentResult(completionApi, presentation, resultDetails);
@@ -3131,13 +3183,27 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						running.lifecycle = markDelivery(running.lifecycle, "delivered");
 						runningSubagents.delete(running.id);
 						updateWidget();
+						if (running.persistent) {
+							const facts = persistentSpecialistFacts(running);
+							selectCompletionApi(pi, runtime.pi).sendMessage(
+								{
+									customType: "subagent_result",
+									content: `Persistent specialist crashed. Evidence is retained. Persistent sessions cannot be resumed in v1; spawn a new specialist.\n\n${formatPersistentSpecialistFacts(facts)}`,
+									display: true,
+									details: { error: "persistent-crash", facts },
+								},
+								{ triggerTurn: true, deliverAs: "steer" },
+							);
+							return;
+						}
 						const errDetails: SubagentResultDetails = {
 							name: running.name,
 							task: running.task,
 							error: err?.message,
 							sessionFile: running.sessionFile,
 						};
-						if (running.worktree) errDetails.worktree = running.worktree;
+						if (running.worktree)
+							errDetails.worktree = captureWorktreeHandoff(running.worktree);
 						sendSubagentResult(
 							selectCompletionApi(pi, runtime.pi),
 							resolveUnexpectedErrorPresentation(

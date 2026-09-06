@@ -514,6 +514,15 @@ export function consumePersistentTaskInbox(
 ): PersistentTaskInboxEntry | null {
 	const directory = dirname(sessionFile);
 	const prefix = `${sessionFile.split("/").pop()}.task-inbox.`;
+	for (const name of readdirSync(directory)) {
+		if (!name.startsWith(prefix) || !name.endsWith(".json.consuming")) continue;
+		const claimed = join(directory, name);
+		try {
+			renameSync(claimed, claimed.slice(0, -".consuming".length));
+		} catch {
+			// Another poller owns this claim, or recovery cannot safely proceed.
+		}
+	}
 	const inbox = readdirSync(directory)
 		.filter((name) => name.startsWith(prefix) && name.endsWith(".json"))
 		.sort()[0];
@@ -537,7 +546,7 @@ export function consumePersistentTaskInbox(
 			!isString(value.message) ||
 			!isString(value.at)
 		)
-			return null;
+			throw new Error("invalid persistent task inbox entry");
 		const entry: PersistentTaskInboxEntry = {
 			version: 1,
 			task: value.task,
@@ -545,9 +554,15 @@ export function consumePersistentTaskInbox(
 			at: value.at,
 		};
 		if (value.type === "task" || value.type === "stop") entry.type = value.type;
-		return entry;
-	} finally {
 		rmSync(claimed, { force: true });
+		return entry;
+	} catch {
+		try {
+			renameSync(claimed, `${path}.invalid`);
+		} catch {
+			// Keep the claimed file when it cannot be moved; never silently delete it.
+		}
+		return null;
 	}
 }
 
