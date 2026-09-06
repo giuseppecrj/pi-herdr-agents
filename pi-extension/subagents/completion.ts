@@ -138,11 +138,17 @@ export async function waitForCompletion(
 		try {
 			const exitCode = terminalExitCode(await options.readTerminalTail());
 			if (exitCode !== null) {
-				// The shell sentinel can become readable just before the child writes
-				// its authoritative error sidecar. Preserve that error metadata.
+				// The shell sentinel can become readable while the child publishes its
+				// authoritative semantic record. Always recheck after the asynchronous
+				// terminal read; a zero exit can race a ping or error just like a failure.
+				const racedCompletion = completionArtifact(options);
+				if (racedCompletion) return racedCompletion;
 				if (exitCode !== 0) {
-					const racedCompletion = await waitForDelayedSidecar(signal, options);
-					if (racedCompletion) return racedCompletion;
+					const delayedCompletion = await waitForDelayedSidecar(
+						signal,
+						options,
+					);
+					if (delayedCompletion) return delayedCompletion;
 				}
 				return { reason: "sentinel", exitCode };
 			}

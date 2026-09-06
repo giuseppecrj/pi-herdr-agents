@@ -4343,6 +4343,43 @@ describe("completion.ts", () => {
 		}
 	});
 
+	it("prefers semantic sidecars published during a zero-exit terminal read", async () => {
+		for (const [payload, expected] of [
+			[
+				{ type: "ping", name: "Scout", message: "need input" },
+				{
+					reason: "ping",
+					exitCode: 0,
+					ping: { name: "Scout", message: "need input" },
+				},
+			],
+			[
+				{ type: "error", errorMessage: "late semantic failure" },
+				{
+					reason: "error",
+					exitCode: 1,
+					errorMessage: "late semantic failure",
+				},
+			],
+		] as const) {
+			const dir = mkdtempSync(join(tmpdir(), "completion-zero-race-"));
+			const sessionFile = join(dir, "child.jsonl");
+			try {
+				const result = await waitForCompletion(new AbortController().signal, {
+					intervalMs: 1,
+					sessionFile,
+					readTerminalTail: async () => {
+						writeFileSync(`${sessionFile}.exit`, JSON.stringify(payload));
+						return "__SUBAGENT_DONE_0__";
+					},
+				});
+				assert.deepEqual(result, expected);
+			} finally {
+				rmSync(dir, { recursive: true, force: true });
+			}
+		}
+	});
+
 	it("retries transient terminal read failures and reports ticks", async () => {
 		let reads = 0;
 		let ticks = 0;
