@@ -503,10 +503,10 @@ Each public child stores a session-adjacent versioned launch-policy sidecar. Pub
 **Interaction flow:**
 
 1. Child calls `caller_ping({ message: "Not sure which schema to use" })`
-2. Child session exits (like `subagent_done`)
+2. Ordinary child sessions exit (like `subagent_done`); persistent specialists stay alive.
 3. Parent receives a steer notification: *"Sub-agent Worker needs help: Not sure which schema to use"*
-4. Parent resumes the child session via `subagent_resume` with the response
-5. Child picks up where it left off with the parent's guidance
+4. The parent resumes an ordinary child with `subagent_resume`, or replies to a persistent specialist with `subagent_send`.
+5. The child picks up with the parent's guidance
 
 **Example:**
 
