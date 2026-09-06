@@ -1,0 +1,13 @@
+{
+	"commit": "ebef2657b0b21177373868d83d66965fdf77febd",
+	"packageVersion": "1.5.1",
+	"purpose": "Frozen pre-31/pre-32 prototype baseline; not a production implementation.",
+	"sourceHashes": {
+		"completion.ts": "efef9c75f8b26b7d6048798698f0baca9feab585831316a6935b549709a50fa5",
+		"subagent-done.ts": "072b2c2debc9b416d049d97c5794e89c470e1b6c55392300304a60cf45377457",
+		"herdr.ts": "c2c7915083de00a5d8608f84cf6caa259682440f0ef520d5da61ad1a4469dd8c",
+		"index.ts": "e4cdda6c75d3e42af256c1efcc0d9ccaa35401cca1150bb52860d854c2be56de",
+		"lifecycle.ts": "2d39d8841df7f0dd0b7fd710c391496cd6d2d10c68372e058fd8ed7945764b59",
+		"session.ts": "7602d2a40ea5b75a403eea102d9504426e8e5660f0891395da5636d75d893756"
+	}
+}
