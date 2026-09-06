@@ -1962,6 +1962,74 @@ describe("supervision", () => {
 		}
 	});
 
+	it("does not apply an in-flight snapshot to a child registered after it began", async () => {
+		let resolveList:
+			| ((snapshot: {
+					complete: boolean;
+					panes: Array<{
+						paneId: string;
+						workspaceId: string;
+					}>;
+			  }) => void)
+			| undefined;
+		let fallbackInspections = 0;
+		const supervisor = new SupervisionCoordinator(
+			() =>
+				new Promise((resolve) => {
+					resolveList = resolve;
+				}),
+			async () => {
+				fallbackInspections += 1;
+				return { kind: "present", agentStatus: "idle", observedAt: Date.now() };
+			},
+		);
+		const dir = createTestDir();
+		try {
+			const one = supervisor.register(join(dir, "one.jsonl"), "one");
+			const two = supervisor.register(join(dir, "two.jsonl"), "two");
+			resolveList?.({
+				complete: true,
+				panes: [{ paneId: "one", workspaceId: "workspace" }],
+			});
+			await Promise.all([
+				one.wait(new AbortController().signal),
+				two.wait(new AbortController().signal),
+			]);
+			assert.equal((await two.inspectPane()).kind, "present");
+			assert.equal(fallbackInspections, 1);
+			one.unregister();
+			two.unregister();
+		} finally {
+			supervisor.close();
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("confirms empty complete-list absence with a pane inspection", async () => {
+		let fallbackInspections = 0;
+		const supervisor = new SupervisionCoordinator(
+			async () => ({ complete: true, panes: [] }),
+			async () => {
+				fallbackInspections += 1;
+				return { kind: "present", agentStatus: "idle", observedAt: Date.now() };
+			},
+		);
+		const dir = createTestDir();
+		try {
+			const registration = supervisor.register(
+				join(dir, "child.jsonl"),
+				"child",
+			);
+			await registration.wait(new AbortController().signal);
+			assert.equal((await registration.inspectPane()).kind, "present");
+			assert.equal(fallbackInspections, 1);
+			registration.unregister();
+		} finally {
+			supervisor.close();
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("batches pane reconciliation and refuses malformed-list absence", async () => {
 		let lists = 0;
 		let fallbackInspections = 0;
@@ -4259,6 +4327,21 @@ describe("lifecycle.ts", () => {
 			3_000,
 		);
 		assert.equal(projectLifecycle(lifecycle, 120_000).kind, "active");
+	});
+
+	it("uses activity as a fallback after a status-unknown pane snapshot", () => {
+		let lifecycle = createLifecycle(1_000);
+		lifecycle = observePaneInspection(
+			lifecycle,
+			{ kind: "present", observedAt: 2_000, agentStatus: "unknown" },
+			2_000,
+		);
+		lifecycle = observeLifecycleActivity(
+			lifecycle,
+			{ ok: true, activity: activity() },
+			2_000,
+		);
+		assert.equal(projectLifecycle(lifecycle, 3_000).kind, "active");
 	});
 
 	it("uses activity only as detail and does not override herdr waiting", () => {

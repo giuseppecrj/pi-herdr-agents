@@ -12,7 +12,6 @@ const BATCH_UNHEALTHY_MS = 5_000;
 export interface PaneListEntry {
 	paneId: string;
 	workspaceId: string;
-	inspection: PaneInspection;
 }
 
 export interface PaneListSnapshot {
@@ -28,6 +27,7 @@ export interface SupervisionRegistration {
 
 interface Entry {
 	surface: string;
+	generation: number;
 	wakeRegistration?: WakeRegistration;
 	pending?: WakeReason;
 	resolve?: (reason: WakeReason) => void;
@@ -53,6 +53,7 @@ export class SupervisionCoordinator {
 	private timer: ReturnType<typeof setInterval> | undefined;
 	private reconciling = false;
 	private unhealthyUntil = 0;
+	private nextGeneration = 0;
 
 	constructor(
 		listPanes: () => Promise<PaneListSnapshot>,
@@ -67,6 +68,7 @@ export class SupervisionCoordinator {
 	register(sessionFile: string, surface: string): SupervisionRegistration {
 		const entry: Entry = {
 			surface,
+			generation: this.nextGeneration++,
 			fallback: this.forcePolling,
 			fileFallback: this.forcePolling,
 		};
@@ -79,6 +81,7 @@ export class SupervisionCoordinator {
 			);
 		} else {
 			entry.fallback = true;
+			entry.fileFallback = true;
 			// Forced polling retains the legacy immediate probe, then 1s cadence.
 			entry.pending = "reconcile";
 		}
@@ -177,15 +180,27 @@ export class SupervisionCoordinator {
 	private async reconcile(): Promise<void> {
 		if (this.reconciling || this.entries.size === 0) return;
 		this.reconciling = true;
+		const snapshotGeneration = this.nextGeneration - 1;
 		try {
 			const snapshot = await this.listPanes();
 			if (!snapshot.complete) throw new Error("malformed pane list");
-			const bySurface = new Map(
-				snapshot.panes.map((pane) => [pane.paneId, pane.inspection]),
-			);
+			const bySurface = new Set(snapshot.panes.map((pane) => pane.paneId));
 			for (const entry of this.entries) {
 				entry.fallback = entry.fileFallback;
-				entry.inspection = bySurface.get(entry.surface) ?? { kind: "missing" };
+				if (entry.fallback || entry.generation > snapshotGeneration) {
+					// Legacy polling and later registrants always inspect their own pane.
+					entry.inspection = undefined;
+				} else if (bySurface.has(entry.surface)) {
+					entry.inspection = {
+						kind: "present",
+						agentStatus: "unknown",
+						observedAt: Date.now(),
+					};
+				} else {
+					// A complete list can establish presence, not absence. Only pane get
+					// may establish a missing pane before completion acts on it.
+					entry.inspection = undefined;
+				}
 				this.signal(entry, "reconcile");
 			}
 			this.unhealthyUntil = 0;

@@ -2612,17 +2612,7 @@ function getSupervisionCoordinator(): SupervisionCoordinator {
 		async () => {
 			const panes = await listPanes();
 			if (!panes) return { complete: false, panes: [] };
-			return {
-				complete: true,
-				panes: panes.map((pane) => ({
-					...pane,
-					// SAFETY: this literal is the present PaneInspection variant.
-					inspection: {
-						kind: "present",
-						observedAt: Date.now(),
-					} as PaneInspection,
-				})),
-			};
+			return { complete: true, panes };
 		},
 		inspectPane,
 		supervisionConfig.forcePolling,
