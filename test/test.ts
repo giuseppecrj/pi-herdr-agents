@@ -71,6 +71,10 @@ import {
 	parsePaneConfig,
 } from "../pi-extension/subagents/pane-config.ts";
 import {
+	loadPersistentConfig,
+	parsePersistentConfig,
+} from "../pi-extension/subagents/persistent-config.ts";
+import {
 	advanceStatusState,
 	capStatusLines,
 	classifyStatus,
@@ -95,6 +99,7 @@ import subagentDoneExtension, {
 	findLatestAssistantError,
 	buildCompletionSidecar,
 	buildPersistentTaskEvent,
+	isPersistentStopDirective,
 } from "../pi-extension/subagents/subagent-done.ts";
 import {
 	interpretExitSidecar,
@@ -1843,6 +1848,35 @@ describe("model configuration", () => {
 			() => parseModelConfig({ models: { agents: [] } }),
 			/must be an object/,
 		);
+	});
+});
+
+describe("persistent specialist configuration", () => {
+	it("defaults absent configuration to three specialists and rejects unknown keys", () => {
+		assert.deepEqual(parsePersistentConfig({}), { maxAgents: 3 });
+		assert.throws(
+			() =>
+				parsePersistentConfig({ persistent: { maxAgents: 3, extra: true } }),
+			/persistent has unsupported key\(s\): extra/,
+		);
+		assert.throws(
+			() => parsePersistentConfig({ persistent: { maxAgents: 0 } }),
+			/persistent\.maxAgents must be a positive integer/,
+		);
+	});
+
+	it("loads the shared example when local configuration is absent", () => {
+		withTempDir((dir) => {
+			const examplePath = join(dir, "config.json.example");
+			writeFileSync(
+				examplePath,
+				JSON.stringify({ persistent: { maxAgents: 2 } }),
+			);
+			assert.deepEqual(
+				loadPersistentConfig(join(dir, "config.json"), examplePath),
+				{ maxAgents: 2 },
+			);
+		});
 	});
 });
 
@@ -5066,6 +5100,167 @@ describe("persistent subagent send", () => {
 			assert.equal(consumePersistentTaskInbox(sessionFile), null);
 			testApi.runningSubagents.clear();
 		});
+	});
+});
+
+describe("persistent subagent stop", () => {
+	const testApi = subagentsModule.__test__;
+
+	function persistentFixture(
+		sessionFile: string,
+		policyHash: string,
+		active = false,
+	) {
+		const now = Date.now();
+		return {
+			id: "logical-stop",
+			name: "Persistent stop",
+			task: "first",
+			surface: "pane",
+			startTime: now,
+			sessionFile,
+			interactive: false,
+			runtimePlan: undefined,
+			persistent: true,
+			logicalId: "logical-stop",
+			generationId: "generation-stop",
+			policyHash,
+			taskId: "task-1",
+			inboxSequence: 0,
+			lifecycle: {
+				...createLifecycle(now),
+				process: { kind: "running" as const, startedAt: now, confirmedAt: now },
+				turn: active
+					? {
+							kind: "active" as const,
+							startedAt: now,
+							source: "fallback" as const,
+						}
+					: { kind: "waiting" as const, startedAt: now },
+			},
+		};
+	}
+
+	it("records stop-pending for an active task and never abandons it", () => {
+		withTempDir((dir) => {
+			const sessionFile = join(dir, "stop-pending.jsonl");
+			const policy = writeSubagentSessionPolicy(sessionFile, {
+				owner: "public",
+				tools: ["read"],
+				deniedTools: [],
+				persistent: true,
+				logicalId: "logical-stop",
+				generationId: "generation-stop",
+			});
+			testApi.runningSubagents.clear();
+			testApi.runningSubagents.set(
+				"logical-stop",
+				persistentFixture(sessionFile, policy.policyHash, true),
+			);
+			const result = testApi.handleSubagentStop(
+				{ id: "logical-stop" },
+				{ sendMessage() {} },
+				60_000,
+			);
+			assert.equal(result.details.status, "stop_pending");
+			assert.equal(
+				testApi.runningSubagents.get("logical-stop")?.taskId,
+				"task-1",
+			);
+			assert.equal(
+				readPersistentDeliveryLedger(sessionFile).at(-1)?.outcome,
+				"stop-pending",
+			);
+			testApi.runningSubagents.clear();
+		});
+	});
+
+	it("fails closed when bounded stop exit confirmation is unavailable", async () => {
+		await new Promise<void>((resolve, reject) =>
+			withTempDir((dir) => {
+				const sessionFile = join(dir, "stop-timeout.jsonl");
+				const policy = writeSubagentSessionPolicy(sessionFile, {
+					owner: "public",
+					tools: ["read"],
+					deniedTools: [],
+					persistent: true,
+					logicalId: "logical-stop",
+					generationId: "generation-stop",
+				});
+				const messages: any[] = [];
+				testApi.runningSubagents.clear();
+				testApi.runningSubagents.set(
+					"logical-stop",
+					persistentFixture(sessionFile, policy.policyHash),
+				);
+				testApi.handleSubagentStop(
+					{ id: "logical-stop" },
+					{
+						sendMessage(message: any) {
+							messages.push(message);
+						},
+					},
+					0,
+				);
+				setTimeout(() => {
+					try {
+						assert.equal(
+							testApi.runningSubagents.get("logical-stop")?.stopState,
+							"failed",
+						);
+						assert.equal(messages.length, 1);
+						assert.match(messages[0].content, /exit was not confirmed/);
+						resolve();
+					} catch (error) {
+						reject(error);
+					} finally {
+						testApi.runningSubagents.clear();
+					}
+				}, 5);
+			}),
+		);
+	});
+
+	it("rejects a persistent spawn at the cap before resource creation", () => {
+		testApi.runningSubagents.clear();
+		try {
+			for (let index = 0; index < 3; index++) {
+				testApi.runningSubagents.set(`logical-${index}`, {
+					...persistentFixture(`session-${index}`, "a".repeat(64)),
+					id: `logical-${index}`,
+					name: `Specialist ${index}`,
+					tasksCompleted: index,
+				});
+			}
+			assert.match(
+				testApi.persistentCapacityError({ maxAgents: 3 }),
+				/Specialist 0 \(idle, 0 completed\)/,
+			);
+		} finally {
+			testApi.runningSubagents.clear();
+		}
+	});
+
+	it("recognizes only explicit child stop directives", () => {
+		assert.equal(
+			isPersistentStopDirective({
+				version: 1,
+				type: "stop",
+				task: "stop",
+				message: "",
+				at: "now",
+			}),
+			true,
+		);
+		assert.equal(
+			isPersistentStopDirective({
+				version: 1,
+				task: "task",
+				message: "next",
+				at: "now",
+			}),
+			false,
+		);
 	});
 });
 

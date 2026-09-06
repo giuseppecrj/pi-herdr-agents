@@ -94,6 +94,12 @@ export function buildPersistentTaskEvent(task: string, generation: string) {
 	};
 }
 
+export function isPersistentStopDirective(
+	inbox: ReturnType<typeof consumePersistentTaskInbox>,
+): boolean {
+	return inbox?.type === "stop";
+}
+
 export function parseDeniedTools(rawValue: string | undefined): string[] {
 	return (rawValue ?? "")
 		.split(",")
@@ -183,9 +189,11 @@ export default function (pi: ExtensionAPI) {
 	let agentStarted = false;
 	let latestAgentMessages: any[] | undefined;
 	let completionFinalized = false;
+	let sessionContext: { shutdown(): void } | undefined;
 
 	// Show widget + status bar on session start
 	pi.on("session_start", (_event, ctx) => {
+		sessionContext = ctx;
 		recorder.sessionStart();
 		const tools = pi.getAllTools();
 		toolNames = tools.map((t) => t.name).sort();
@@ -398,6 +406,20 @@ export default function (pi: ExtensionAPI) {
 			if (!sessionFile || currentTask) return;
 			const inbox = consumePersistentTaskInbox(sessionFile);
 			if (!inbox) return;
+			if (isPersistentStopDirective(inbox)) {
+				try {
+					writeFileSync(
+						`${sessionFile}.exit`,
+						JSON.stringify({ type: "done" }),
+					);
+				} catch {
+					// The parent can still confirm the shell exit marker.
+				}
+				completionFinalized = true;
+				recorder.subagentDone();
+				sessionContext?.shutdown();
+				return;
+			}
 			currentTask = inbox.task;
 			pi.sendUserMessage(inbox.message);
 		}, 1000);

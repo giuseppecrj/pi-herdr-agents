@@ -49,6 +49,10 @@ import {
 import { loadModelConfig, resolveModelDefault } from "./model-config.ts";
 import { loadRoleConfig, type RoleConfig } from "./role-config.ts";
 import {
+	loadPersistentConfig,
+	type PersistentConfig,
+} from "./persistent-config.ts";
+import {
 	appendPersistentDeliveryLedger,
 	findLastAssistantMessage,
 	findObservedSessionRuntime,
@@ -1039,6 +1043,7 @@ function finalizeSubagentSurface(
 const statusConfig = loadStatusConfig();
 const modelConfig = loadModelConfig();
 const bundledRoleConfig = loadRoleConfig();
+const persistentConfig = loadPersistentConfig();
 
 const MAX_RESULT_PRESENTATION_CHARS = 16_000;
 const MAX_SESSION_REFERENCE_CHARS = 10_000;
@@ -1343,6 +1348,9 @@ interface RunningSubagent {
 	taskId?: string;
 	inboxSequence?: number;
 	observedTaskEvents?: number;
+	stopState?: "requested" | "pending" | "failed";
+	stopFailure?: string;
+	crashNotified?: boolean;
 }
 
 interface SubagentRuntime {
@@ -1788,6 +1796,160 @@ interface SubagentSendDetails {
 	outcome?: "dispatched" | "rejected-busy";
 }
 
+interface PersistentSpecialistFacts {
+	logicalId: string;
+	generationId: string;
+	policyHash: string;
+	tasks: Array<{ task: string; outcome: string }>;
+	sessionFile: string;
+	worktree?: WorktreeHandoff;
+	lastObservedPhase: string;
+}
+
+function persistentSpecialistFacts(
+	running: RunningSubagent,
+): PersistentSpecialistFacts {
+	const facts: PersistentSpecialistFacts = {
+		logicalId: running.logicalId!,
+		generationId: running.generationId!,
+		policyHash: running.policyHash!,
+		tasks: readPersistentDeliveryLedger(running.sessionFile).map((entry) => ({
+			task: entry.task,
+			outcome: entry.outcome,
+		})),
+		sessionFile: running.sessionFile,
+		lastObservedPhase: projectLifecycle(ensureLifecycle(running), Date.now())
+			.kind,
+	};
+	if (running.worktree)
+		facts.worktree = captureWorktreeHandoff(running.worktree);
+	return facts;
+}
+
+function formatPersistentSpecialistFacts(
+	facts: PersistentSpecialistFacts,
+): string {
+	const lines = [
+		`Logical ID: ${facts.logicalId}`,
+		`Generation ID: ${facts.generationId}`,
+		`Policy hash: ${facts.policyHash}`,
+		`Task outcomes: ${facts.tasks.map((task) => `${task.task}=${task.outcome}`).join(", ") || "none"}`,
+		`Session: ${facts.sessionFile}`,
+		`Last observed phase: ${facts.lastObservedPhase}`,
+	];
+	if (facts.worktree)
+		lines.push(
+			`Worktree Git state: ${facts.worktree.gitError ? "unknown" : facts.worktree.conflicted ? "conflicted" : facts.worktree.clean ? "clean" : "dirty"}`,
+		);
+	return lines.join("\n");
+}
+
+function persistentCapacityError(
+	config: PersistentConfig = persistentConfig,
+): string | undefined {
+	const specialists = Array.from(runningSubagents.values()).filter(
+		(running) => running.persistent,
+	);
+	if (specialists.length < config.maxAgents) return undefined;
+	return `Persistent specialist cap (${config.maxAgents}) reached. Current specialists: ${specialists.map((running) => `${running.name} (${persistentSpecialistState(running)}, ${running.tasksCompleted ?? 0} completed)`).join(", ")}.`;
+}
+
+function sendPersistentStopFailure(
+	api: Pick<ExtensionAPI, "sendMessage">,
+	running: RunningSubagent,
+): void {
+	const facts = persistentSpecialistFacts(running);
+	api.sendMessage(
+		{
+			customType: "subagent_stop",
+			content: `Persistent specialist stop failed: process exit was not confirmed. Evidence is retained.\n\n${formatPersistentSpecialistFacts(facts)}`,
+			display: true,
+			details: { status: "failed", facts },
+		},
+		{ triggerTurn: true, deliverAs: "steer" },
+	);
+}
+
+interface SubagentStopDetails {
+	error?: string;
+	id?: string;
+	name?: string;
+	status?: "stop_requested" | "stop_pending";
+}
+
+function handleSubagentStop(
+	params: { id?: string; name?: string },
+	api: Pick<ExtensionAPI, "sendMessage">,
+	stopTimeoutMs = 15_000,
+): AgentToolResult<SubagentStopDetails> {
+	const resolved = resolvePersistentTarget(params);
+	if ("error" in resolved) {
+		return {
+			content: [{ type: "text", text: resolved.error }],
+			details: { error: resolved.error },
+		};
+	}
+	const running = resolved.running;
+	if (running.stopState === "requested" || running.stopState === "pending") {
+		const error = `Stop is already requested for persistent specialist "${running.name}".`;
+		return {
+			content: [{ type: "text", text: error }],
+			details: { error, id: running.id, name: running.name },
+		};
+	}
+	const state = persistentSpecialistState(running);
+	if (state === "stopped") {
+		const error = `Persistent specialist "${running.name}" is already stopped.`;
+		return {
+			content: [{ type: "text", text: error }],
+			details: { error, id: running.id, name: running.name },
+		};
+	}
+	const task = running.taskId ?? "stop";
+	const pending = state !== "idle";
+	running.stopState = pending ? "pending" : "requested";
+	if (pending) {
+		appendPersistentDeliveryLedger(running.sessionFile, {
+			task,
+			outcome: "stop-pending",
+			generation: running.generationId!,
+			logicalId: running.logicalId!,
+			policyHash: running.policyHash!,
+		});
+	}
+	writePersistentTaskInbox(
+		running.sessionFile,
+		(running.inboxSequence = (running.inboxSequence ?? 0) + 1),
+		{ type: "stop", task, message: "" },
+	);
+	const stopTimeout = setTimeout(() => {
+		if (!runningSubagents.has(running.id) || running.stopState === "failed")
+			return;
+		if (running.stopState === "requested" || running.stopState === "pending") {
+			running.stopState = "failed";
+			running.stopFailure =
+				"process exit was not confirmed within the bounded stop wait";
+			sendPersistentStopFailure(api, running);
+		}
+	}, stopTimeoutMs);
+	stopTimeout.unref();
+	return {
+		content: [
+			{
+				type: "text",
+				text: pending
+					? `Stop pending for persistent specialist "${running.name}"; its active task will settle first.`
+					: `Stop requested for persistent specialist "${running.name}".`,
+			},
+		],
+		details: {
+			id: running.id,
+			name: running.name,
+			status: pending ? "stop_pending" : "stop_requested",
+		},
+	};
+}
+
 function handleSubagentSend(params: {
 	id?: string;
 	name?: string;
@@ -2026,7 +2188,9 @@ export const __test__ = {
 	requestSubagentInterrupt,
 	handleSubagentInterrupt,
 	handleSubagentSend,
+	handleSubagentStop,
 	persistentSpecialistState,
+	persistentCapacityError,
 	resolveResultPresentation,
 	resolveUnexpectedErrorPresentation,
 	shouldAdvanceToFallback,
@@ -2307,6 +2471,7 @@ function deliverPersistentTaskEvent(
 		policyHash: running.policyHash!,
 	});
 	running.tasksCompleted = (running.tasksCompleted ?? 0) + 1;
+	if (running.taskId === event.task) running.taskId = undefined;
 	const summary = existsSync(running.sessionFile)
 		? (findLastAssistantMessage(getNewEntries(running.sessionFile, 0)) ??
 			"Persistent specialist completed without output.")
@@ -2730,6 +2895,18 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					};
 				}
 
+				const persistent = resolveEffectivePersistent(
+					params,
+					params.agent ? loadAgentDefaults(params.agent, runtime.pi) : null,
+				);
+				const capError = persistent ? persistentCapacityError() : undefined;
+				if (capError) {
+					return {
+						content: [{ type: "text", text: capError }],
+						details: { error: "persistent-cap" },
+					};
+				}
+
 				// Validate prerequisites
 				if (!isTerminalAvailable()) {
 					return muxUnavailableResult();
@@ -2813,6 +2990,52 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				)
 					.then(({ running: completedRunning, result }) => {
 						if (persistentTaskPoller) clearInterval(persistentTaskPoller);
+						if (completedRunning.persistent) {
+							if (completedRunning.stopState === "failed") return;
+							if (!shouldDeliverSubagentCompletion(completedRunning)) return;
+							completedRunning.lifecycle = markDelivery(
+								completedRunning.lifecycle,
+								"delivered",
+							);
+							const completionApi = selectCompletionApi(pi, runtime.pi);
+							if (
+								completedRunning.stopState === "requested" ||
+								completedRunning.stopState === "pending"
+							) {
+								appendPersistentDeliveryLedger(completedRunning.sessionFile, {
+									task: "stop",
+									outcome: "stopped",
+									generation: completedRunning.generationId!,
+									logicalId: completedRunning.logicalId!,
+									policyHash: completedRunning.policyHash!,
+								});
+								const facts = persistentSpecialistFacts(completedRunning);
+								completionApi.sendMessage(
+									{
+										customType: "subagent_stop",
+										content: `Persistent specialist stopped.\n\n${formatPersistentSpecialistFacts(facts)}`,
+										display: true,
+										details: { status: "stopped", facts },
+									},
+									{ triggerTurn: true, deliverAs: "steer" },
+								);
+							} else if (!completedRunning.crashNotified) {
+								completedRunning.crashNotified = true;
+								const facts = persistentSpecialistFacts(completedRunning);
+								completionApi.sendMessage(
+									{
+										customType: "subagent_result",
+										content: `Persistent specialist crashed. Evidence is retained. Persistent sessions cannot be resumed in v1; spawn a new specialist.\n\n${formatPersistentSpecialistFacts(facts)}`,
+										display: true,
+										details: { error: "persistent-crash", facts },
+									},
+									{ triggerTurn: true, deliverAs: "steer" },
+								);
+							}
+							runningSubagents.delete(completedRunning.id);
+							updateWidget();
+							return;
+						}
 						if (!shouldDeliverSubagentCompletion(completedRunning)) {
 							completedRunning.lifecycle = markDelivery(
 								completedRunning.lifecycle,
@@ -3048,6 +3271,30 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			}),
 			async execute(_toolCallId, params) {
 				return handleSubagentSend(params);
+			},
+		});
+
+	// ── subagent_stop tool ──
+	if (shouldRegister("subagent_stop"))
+		pi.registerTool({
+			name: "subagent_stop",
+			label: "Stop Persistent Specialist",
+			description:
+				"Gracefully stop a persistent specialist after its active task settles. Exit is confirmed before the specialist is removed.",
+			parameters: Type.Object({
+				id: Type.Optional(
+					Type.String({
+						description: "Exact persistent specialist logical ID",
+					}),
+				),
+				name: Type.Optional(
+					Type.String({
+						description: "Exact unambiguous persistent specialist name",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				return handleSubagentStop(params, selectCompletionApi(pi, runtime.pi));
 			},
 		});
 

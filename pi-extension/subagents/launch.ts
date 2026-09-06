@@ -148,10 +148,15 @@ export interface PiRunningChild {
 	logicalId?: string;
 	generationId?: string;
 	policyHash?: string;
+	policyTools?: string[] | null;
+	policyDeniedTools?: string[];
 	tasksCompleted?: number;
 	taskId?: string;
 	inboxSequence?: number;
 	observedTaskEvents?: number;
+	stopState?: "requested" | "pending" | "failed";
+	stopFailure?: string;
+	crashNotified?: boolean;
 }
 
 export interface PiLaunchOperations {

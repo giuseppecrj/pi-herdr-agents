@@ -97,7 +97,13 @@ export interface PersistentTaskEvent {
 
 export interface PersistentDeliveryLedgerEntry {
 	task: string;
-	outcome: "dispatched" | "delivered" | "rejected-busy" | "help-requested";
+	outcome:
+		| "dispatched"
+		| "delivered"
+		| "rejected-busy"
+		| "help-requested"
+		| "stop-pending"
+		| "stopped";
 	generation: string;
 	logicalId: string;
 	policyHash: string;
@@ -106,6 +112,7 @@ export interface PersistentDeliveryLedgerEntry {
 
 export interface PersistentTaskInboxEntry {
 	version: 1;
+	type?: "task" | "stop";
 	task: string;
 	message: string;
 	at: string;
@@ -443,6 +450,8 @@ function parsePersistentLedgerOutcome(
 	if (value === "delivered") return value;
 	if (value === "rejected-busy") return value;
 	if (value === "help-requested") return value;
+	if (value === "stop-pending") return value;
+	if (value === "stopped") return value;
 	return null;
 }
 
@@ -491,7 +500,7 @@ export function writePersistentTaskInbox(
 	const temporary = `${path}.tmp`;
 	writeFileSync(
 		temporary,
-		`${JSON.stringify({ version: 1, ...entry, at: entry.at ?? new Date().toISOString() })}\n`,
+		`${JSON.stringify({ version: 1, type: "task", ...entry, at: entry.at ?? new Date().toISOString() })}\n`,
 		"utf8",
 	);
 	renameSync(temporary, path);
@@ -519,17 +528,22 @@ export function consumePersistentTaskInbox(
 		if (
 			!isPlainObject(value) ||
 			value.version !== 1 ||
+			(value.type !== undefined &&
+				value.type !== "task" &&
+				value.type !== "stop") ||
 			!isString(value.task) ||
 			!isString(value.message) ||
 			!isString(value.at)
 		)
 			return null;
-		return {
+		const entry: PersistentTaskInboxEntry = {
 			version: 1,
 			task: value.task,
 			message: value.message,
 			at: value.at,
 		};
+		if (value.type === "task" || value.type === "stop") entry.type = value.type;
+		return entry;
 	} finally {
 		rmSync(claimed, { force: true });
 	}
