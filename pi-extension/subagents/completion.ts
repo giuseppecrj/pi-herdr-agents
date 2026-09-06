@@ -24,6 +24,10 @@ export interface CompletionOptions {
 	) => void;
 	sessionFile?: string;
 	onTick?: (elapsedSeconds: number) => void;
+	/** Wait for a local file wake-up or a scheduled reconciliation. */
+	waitForNextCheck?: (signal: AbortSignal) => Promise<"wake" | "reconcile">;
+	/** Drain local task evidence before any terminal fallback. */
+	onLocalEvidence?: () => void;
 }
 
 export function interpretExitSidecar(payload: any): CompletionResult {
@@ -129,35 +133,41 @@ export async function waitForCompletion(
 ): Promise<CompletionResult> {
 	const startedAt = Date.now();
 
+	// Coordinated supervision waits for its first shared epoch; legacy callers
+	// retain the immediate terminal probe.
+	let reconcile = !options.waitForNextCheck;
 	for (;;) {
 		if (signal.aborted) throw new Error(ABORT_MESSAGE);
 
 		const sidecarResult = consumeExitSidecar(options.sessionFile);
 		if (sidecarResult) return sidecarResult;
+		options.onLocalEvidence?.();
 
-		try {
-			const exitCode = terminalExitCode(await options.readTerminalTail());
-			if (exitCode !== null) {
-				// The shell sentinel can become readable while the child publishes its
-				// authoritative semantic record. Always recheck after the asynchronous
-				// terminal read; a zero exit can race a ping or error just like a failure.
-				const racedCompletion = completionArtifact(options);
-				if (racedCompletion) return racedCompletion;
-				if (exitCode !== 0) {
-					const delayedCompletion = await waitForDelayedSidecar(
-						signal,
-						options,
-					);
-					if (delayedCompletion) return delayedCompletion;
+		if (reconcile)
+			try {
+				const exitCode = terminalExitCode(await options.readTerminalTail());
+				if (exitCode !== null) {
+					// The shell sentinel can become readable while the child publishes its
+					// authoritative semantic record. Always recheck after the asynchronous
+					// terminal read; a zero exit can race a ping or error just like a failure.
+					options.onLocalEvidence?.();
+					const racedCompletion = completionArtifact(options);
+					if (racedCompletion) return racedCompletion;
+					if (exitCode !== 0) {
+						const delayedCompletion = await waitForDelayedSidecar(
+							signal,
+							options,
+						);
+						if (delayedCompletion) return delayedCompletion;
+					}
+					return { reason: "sentinel", exitCode };
 				}
-				return { reason: "sentinel", exitCode };
+			} catch {
+				// Terminal reads are only sentinel/output probes; Herdr status is polled
+				// independently below, even when terminal reads succeed.
 			}
-		} catch {
-			// Terminal reads are only sentinel/output probes; Herdr status is polled
-			// independently below, even when terminal reads succeed.
-		}
 
-		if (options.inspectPane) {
+		if (reconcile && options.inspectPane) {
 			let inspection: import("./lifecycle.ts").PaneInspection;
 			try {
 				inspection = await options.inspectPane();
@@ -167,6 +177,8 @@ export async function waitForCompletion(
 			const observedAt = Date.now();
 			options.onPaneInspection?.(inspection, observedAt);
 			if (inspection.kind === "missing") {
+				// Drain concurrent persistent events before accepting pane fallback.
+				options.onLocalEvidence?.();
 				// Pane closure and atomic artifact publication are separate operations.
 				// Allow a short bounded grace window before declaring evidence lost.
 				const racedCompletion = await waitForDelayedSidecar(signal, options);
@@ -181,6 +193,11 @@ export async function waitForCompletion(
 		}
 
 		options.onTick?.(Math.floor((Date.now() - startedAt) / 1000));
-		await abortableDelay(options.intervalMs, signal);
+		if (options.waitForNextCheck) {
+			reconcile = (await options.waitForNextCheck(signal)) === "reconcile";
+		} else {
+			await abortableDelay(options.intervalMs, signal);
+			reconcile = true;
+		}
 	}
 }

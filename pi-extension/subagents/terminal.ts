@@ -15,6 +15,7 @@ import {
 	readHerdrScreen,
 	readHerdrScreenAsync,
 	inspectHerdrPane,
+	listHerdrPanes,
 	renameHerdrTab,
 	renameHerdrWorkspace,
 	sendHerdrCommand,
@@ -136,6 +137,13 @@ export async function readPaneAsync(
 }
 
 export type { PaneInspection, HerdrAgentStatus } from "./lifecycle.ts";
+
+export async function listPanes(): Promise<
+	import("./herdr.ts").HerdrPaneListEntry[] | null
+> {
+	assertTerminalAvailable();
+	return listHerdrPanes();
+}
 
 export async function inspectPane(
 	paneId: PaneId,

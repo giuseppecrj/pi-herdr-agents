@@ -11,6 +11,9 @@
   "persistent": {
     "maxAgents": 3
   },
+  "supervision": {
+    "forcePolling": false
+  },
   "panes": {
     "mode": "tab",
     "direction": "right"

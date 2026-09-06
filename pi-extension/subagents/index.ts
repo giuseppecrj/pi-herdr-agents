@@ -33,9 +33,15 @@ import {
 	shellQuote,
 	readPaneAsync,
 	inspectPane,
+	listPanes,
 	waitForShellReady,
 } from "./terminal.ts";
 import { waitForCompletion } from "./completion.ts";
+import {
+	SupervisionCoordinator,
+	type SupervisionRegistration,
+} from "./supervision.ts";
+import { loadSupervisionConfig } from "./supervision-config.ts";
 import {
 	buildAuthenticatedModelCatalog,
 	resolveRuntimePlan,
@@ -853,6 +859,16 @@ function formatLivePersistentSpecialists(): string[] {
 	];
 }
 
+function formatSupervisionDiagnostics(): string[] {
+	const diagnostics = runtime.supervision?.diagnostics() ?? {
+		mode: supervisionConfig.forcePolling ? "polling(forced)" : "wake+batch",
+		watcherCount: 0,
+	};
+	return [
+		`Supervision: ${diagnostics.mode}; ${diagnostics.watcherCount} watcher${diagnostics.watcherCount === 1 ? "" : "s"}`,
+	];
+}
+
 function formatAgentDiagnostics(diagnostics: AgentDiagnostic[]): string[] {
 	return diagnostics.map((diagnostic) => `! ${diagnostic.message}`);
 }
@@ -1044,6 +1060,7 @@ const statusConfig = loadStatusConfig();
 const modelConfig = loadModelConfig();
 const bundledRoleConfig = loadRoleConfig();
 const persistentConfig = loadPersistentConfig();
+const supervisionConfig = loadSupervisionConfig();
 
 const MAX_RESULT_PRESENTATION_CHARS = 16_000;
 const MAX_SESSION_REFERENCE_CHARS = 10_000;
@@ -1356,10 +1373,12 @@ interface RunningSubagent {
 	stopTimeout?: ReturnType<typeof setTimeout>;
 	stopTimeoutMs?: number;
 	crashNotified?: boolean;
+	supervisionRegistration?: SupervisionRegistration;
 }
 
 interface SubagentRuntime {
 	runningSubagents: Map<string, RunningSubagent>;
+	supervision?: SupervisionCoordinator;
 	pi?: ExtensionAPI;
 	latestCtx?: ExtensionContext;
 	modelCatalog?: string;
@@ -2587,17 +2606,37 @@ function notifyPersistentCrash(
 	);
 }
 
-function watchPersistentTaskEvents(
-	running: RunningSubagent,
-	api: Pick<ExtensionAPI, "sendMessage">,
-): ReturnType<typeof setInterval> {
-	return setInterval(() => {
-		try {
-			drainPersistentTaskEvents(running, api);
-		} catch {
-			// Leave the event unread so the next poll can retry delivery.
-		}
-	}, 1000);
+function getSupervisionCoordinator(): SupervisionCoordinator {
+	if (runtime.supervision) return runtime.supervision;
+	runtime.supervision = new SupervisionCoordinator(
+		async () => {
+			const panes = await listPanes();
+			if (!panes) return { complete: false, panes: [] };
+			return {
+				complete: true,
+				panes: panes.map((pane) => ({
+					...pane,
+					// SAFETY: this literal is the present PaneInspection variant.
+					inspection: {
+						kind: "present",
+						observedAt: Date.now(),
+					} as PaneInspection,
+				})),
+			};
+		},
+		inspectPane,
+		supervisionConfig.forcePolling,
+	);
+	return runtime.supervision;
+}
+
+function drainPersistentEventsSafely(running: RunningSubagent): void {
+	if (!running.persistent || !runtime.pi) return;
+	try {
+		drainPersistentTaskEvents(running, runtime.pi);
+	} catch {
+		// Leave an unread task event for the next file wake-up or reconciliation.
+	}
 }
 
 async function watchSubagent(
@@ -2605,13 +2644,20 @@ async function watchSubagent(
 	signal: AbortSignal,
 ): Promise<SubagentResult> {
 	const { name, task, surface, startTime, sessionFile } = running;
+	const supervision = getSupervisionCoordinator().register(
+		sessionFile,
+		surface,
+	);
+	running.supervisionRegistration = supervision;
 
 	try {
 		const result = await waitForCompletion(signal, {
 			intervalMs: 1000,
 			sessionFile,
+			waitForNextCheck: supervision.wait,
 			readTerminalTail: () => readPaneAsync(surface, 5),
-			inspectPane: async () => inspectPane(surface),
+			inspectPane: supervision.inspectPane,
+			onLocalEvidence: () => drainPersistentEventsSafely(running),
 			onPaneInspection: (inspection: PaneInspection, observedAt: number) => {
 				ensureLifecycle(running);
 				running.lifecycle = observePaneInspection(
@@ -2741,6 +2787,11 @@ async function watchSubagent(
 		};
 		if (worktreeHandoff) errorResult.worktree = worktreeHandoff;
 		return errorResult;
+	} finally {
+		supervision.unregister();
+		if (running.supervisionRegistration === supervision) {
+			running.supervisionRegistration = undefined;
+		}
 	}
 }
 
@@ -2909,6 +2960,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		}
 
 		cleanupSubagentsForShutdown(event.reason, runningSubagents);
+		if (!shouldPreserveSubagentsOnShutdown(event.reason)) {
+			runtime.supervision?.close();
+			runtime.supervision = undefined;
+		}
 		try {
 			await closeBtw();
 		} catch {
@@ -3066,15 +3121,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				startWidgetRefresh();
 				startStatusRefresh(pi);
 
-				// Persistent specialists deliver task events while the normal watcher remains
-				// responsible for a real process exit or pane disappearance.
-				const persistentTaskPoller = running.persistent
-					? watchPersistentTaskEvents(
-							running,
-							selectCompletionApi(pi, runtime.pi),
-						)
-					: undefined;
-
 				// Fire-and-forget: start watching in background
 				watchSubagentWithFallbacks(
 					running,
@@ -3092,7 +3138,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 								completedRunning,
 								selectCompletionApi(pi, runtime.pi),
 							);
-						if (persistentTaskPoller) clearInterval(persistentTaskPoller);
 						if (completedRunning.stopTimeout)
 							clearTimeout(completedRunning.stopTimeout);
 						if (completedRunning.persistent) {
@@ -3199,7 +3244,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						sendSubagentResult(completionApi, presentation, resultDetails);
 					})
 					.catch((err) => {
-						if (persistentTaskPoller) clearInterval(persistentTaskPoller);
 						if (!shouldDeliverSubagentCompletion(running)) {
 							running.lifecycle = markDelivery(running.lifecycle, "suppressed");
 							runningSubagents.delete(running.id);
@@ -3483,6 +3527,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const lines = [
 					...formatVisibleAgentDefinitions(list),
 					...formatLivePersistentSpecialists(),
+					...formatSupervisionDiagnostics(),
 					...formatAgentDiagnostics(catalog.diagnostics),
 				];
 

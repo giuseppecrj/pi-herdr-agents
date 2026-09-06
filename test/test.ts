@@ -80,6 +80,12 @@ import {
 	parsePersistentConfig,
 } from "../pi-extension/subagents/persistent-config.ts";
 import {
+	loadSupervisionConfig,
+	parseSupervisionConfig,
+} from "../pi-extension/subagents/supervision-config.ts";
+import { FileWakeRegistry } from "../pi-extension/subagents/wake.ts";
+import { SupervisionCoordinator } from "../pi-extension/subagents/supervision.ts";
+import {
 	advanceStatusState,
 	capStatusLines,
 	classifyStatus,
@@ -1903,6 +1909,103 @@ describe("persistent specialist configuration", () => {
 				{ maxAgents: 2 },
 			);
 		});
+	});
+});
+
+describe("supervision", () => {
+	it("parses forcePolling strictly and loads the shared example", () => {
+		assert.deepEqual(parseSupervisionConfig({}), { forcePolling: false });
+		assert.deepEqual(
+			parseSupervisionConfig({ supervision: { forcePolling: true } }),
+			{ forcePolling: true },
+		);
+		assert.throws(
+			() => parseSupervisionConfig({ supervision: { extra: true } }),
+			/supervision has unsupported key\(s\): extra/,
+		);
+		withTempDir((dir) => {
+			const example = join(dir, "config.json.example");
+			writeFileSync(
+				example,
+				JSON.stringify({ supervision: { forcePolling: true } }),
+			);
+			assert.deepEqual(
+				loadSupervisionConfig(join(dir, "config.json"), example),
+				{ forcePolling: true },
+			);
+		});
+	});
+
+	it("wakes on sidecar rename and releases registrations", async () => {
+		const dir = createTestDir();
+		const sessionFile = join(dir, "child.jsonl");
+		let wakes = 0;
+		const registry = new FileWakeRegistry();
+		const registration = registry.register(
+			sessionFile,
+			() => {
+				wakes += 1;
+			},
+			() => assert.fail("watcher unexpectedly fell back"),
+		);
+		try {
+			const temporary = `${sessionFile}.exit.tmp`;
+			writeFileSync(temporary, "{}");
+			renameSync(temporary, `${sessionFile}.exit`);
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			assert.equal(wakes, 1);
+			registration.unregister();
+			assert.equal(registry.watcherCount, 0);
+		} finally {
+			registry.close();
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("batches pane reconciliation and refuses malformed-list absence", async () => {
+		let lists = 0;
+		let fallbackInspections = 0;
+		const supervisor = new SupervisionCoordinator(
+			async () => {
+				lists += 1;
+				return {
+					complete: true,
+					panes: [
+						{
+							paneId: "one",
+							workspaceId: "workspace",
+							inspection: { kind: "present", observedAt: Date.now() } as const,
+						},
+						{
+							paneId: "two",
+							workspaceId: "workspace",
+							inspection: { kind: "present", observedAt: Date.now() } as const,
+						},
+					],
+				};
+			},
+			async () => {
+				fallbackInspections += 1;
+				return { kind: "unavailable", error: "fallback" };
+			},
+		);
+		const dir = createTestDir();
+		try {
+			const one = supervisor.register(join(dir, "one.jsonl"), "one");
+			const two = supervisor.register(join(dir, "two.jsonl"), "two");
+			await Promise.all([
+				one.wait(new AbortController().signal),
+				two.wait(new AbortController().signal),
+			]);
+			assert.equal(lists, 1);
+			assert.equal((await one.inspectPane()).kind, "present");
+			assert.equal(fallbackInspections, 0);
+			one.unregister();
+			two.unregister();
+		} finally {
+			supervisor.close();
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
 

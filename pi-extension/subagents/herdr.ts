@@ -474,6 +474,44 @@ function parsePaneGetError(error: any): PaneInspectionResult {
  * - missing: server responded, pane is gone
  * - unavailable: server command failed; caller should keep polling
  */
+export interface HerdrPaneListEntry {
+	paneId: string;
+	workspaceId: string;
+}
+
+/** Parse only complete snapshots; partial lists never establish pane absence. */
+export function parseHerdrPaneSnapshot(
+	output: string,
+): HerdrPaneListEntry[] | null {
+	const parsed = parseHerdrJson(output);
+	const panes = parsed?.result?.panes;
+	if (parsed?.result?.type !== "pane_list" || !Array.isArray(panes))
+		return null;
+	const ids = new Set<string>();
+	const result: HerdrPaneListEntry[] = [];
+	for (const pane of panes) {
+		if (
+			!isString(pane?.pane_id) ||
+			!pane.pane_id ||
+			!isString(pane?.workspace_id) ||
+			!pane.workspace_id ||
+			ids.has(pane.pane_id)
+		)
+			return null;
+		ids.add(pane.pane_id);
+		result.push({ paneId: pane.pane_id, workspaceId: pane.workspace_id });
+	}
+	return result;
+}
+
+export async function listHerdrPanes(): Promise<HerdrPaneListEntry[] | null> {
+	try {
+		return parseHerdrPaneSnapshot(await herdrExecAsync(["pane", "list"]));
+	} catch {
+		return null;
+	}
+}
+
 export async function inspectHerdrPane(
 	surface: string,
 ): Promise<PaneInspectionResult> {
@@ -751,6 +789,7 @@ export const __herdrTest__ = {
 	parseHerdrPaneList,
 	parsePaneGetOutput,
 	parsePaneGetError,
+	parseHerdrPaneSnapshot,
 	parsePaneProcessInfo,
 	isHerdrShellReady,
 	isExpectedPiProcess,
