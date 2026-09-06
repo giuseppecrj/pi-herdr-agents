@@ -40,15 +40,26 @@ function reviewStringArray(value, label, maximum = 20) {
 }
 
 function parseReviewJson(text) {
-	if (!reviewIsString(text) || text.length > REVIEW_REPORT_MAX_CHARS) {
+	if (!reviewIsString(text)) {
+		throw new Error("report must be a string");
+	}
+	// Public delivery wraps the child's final message in a completion
+	// presentation (prefix, model, and session lines), so the report is
+	// recovered from the required single fenced block rather than the
+	// whole delivered text.
+	const trimmed = text.trim();
+	const fences = [...trimmed.matchAll(/```(?:json)?\s*\n([\s\S]*?)\n```/gi)];
+	if (fences.length > 1) {
+		throw new Error("report must contain exactly one fenced JSON block");
+	}
+	const candidate = fences.length === 1 ? fences[0][1].trim() : trimmed;
+	if (candidate.length > REVIEW_REPORT_MAX_CHARS) {
 		throw new Error("report exceeds the request-local output bound");
 	}
-	const trimmed = text.trim();
-	const fenced = trimmed.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i);
 	try {
-		return JSON.parse(fenced ? fenced[1] : trimmed);
+		return JSON.parse(candidate);
 	} catch {
-		throw new Error("report must be valid JSON");
+		throw new Error("report must be valid JSON in one fenced block");
 	}
 }
 

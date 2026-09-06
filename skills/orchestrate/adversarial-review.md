@@ -52,8 +52,10 @@ tail sessions.
 
 ## Finding records
 
-Require each discovery and verifier to return JSON, optionally in one `json`
-fence, under 12,000 characters. Use the request-local helpers in
+Require each discovery and verifier to end its final message with the report in
+exactly one `json` fence, under 12,000 characters. Public delivery wraps that
+message in a completion presentation, so the fence is what keeps the report
+recoverable. Use the request-local helpers in
 [`adversarial-review-example.js`](adversarial-review-example.js) to validate
 public subagent results. The helpers are not an extension or runner schema.
 
