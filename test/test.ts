@@ -42,6 +42,12 @@ import {
 	getSubagentSessionPolicyFile,
 	readSubagentSessionPolicy,
 	writeSubagentSessionPolicy,
+	appendPersistentTaskEvent,
+	readPersistentTaskEvents,
+	appendPersistentDeliveryLedger,
+	readPersistentDeliveryLedger,
+	writePersistentTaskInbox,
+	consumePersistentTaskInbox,
 	type SessionEntry,
 } from "../pi-extension/subagents/session.ts";
 
@@ -88,6 +94,7 @@ import subagentDoneExtension, {
 	shouldAutoExitOnAgentEnd,
 	findLatestAssistantError,
 	buildCompletionSidecar,
+	buildPersistentTaskEvent,
 } from "../pi-extension/subagents/subagent-done.ts";
 import {
 	interpretExitSidecar,
@@ -550,12 +557,12 @@ describe("session.ts", () => {
 				deniedTools: [],
 			});
 
-			assert.deepEqual(readSubagentSessionPolicy(restricted), {
-				version: 1,
-				owner: "public",
-				tools: ["read"],
-				deniedTools: ["subagent"],
-			});
+			const restrictedPolicy = readSubagentSessionPolicy(restricted);
+			assert.equal(restrictedPolicy.version, 2);
+			assert.equal(restrictedPolicy.owner, "public");
+			assert.deepEqual(restrictedPolicy.tools, ["read"]);
+			assert.deepEqual(restrictedPolicy.deniedTools, ["subagent"]);
+			assert.equal(restrictedPolicy.persistent, false);
 			assert.equal(readSubagentSessionPolicy(unrestricted).tools, null);
 			assert.equal(existsSync(getSubagentSessionPolicyFile(restricted)), true);
 		});
@@ -577,7 +584,7 @@ describe("session.ts", () => {
 			writeFileSync(
 				policyFile,
 				JSON.stringify({
-					version: 2,
+					version: 3,
 					owner: "public",
 					tools: null,
 					deniedTools: [],
@@ -589,6 +596,68 @@ describe("session.ts", () => {
 				/launch policy version is unsupported/,
 			);
 		});
+	});
+
+	it("writes v2 persistent policies and reads v1 compatibility", () => {
+		const persistent = join(dir, "persistent-policy.jsonl");
+		writeSubagentSessionPolicy(persistent, {
+			owner: "public",
+			tools: ["read"],
+			deniedTools: ["subagent"],
+			persistent: true,
+			logicalId: "logical-1",
+			generationId: "generation-1",
+		});
+		const read = readSubagentSessionPolicy(persistent);
+		assert.equal(read.version, 2);
+		assert.equal(read.persistent, true);
+		assert.equal(read.logicalId, "logical-1");
+		assert.match(read.policyHash, /^[a-f0-9]{64}$/);
+
+		const legacy = join(dir, "legacy-policy.jsonl");
+		writeFileSync(
+			getSubagentSessionPolicyFile(legacy),
+			JSON.stringify({ version: 1, owner: "public", tools: null, deniedTools: [] }),
+		);
+		assert.deepEqual(readSubagentSessionPolicy(legacy), {
+			version: 1,
+			owner: "public",
+			tools: null,
+			deniedTools: [],
+			persistent: false,
+		});
+	});
+
+	it("appends task events and ignores a torn tail", () => {
+		const sessionFile = join(dir, "tasks.jsonl");
+		appendPersistentTaskEvent(sessionFile, {
+			type: "task-done",
+			task: "task-1",
+			generation: "generation-1",
+		});
+		writeFileSync(`${sessionFile}.tasks`, "{\"version\":1", { flag: "a" });
+		assert.deepEqual(readPersistentTaskEvents(sessionFile).map((event) => event.task), [
+			"task-1",
+		]);
+	});
+
+	it("records delivery outcomes and atomically consumes each inbox task once", () => {
+		const sessionFile = join(dir, "inbox.jsonl");
+		appendPersistentDeliveryLedger(sessionFile, {
+			task: "task-1",
+			outcome: "dispatched",
+			generation: "generation-1",
+			logicalId: "logical-1",
+			policyHash: "a".repeat(64),
+		});
+		assert.equal(readPersistentDeliveryLedger(sessionFile)[0].outcome, "dispatched");
+		const inbox = writePersistentTaskInbox(sessionFile, 1, {
+			task: "task-2",
+			message: "next task",
+		});
+		assert.ok(existsSync(inbox));
+		assert.equal(consumePersistentTaskInbox(sessionFile)?.task, "task-2");
+		assert.equal(consumePersistentTaskInbox(sessionFile), null);
 	});
 
 	describe("seedSubagentSessionFile", () => {
@@ -1021,12 +1090,12 @@ describe("subagent resume launch policy", () => {
 				},
 				launchOperations(commands),
 			);
-			assert.deepEqual(readSubagentSessionPolicy(fresh.sessionFile), {
-				version: 1,
-				owner: "public",
-				tools: ["read"],
-				deniedTools: ["subagent", "subagent_resume"],
-			});
+			const policy = readSubagentSessionPolicy(fresh.sessionFile);
+			assert.equal(policy.version, 2);
+			assert.equal(policy.owner, "public");
+			assert.deepEqual(policy.tools, ["read"]);
+			assert.deepEqual(policy.deniedTools, ["subagent", "subagent_resume"]);
+			assert.equal(policy.persistent, false);
 
 			await launchPiSubagent(
 				{
@@ -3174,6 +3243,15 @@ describe("subagent discovery", () => {
 	});
 });
 describe("subagent-done.ts", () => {
+	it("builds a persistent task completion event", () => {
+		const event = buildPersistentTaskEvent("task-1", "generation-1");
+		assert.equal(event.version, 1);
+		assert.equal(event.type, "task-done");
+		assert.equal(event.task, "task-1");
+		assert.equal(event.generation, "generation-1");
+		assert.ok(event.at);
+	});
+
 	it("does not register subagent_done for auto-exit children", () => {
 		const previousAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
 		process.env.PI_SUBAGENT_AUTO_EXIT = "1";

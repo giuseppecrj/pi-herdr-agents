@@ -101,6 +101,10 @@ export interface FreshPiLaunchRequest {
 		deniedTools: readonly string[];
 		autoExit: boolean;
 		interactive: boolean;
+		persistent?: boolean;
+		logicalId?: string;
+		generationId?: string;
+		taskId?: string;
 		identity?: string;
 		systemPromptMode?: "append" | "replace";
 		sessionMode: SubagentSessionMode;
@@ -140,6 +144,14 @@ export interface PiRunningChild {
 	runtimePlan: ResolvedRuntimePlan | undefined;
 	worktree?: WorktreeLaunch;
 	lifecycle: SubagentLifecycle;
+	persistent?: boolean;
+	logicalId?: string;
+	generationId?: string;
+	policyHash?: string;
+	tasksCompleted?: number;
+	taskId?: string;
+	inboxSequence?: number;
+	observedTaskEvents?: number;
 }
 
 export interface PiLaunchOperations {
@@ -458,6 +470,17 @@ function prepareChildSession(
 		owner: surface.worktree ? "managed-worktree" : "public",
 		tools: resolved.request.behavior.tools,
 		deniedTools: resolved.request.behavior.deniedTools,
+		persistent: resolved.request.behavior.persistent,
+		logicalId: resolved.request.behavior.logicalId ?? resolved.id,
+		generationId: resolved.request.behavior.generationId,
+		worktree: surface.worktree
+			? {
+					path: surface.worktree.path,
+					workspaceId: surface.worktree.workspaceId,
+					branch: surface.worktree.branch,
+					baseSha: surface.worktree.baseSha,
+				}
+			: undefined,
 	});
 	const activityFile = getSubagentActivityFile(
 		resolved.artifactDir,
@@ -627,6 +650,11 @@ function buildPiCommand(
 		if (request.agent)
 			env.push(`PI_SUBAGENT_AGENT=${shellQuote(request.agent)}`);
 		env.push(`PI_SUBAGENT_AUTO_EXIT=${request.behavior.autoExit ? "1" : "0"}`);
+		if (request.behavior.persistent) {
+			env.push("PI_SUBAGENT_PERSISTENT=1");
+			env.push(`PI_SUBAGENT_GENERATION_ID=${shellQuote(request.behavior.generationId ?? "")}`);
+			env.push(`PI_SUBAGENT_TASK_ID=${shellQuote(request.behavior.taskId ?? "")}`);
+		}
 		env.push(`PI_SUBAGENT_SESSION=${shellQuote(artifacts.sessionFile)}`);
 		env.push(`PI_SUBAGENT_ID=${shellQuote(resolved.id)}`);
 		env.push(`PI_SUBAGENT_ACTIVITY_FILE=${shellQuote(artifacts.activityFile)}`);
@@ -698,6 +726,11 @@ async function launchResumedPiSubagent(
 		throw new Error(
 			`Cannot resume ${policy.owner} session through subagent_resume. ` +
 				"Use its retained managed-worktree workspace instead.",
+		);
+	}
+	if (policy.persistent) {
+		throw new Error(
+			`Cannot resume persistent specialist ${request.sessionFile}. Spawn a new specialist instead; persistent sessions retain their evidence but do not revive in v1.`,
 		);
 	}
 	const autoExit = request.behavior?.autoExit ?? true;

@@ -7,6 +7,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { writeFileSync } from "node:fs";
+import {
+	appendPersistentTaskEvent,
+	consumePersistentTaskInbox,
+} from "./session.ts";
 import { createSubagentActivityRecorder } from "./activity.ts";
 import { isString } from "./type-guards.ts";
 
@@ -80,6 +84,16 @@ export function buildCompletionSidecar(
 	return errorInfo ? { type: "error", ...errorInfo } : { type: "done" };
 }
 
+export function buildPersistentTaskEvent(task: string, generation: string) {
+	return {
+		version: 1 as const,
+		type: "task-done" as const,
+		task,
+		generation,
+		at: new Date().toISOString(),
+	};
+}
+
 export function parseDeniedTools(rawValue: string | undefined): string[] {
 	return (rawValue ?? "")
 		.split(",")
@@ -97,6 +111,9 @@ export default function (pi: ExtensionAPI) {
 	const subagentAgent = process.env.PI_SUBAGENT_AGENT ?? "";
 	const deniedToolsValue = process.env.PI_DENY_TOOLS;
 	const autoExit = process.env.PI_SUBAGENT_AUTO_EXIT === "1";
+	const persistent = process.env.PI_SUBAGENT_PERSISTENT === "1";
+	const generation = process.env.PI_SUBAGENT_GENERATION_ID ?? "";
+	let currentTask = process.env.PI_SUBAGENT_TASK_ID ?? "";
 	const recorder = createSubagentActivityRecorder({
 		runningChildId: process.env.PI_SUBAGENT_ID,
 		activityFile: process.env.PI_SUBAGENT_ACTIVITY_FILE,
@@ -205,6 +222,23 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("agent_settled", (_event, ctx) => {
+		if (persistent && !completionFinalized) {
+			let messages = latestAgentMessages;
+			try {
+				const branchMessages = ctx.sessionManager
+					.getBranch()
+					.flatMap((entry) => (entry.type === "message" ? [entry.message] : []));
+				if (branchMessages.length > 0) messages = branchMessages;
+			} catch {
+			// Fall back to the latest low-level run when session evidence is unavailable.
+		}
+			if (currentTask && shouldAutoExitOnAgentEnd(userTookOver, messages)) {
+				appendPersistentTaskEvent(process.env.PI_SUBAGENT_SESSION ?? "", buildPersistentTaskEvent(currentTask, generation));
+				currentTask = "";
+				recorder.agentEndWaiting();
+			}
+			return;
+		}
 		if (!autoExit || completionFinalized) return;
 
 		let messages = latestAgentMessages;
@@ -281,6 +315,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", (event) => {
+		if (inboxPoller) clearInterval(inboxPoller);
 		recorder.sessionShutdown(event.reason);
 	});
 
@@ -313,6 +348,18 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			recorder.callerPing();
+			if (persistent) {
+				appendPersistentTaskEvent(sessionFile, {
+					type: "help-request",
+					task: currentTask,
+					generation,
+					message: params.message,
+				});
+				return {
+					content: [{ type: "text", text: "Help request sent. Stay available for subagent_send." }],
+					details: {},
+				};
+			}
 			const exitData = {
 				type: "ping" as const,
 				name: process.env.PI_SUBAGENT_NAME ?? "subagent",
@@ -323,16 +370,23 @@ export default function (pi: ExtensionAPI) {
 
 			ctx.shutdown();
 			return {
-				content: [
-					{
-						type: "text",
-						text: "Ping sent. Session will exit and parent will be notified.",
-					},
-				],
+				content: [{ type: "text", text: "Ping sent. Session will exit and parent will be notified." }],
 				details: {},
 			};
 		},
 	});
+
+	let inboxPoller: ReturnType<typeof setInterval> | undefined;
+	if (persistent) {
+		inboxPoller = setInterval(() => {
+			const sessionFile = process.env.PI_SUBAGENT_SESSION;
+			if (!sessionFile || currentTask) return;
+			const inbox = consumePersistentTaskInbox(sessionFile);
+			if (!inbox) return;
+			currentTask = inbox.task;
+			pi.sendUserMessage(inbox.message);
+		}, 1000);
+	}
 
 	if (autoExit) return;
 
@@ -347,6 +401,11 @@ export default function (pi: ExtensionAPI) {
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
 			const sessionFile = process.env.PI_SUBAGENT_SESSION;
 			recorder.subagentDone();
+			if (persistent && sessionFile && currentTask) {
+				appendPersistentTaskEvent(sessionFile, buildPersistentTaskEvent(currentTask, generation));
+				currentTask = "";
+				return { content: [{ type: "text", text: "Task complete. Staying available for subagent_send." }], details: {} };
+			}
 			if (sessionFile) {
 				writeFileSync(`${sessionFile}.exit`, JSON.stringify({ type: "done" }));
 			}
