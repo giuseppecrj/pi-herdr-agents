@@ -15,15 +15,22 @@ interface DirectoryWatcher {
 }
 
 export interface WakeRegistration {
+	watching: boolean;
 	unregister(): void;
 }
 
 /**
- * Shares directory watches between supervised sessions. Writers publish with
- * rename, so directories (rather than sidecar files) are watched deliberately.
+ * Shares directory watches between supervised sessions. Sidecars use atomic
+ * rename and task events use appendFileSync, so directories are watched deliberately.
  */
 export class FileWakeRegistry {
 	private readonly directories = new Map<string, DirectoryWatcher>();
+	private readonly watchDirectory: typeof watch;
+	private closed = false;
+
+	constructor(watchDirectory: typeof watch = watch) {
+		this.watchDirectory = watchDirectory;
+	}
 
 	register(
 		sessionFile: string,
@@ -40,16 +47,17 @@ export class FileWakeRegistry {
 			fallback,
 		};
 		let current = this.directories.get(directory);
-		if (!current) {
+		if (!this.closed && !current) {
 			try {
-				const watcher = watch(directory, (_event, filename) => {
-					if (!filename) return;
-					const name = filename.toString();
+				const watcher = this.watchDirectory(directory, (_event, filename) => {
+					if (this.closed) return;
 					for (const watched of current?.entries ?? []) {
-						if (watched.filenames.has(name)) watched.wake();
+						if (!filename || watched.filenames.has(filename.toString()))
+							watched.wake();
 					}
 				});
 				current = { watcher, entries: new Set() };
+				watcher.unref();
 				watcher.on("error", () => this.failDirectory(directory));
 				this.directories.set(directory, current);
 			} catch {
@@ -60,6 +68,7 @@ export class FileWakeRegistry {
 		else fallback();
 
 		return {
+			watching: current != null,
 			unregister: () => {
 				const active = this.directories.get(directory);
 				if (!active) return;
@@ -77,11 +86,13 @@ export class FileWakeRegistry {
 	}
 
 	close(): void {
+		this.closed = true;
 		for (const { watcher } of this.directories.values()) watcher.close();
 		this.directories.clear();
 	}
 
 	private failDirectory(directory: string): void {
+		if (this.closed) return;
 		const current = this.directories.get(directory);
 		if (!current) return;
 		this.directories.delete(directory);

@@ -41,6 +41,14 @@ export interface SupervisionDiagnostics {
 	watcherCount: number;
 }
 
+interface SupervisionTimers {
+	setTimeout(
+		callback: () => void,
+		milliseconds: number,
+	): ReturnType<typeof setTimeout>;
+	clearTimeout(timer: ReturnType<typeof setTimeout>): void;
+}
+
 /** A runtime-owned coordinator for file wake-ups and shared pane snapshots. */
 export class SupervisionCoordinator {
 	private readonly entries = new Set<Entry>();
@@ -49,20 +57,27 @@ export class SupervisionCoordinator {
 		surface: string,
 	) => Promise<PaneInspection>;
 	private readonly forcePolling: boolean;
-	private readonly wakeRegistry = new FileWakeRegistry();
+	private readonly wakeRegistry: FileWakeRegistry;
+	private readonly timers: SupervisionTimers;
 	private timer: ReturnType<typeof setInterval> | undefined;
+	private unhealthyTimer: ReturnType<typeof setTimeout> | undefined;
 	private reconciling = false;
 	private unhealthyUntil = 0;
 	private nextGeneration = 0;
+	private closed = false;
 
 	constructor(
 		listPanes: () => Promise<PaneListSnapshot>,
 		inspectFallback: (surface: string) => Promise<PaneInspection>,
 		forcePolling = false,
+		wakeRegistry = new FileWakeRegistry(),
+		timers: SupervisionTimers = { setTimeout, clearTimeout },
 	) {
 		this.listPanes = listPanes;
 		this.inspectFallback = inspectFallback;
 		this.forcePolling = forcePolling;
+		this.wakeRegistry = wakeRegistry;
+		this.timers = timers;
 	}
 
 	register(sessionFile: string, surface: string): SupervisionRegistration {
@@ -79,6 +94,8 @@ export class SupervisionCoordinator {
 				() => this.signal(entry, "wake"),
 				() => this.enterFallback(entry),
 			);
+			entry.fileFallback = !entry.wakeRegistration.watching;
+			entry.fallback = entry.fileFallback;
 		} else {
 			entry.fallback = true;
 			entry.fileFallback = true;
@@ -104,8 +121,11 @@ export class SupervisionCoordinator {
 	}
 
 	close(): void {
+		this.closed = true;
 		if (this.timer) clearInterval(this.timer);
 		this.timer = undefined;
+		if (this.unhealthyTimer) this.timers.clearTimeout(this.unhealthyTimer);
+		this.unhealthyTimer = undefined;
 		for (const entry of this.entries) entry.wakeRegistration?.unregister();
 		this.entries.clear();
 		this.wakeRegistry.close();
@@ -114,6 +134,7 @@ export class SupervisionCoordinator {
 	private ensureTimer(): void {
 		if (this.timer) return;
 		this.timer = setInterval(() => this.reconcile(), RECONCILE_INTERVAL_MS);
+		this.timer.unref?.();
 	}
 
 	private unregister(entry: Entry): void {
@@ -126,6 +147,7 @@ export class SupervisionCoordinator {
 	}
 
 	private enterFallback(entry: Entry): void {
+		if (this.closed) return;
 		entry.fileFallback = true;
 		entry.fallback = true;
 		entry.inspection = undefined;
@@ -172,13 +194,14 @@ export class SupervisionCoordinator {
 	}
 
 	private signal(entry: Entry, reason: WakeReason): void {
+		if (this.closed) return;
 		if (reason === "wake") entry.inspection = undefined;
 		if (entry.resolve) entry.resolve(reason);
 		else entry.pending = reason;
 	}
 
 	private async reconcile(): Promise<void> {
-		if (this.reconciling || this.entries.size === 0) return;
+		if (this.closed || this.reconciling || this.entries.size === 0) return;
 		this.reconciling = true;
 		const snapshotGeneration = this.nextGeneration - 1;
 		try {
@@ -204,16 +227,22 @@ export class SupervisionCoordinator {
 				this.signal(entry, "reconcile");
 			}
 			this.unhealthyUntil = 0;
+			if (this.unhealthyTimer) this.timers.clearTimeout(this.unhealthyTimer);
+			this.unhealthyTimer = undefined;
 		} catch {
+			if (this.closed) return;
 			this.unhealthyUntil = Date.now() + BATCH_UNHEALTHY_MS;
 			for (const entry of this.entries) {
 				entry.fallback = true;
 				entry.inspection = undefined;
 				this.signal(entry, "reconcile");
 			}
-			setTimeout(() => {
-				if (Date.now() >= this.unhealthyUntil) this.reconcile();
+			if (this.unhealthyTimer) this.timers.clearTimeout(this.unhealthyTimer);
+			this.unhealthyTimer = this.timers.setTimeout(() => {
+				this.unhealthyTimer = undefined;
+				if (!this.closed && Date.now() >= this.unhealthyUntil) this.reconcile();
 			}, BATCH_UNHEALTHY_MS);
+			this.unhealthyTimer.unref?.();
 		} finally {
 			this.reconciling = false;
 		}

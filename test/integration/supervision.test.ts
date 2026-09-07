@@ -10,6 +10,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import * as subagentsModule from "../../pi-extension/subagents/index.ts";
 import {
 	mkdtempSync,
 	mkdirSync,
@@ -137,6 +138,11 @@ describe("event-driven supervision integration", { timeout: 30_000 }, () => {
 			const registration = supervisor.register(sessionFile, "child-pane");
 			try {
 				let deliveries = 0;
+				const deliveryApi = {
+					sendMessage() {
+						deliveries += 1;
+					},
+				};
 				const completion = waitForCompletion(new AbortController().signal, {
 					intervalMs: POLLING_INTERVAL_MS,
 					sessionFile,
@@ -147,10 +153,14 @@ describe("event-driven supervision integration", { timeout: 30_000 }, () => {
 				await sleep(35);
 				publishSidecar(sessionFile, { type: "done" });
 				assert.equal((await completion).reason, "done");
-				deliveries += 1;
+				subagentsModule.__test__.sendSubagentResult(
+					deliveryApi,
+					"Subagent completed.",
+					{ name: "child" },
+				);
 
 				// A second atomic publish is a legal late watcher event. The resolved
-				// completion is never re-delivered.
+				// completion does not invoke the real parent delivery path again.
 				publishSidecar(sessionFile, { type: "done" });
 				await sleep(50);
 				assert.equal(deliveries, 1);

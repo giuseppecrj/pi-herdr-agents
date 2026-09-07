@@ -84,7 +84,10 @@ import {
 	parseSupervisionConfig,
 } from "../pi-extension/subagents/supervision-config.ts";
 import { FileWakeRegistry } from "../pi-extension/subagents/wake.ts";
-import { SupervisionCoordinator } from "../pi-extension/subagents/supervision.ts";
+import {
+	POLLING_INTERVAL_MS,
+	SupervisionCoordinator,
+} from "../pi-extension/subagents/supervision.ts";
 import {
 	advanceStatusState,
 	capStatusLines,
@@ -1936,6 +1939,41 @@ describe("supervision", () => {
 		});
 	});
 
+	it("wakes every directory entry when fs.watch omits a filename", () => {
+		let listener:
+			| ((event: string, filename: string | Buffer | null) => void)
+			| undefined;
+		const watcher = {
+			on() {
+				return this;
+			},
+			close() {},
+			unref() {
+				return this;
+			},
+		};
+		// SAFETY: The fake implements the fs.watch behavior used by FileWakeRegistry.
+		const registry = new FileWakeRegistry(((
+			_directory: string,
+			callback: (event: string, filename: string | Buffer | null) => void,
+		) => {
+			listener = callback;
+			return watcher;
+		}) as any);
+		let wakes = 0;
+		const registration = registry.register(
+			"/tmp/child.jsonl",
+			() => {
+				wakes += 1;
+			},
+			() => assert.fail("watcher unexpectedly fell back"),
+		);
+		listener?.("change", null);
+		assert.equal(wakes, 1);
+		registration.unregister();
+		registry.close();
+	});
+
 	it("wakes on sidecar rename and releases registrations", async () => {
 		const dir = createTestDir();
 		const sessionFile = join(dir, "child.jsonl");
@@ -1952,7 +1990,9 @@ describe("supervision", () => {
 			const temporary = `${sessionFile}.exit.tmp`;
 			writeFileSync(temporary, "{}");
 			renameSync(temporary, `${sessionFile}.exit`);
-			await new Promise((resolve) => setTimeout(resolve, 50));
+			const deadline = Date.now() + 500;
+			while (wakes === 0 && Date.now() < deadline)
+				await new Promise((resolve) => setTimeout(resolve, 10));
 			assert.equal(wakes, 1);
 			registration.unregister();
 			assert.equal(registry.watcherCount, 0);
@@ -2030,49 +2070,106 @@ describe("supervision", () => {
 		}
 	});
 
-	it("batches pane reconciliation and refuses malformed-list absence", async () => {
-		let lists = 0;
+	it("keeps watcherless entries on the legacy polling cadence", async () => {
 		let fallbackInspections = 0;
+		// SAFETY: This fake fs.watch always throws to model an unavailable watcher.
+		const registry = new FileWakeRegistry((() => {
+			throw new Error("watch unavailable");
+		}) as any);
 		const supervisor = new SupervisionCoordinator(
-			async () => {
-				lists += 1;
-				return {
-					complete: true,
-					panes: [
-						{
-							paneId: "one",
-							workspaceId: "workspace",
-							inspection: { kind: "present", observedAt: Date.now() } as const,
-						},
-						{
-							paneId: "two",
-							workspaceId: "workspace",
-							inspection: { kind: "present", observedAt: Date.now() } as const,
-						},
-					],
-				};
-			},
+			async () => ({
+				complete: true,
+				panes: [{ paneId: "child", workspaceId: "workspace" }],
+			}),
 			async () => {
 				fallbackInspections += 1;
-				return { kind: "unavailable", error: "fallback" };
+				return { kind: "present", agentStatus: "idle", observedAt: Date.now() };
 			},
+			false,
+			registry,
 		);
 		const dir = createTestDir();
 		try {
-			const one = supervisor.register(join(dir, "one.jsonl"), "one");
-			const two = supervisor.register(join(dir, "two.jsonl"), "two");
-			await Promise.all([
-				one.wait(new AbortController().signal),
-				two.wait(new AbortController().signal),
-			]);
-			assert.equal(lists, 1);
-			assert.equal((await one.inspectPane()).kind, "present");
-			assert.equal(fallbackInspections, 0);
-			one.unregister();
-			two.unregister();
+			const registration = supervisor.register(
+				join(dir, "child.jsonl"),
+				"child",
+			);
+			await registration.wait(new AbortController().signal);
+			assert.equal(supervisor.diagnostics().mode, "polling(fallback)");
+			assert.equal((await registration.inspectPane()).kind, "present");
+			await new Promise((resolve) => setImmediate(resolve));
+			await registration.wait(new AbortController().signal);
+			assert.equal((await registration.inspectPane()).kind, "present");
+			const startedAt = Date.now();
+			await registration.wait(new AbortController().signal);
+			assert.ok(Date.now() - startedAt >= POLLING_INTERVAL_MS - 100);
+			assert.equal((await registration.inspectPane()).kind, "present");
+			assert.equal(fallbackInspections, 3);
+			registration.unregister();
 		} finally {
 			supervisor.close();
 			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("clears the unhealthy batch retry when closed", async () => {
+		const timeouts: Array<() => void> = [];
+		const cleared: Array<() => void> = [];
+		const timers = {
+			setTimeout(callback: () => void) {
+				timeouts.push(callback);
+				// SAFETY: clearTimeout receives this opaque token only in this test.
+				return callback as any;
+			},
+			clearTimeout(timer: () => void) {
+				cleared.push(timer);
+			},
+		};
+		const supervisor = new SupervisionCoordinator(
+			async () => {
+				throw new Error("pane list unavailable");
+			},
+			async () => ({ kind: "unavailable" }),
+			false,
+			new FileWakeRegistry(),
+			timers,
+		);
+		const registration = supervisor.register("/tmp/child.jsonl", "child");
+		await new Promise((resolve) => setImmediate(resolve));
+		supervisor.close();
+		assert.equal(timeouts.length, 1);
+		assert.deepEqual(cleared, timeouts);
+		registration.unregister();
+	});
+
+	it("refuses malformed-list absence", async () => {
+		for (const snapshot of [
+			{ complete: false, panes: [] },
+			{ complete: false, panes: [{ paneId: "one", workspaceId: "workspace" }] },
+		]) {
+			let fallbackInspections = 0;
+			const supervisor = new SupervisionCoordinator(
+				async () => snapshot,
+				async () => {
+					fallbackInspections += 1;
+					return {
+						kind: "present",
+						agentStatus: "idle",
+						observedAt: Date.now(),
+					};
+				},
+			);
+			const dir = createTestDir();
+			try {
+				const registration = supervisor.register(join(dir, "one.jsonl"), "one");
+				await registration.wait(new AbortController().signal);
+				assert.equal((await registration.inspectPane()).kind, "present");
+				assert.equal(fallbackInspections, 1);
+				registration.unregister();
+			} finally {
+				supervisor.close();
+				rmSync(dir, { recursive: true, force: true });
+			}
 		}
 	});
 });
@@ -7524,6 +7621,31 @@ describe("herdr.ts", () => {
 						isLinkedWorktree: true,
 					},
 				],
+			);
+		});
+
+		it("accepts only complete, unique pane snapshots", () => {
+			const snapshot = (
+				panes: Array<{ pane_id?: string; workspace_id?: string } | null>,
+			) => JSON.stringify({ result: { type: "pane_list", panes } });
+			assert.deepEqual(__herdrTest__.parseHerdrPaneSnapshot(snapshot([])), []);
+			assert.equal(__herdrTest__.parseHerdrPaneSnapshot('{"result":{}}'), null);
+			assert.equal(
+				__herdrTest__.parseHerdrPaneSnapshot(
+					snapshot([
+						{ pane_id: "p1", workspace_id: "w1" },
+						{ pane_id: "p1", workspace_id: "w1" },
+					]),
+				),
+				null,
+			);
+			assert.equal(
+				__herdrTest__.parseHerdrPaneSnapshot(snapshot([{ pane_id: "p1" }])),
+				null,
+			);
+			assert.equal(
+				__herdrTest__.parseHerdrPaneSnapshot(snapshot([null, {}])),
+				null,
 			);
 		});
 

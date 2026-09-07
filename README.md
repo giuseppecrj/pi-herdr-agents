@@ -300,6 +300,9 @@ cp config.json.example config.json
   "persistent": {
     "maxAgents": 3
   },
+  "supervision": {
+    "forcePolling": false
+  },
   "panes": {
     "mode": "tab",
     "direction": "right"
@@ -340,9 +343,12 @@ pane inspection becomes unavailable, supervision quietly returns to the legacy
 one-second polling cadence. No caller action is required.
 
 Set `supervision.forcePolling` to `true` in the package-local `config.json` to
-disable wake-ups and use that legacy cadence deliberately. `subagents_list`
-reports the active transport mode (`wake+batch`, `polling(forced)`, or
-`polling(fallback)`) and watcher count.
+disable wake-ups and use that legacy cadence deliberately. The setting is read
+when the coordinator is created, so run `/reload` after changing it.
+`subagents_list` reports the active transport mode (`wake+batch`,
+`polling(forced)`, or `polling(fallback)`) and watcher count.
+`polling(fallback)` means at least one tracked child is using per-child polling;
+other children can still use wake+batch.
 
 A Linux manual benchmark on 2026-09-06 used isolated Herdr panes held pending,
 20-second windows, and the extension's completion/supervision seams. At 10
