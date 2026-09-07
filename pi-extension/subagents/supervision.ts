@@ -197,7 +197,10 @@ export class SupervisionCoordinator {
 		if (this.closed) return;
 		if (reason === "wake") entry.inspection = undefined;
 		if (entry.resolve) entry.resolve(reason);
-		else entry.pending = reason;
+		// A wake must never downgrade a queued reconciliation: the reconcile
+		// reason carries the epoch's pane inspection, and skipping it would
+		// defer pane-disappearance detection past the documented 5s bound.
+		else if (entry.pending !== "reconcile") entry.pending = reason;
 	}
 
 	private async reconcile(): Promise<void> {

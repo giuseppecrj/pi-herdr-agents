@@ -2172,6 +2172,57 @@ describe("supervision", () => {
 			}
 		}
 	});
+
+	it("keeps a queued reconciliation when a wake arrives before the next wait", async () => {
+		let listener:
+			| ((event: string, filename: string | Buffer | null) => void)
+			| undefined;
+		const watcher = {
+			on() {
+				return this;
+			},
+			close() {},
+			unref() {
+				return this;
+			},
+		};
+		// SAFETY: The fake implements the fs.watch behavior used by FileWakeRegistry.
+		const registry = new FileWakeRegistry(((
+			_directory: string,
+			callback: (event: string, filename: string | Buffer | null) => void,
+		) => {
+			listener = callback;
+			return watcher;
+		}) as any);
+		const supervisor = new SupervisionCoordinator(
+			async () => ({
+				complete: true,
+				panes: [{ paneId: "one", workspaceId: "workspace" }],
+			}),
+			async () => ({
+				kind: "present",
+				agentStatus: "idle",
+				observedAt: Date.now(),
+			}),
+			false,
+			registry,
+		);
+		try {
+			const registration = supervisor.register("/tmp/child.jsonl", "one");
+			// Let the registration-triggered reconciliation settle and queue its
+			// pending "reconcile" reason before any waiter exists.
+			await new Promise((resolve) => setImmediate(resolve));
+			await new Promise((resolve) => setImmediate(resolve));
+			listener?.("rename", null);
+			assert.equal(
+				await registration.wait(new AbortController().signal),
+				"reconcile",
+			);
+			registration.unregister();
+		} finally {
+			supervisor.close();
+		}
+	});
 });
 
 describe("role configuration", () => {
