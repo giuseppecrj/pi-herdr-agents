@@ -14,9 +14,10 @@ import { createLifecycle, type SubagentLifecycle } from "./lifecycle.ts";
 import type { ResolvedRuntimePlan } from "./runtime-routing.ts";
 import { createSubagentPaneFactory, loadPaneConfig } from "./pane-config.ts";
 import { HerdrWorktreeCreateError } from "./herdr.ts";
-import type { JsonObject } from "./type-guards.ts";
+import { isNonEmptyString, type JsonObject } from "./type-guards.ts";
 import {
 	createWorktreeSessionFork,
+	getNewEntries,
 	readSubagentSessionPolicy,
 	seedSubagentSessionFile,
 	writeSubagentSessionPolicy,
@@ -24,6 +25,7 @@ import {
 import {
 	closePane,
 	createSubagentPane,
+	createGroupedSubagentPane,
 	createSubagentWorktree,
 	splitCurrentPane,
 	runScriptInPane,
@@ -160,7 +162,7 @@ export interface PiRunningChild {
 }
 
 export interface PiLaunchOperations {
-	createPane(name: string): string;
+	createPane(name: string, cwd?: string): string;
 	createWorktree(
 		name: string,
 		cwd: string,
@@ -189,6 +191,7 @@ const defaultOperations: PiLaunchOperations = {
 		paneConfig,
 		createSubagentPane,
 		splitCurrentPane,
+		createGroupedSubagentPane,
 	),
 	createWorktree: createSubagentWorktree,
 	waitForShellReady,
@@ -373,7 +376,9 @@ function prepareLaunchSurface(
 	const { request } = resolved;
 	if (!request.worktree) {
 		return {
-			surface: request.surface ?? operations.createPane(request.name),
+			surface:
+				request.surface ??
+				operations.createPane(request.name, resolved.sourceCwd),
 			targetCwd: resolved.sourceCwd,
 			effectiveAgentDir: resolved.localAgentDir ?? resolved.agentDir,
 			localAgentDir: resolved.localAgentDir,
@@ -750,7 +755,11 @@ async function launchResumedPiSubagent(
 		"artifacts",
 		request.parent.sessionId,
 	);
-	const surface = operations.createPane(request.name);
+	const header = getNewEntries(request.sessionFile, 0).find(
+		(entry) => entry.type === "session",
+	);
+	const cwd = isNonEmptyString(header?.cwd) ? header.cwd : process.cwd();
+	const surface = operations.createPane(request.name, cwd);
 	try {
 		await operations.waitForShellReady(surface);
 		const activityFile = getSubagentActivityFile(artifactDir, id);

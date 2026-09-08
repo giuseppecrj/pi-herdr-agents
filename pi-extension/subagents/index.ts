@@ -1028,10 +1028,9 @@ function resolveWorktreeLaunchWarning(
 		: undefined;
 }
 
-function finalizeSubagentSurface(
+function finalizeSubagentWorktree(
 	running: RunningSubagent,
 	state: "ready_for_review" | "failed" | "needs_help",
-	ignoreCloseError = false,
 ): WorktreeHandoff | undefined {
 	if (running.worktree) {
 		let handoff = captureWorktreeHandoff(running.worktree);
@@ -1051,12 +1050,17 @@ function finalizeSubagentSurface(
 		return handoff;
 	}
 
-	try {
-		closePane(running.surface);
-	} catch (error) {
-		if (!ignoreCloseError) throw error;
-	}
 	return undefined;
+}
+
+function closeCompletedPanes(panes: Iterable<string>): void {
+	for (const pane of panes) {
+		try {
+			closePane(pane);
+		} catch {
+			/* Result delivery remains authoritative. */
+		}
+	}
 }
 
 const statusConfig = loadStatusConfig();
@@ -2534,8 +2538,8 @@ async function launchSubagent(
 
 /**
  * Watch a launched subagent until it exits. Polls for completion, extracts
- * the summary from the session file, and closes ordinary panes. Worktree
- * workspaces are retained for parent review.
+ * the summary from the session file. Temporary panes close only after parent
+ * delivery; worktree workspaces remain retained for review.
  */
 function resolveSubagentRuntimePlans(
 	params: typeof SubagentParams.static,
@@ -2838,7 +2842,7 @@ async function watchSubagent(
 					: `Sub-agent exited with code ${result.exitCode}`;
 		}
 
-		const worktreeHandoff = finalizeSubagentSurface(
+		const worktreeHandoff = finalizeSubagentWorktree(
 			running,
 			result.ping
 				? "needs_help"
@@ -2870,7 +2874,7 @@ async function watchSubagent(
 		if (worktreeHandoff) watchResult.worktree = worktreeHandoff;
 		return watchResult;
 	} catch (err: any) {
-		const worktreeHandoff = finalizeSubagentSurface(running, "failed", true);
+		const worktreeHandoff = finalizeSubagentWorktree(running, "failed");
 		running.lifecycle = markFailed(
 			running.lifecycle,
 			signal.aborted ? "Subagent cancelled." : (err?.message ?? String(err)),
@@ -2926,6 +2930,7 @@ async function watchSubagentWithFallbacks(
 	parentThinking: ThinkingLevel,
 	plans: ResolvedRuntimePlan[],
 	signal: AbortSignal,
+	completedPanes: Set<string>,
 	initialLaunchFailures: ModelFailure[] = [],
 ): Promise<{ running: RunningSubagent; result: SubagentResult }> {
 	let running = initial;
@@ -2937,6 +2942,7 @@ async function watchSubagentWithFallbacks(
 
 	for (;;) {
 		const result = await watchSubagent(running, signal);
+		if (!running.worktree) completedPanes.add(running.surface);
 		const shouldRetry = shouldAdvanceToFallback(
 			result,
 			plans.length - nextPlan,
@@ -3236,6 +3242,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				startWidgetRefresh();
 				startStatusRefresh(pi);
 
+				// Keep all temporary attempt panes until the final parent handoff.
+				const completedPanes = new Set<string>();
+				// Close after accepted delivery or explicit parent shutdown, not failed delivery.
+				let shouldCloseTemporaryPanes = false;
 				// Fire-and-forget: start watching in background
 				watchSubagentWithFallbacks(
 					running,
@@ -3245,6 +3255,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					parentThinking,
 					runtimePlans,
 					watcherAbort.signal,
+					completedPanes,
 					initialLaunchFailures,
 				)
 					.then(({ running: completedRunning, result }) => {
@@ -3256,7 +3267,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						if (completedRunning.stopTimeout)
 							clearTimeout(completedRunning.stopTimeout);
 						if (completedRunning.persistent) {
-							if (!shouldDeliverSubagentCompletion(completedRunning)) return;
+							if (!shouldDeliverSubagentCompletion(completedRunning)) {
+								shouldCloseTemporaryPanes = true;
+								return;
+							}
 							completedRunning.lifecycle = markDelivery(
 								completedRunning.lifecycle,
 								"delivered",
@@ -3286,11 +3300,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 							} else if (completedRunning.stopState !== "failed") {
 								notifyPersistentCrash(completedRunning, completionApi);
 							}
+							shouldCloseTemporaryPanes = true;
 							runningSubagents.delete(completedRunning.id);
 							updateWidget();
 							return;
 						}
 						if (!shouldDeliverSubagentCompletion(completedRunning)) {
+							// Explicit parent shutdown still releases temporary panes.
+							shouldCloseTemporaryPanes = true;
 							completedRunning.lifecycle = markDelivery(
 								completedRunning.lifecycle,
 								"suppressed",
@@ -3329,6 +3346,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 								},
 								{ triggerTurn: true, deliverAs: "steer" },
 							);
+							shouldCloseTemporaryPanes = true;
 							return;
 						}
 
@@ -3357,6 +3375,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						if (completedRunning.runtimePlan)
 							resultDetails.runtimePlan = completedRunning.runtimePlan;
 						sendSubagentResult(completionApi, presentation, resultDetails);
+						shouldCloseTemporaryPanes = true;
 					})
 					.catch((err) => {
 						if (!shouldDeliverSubagentCompletion(running)) {
@@ -3373,6 +3392,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 								running,
 								selectCompletionApi(pi, runtime.pi),
 							);
+							shouldCloseTemporaryPanes = true;
 							return;
 						}
 						const errDetails: SubagentResultDetails = {
@@ -3392,6 +3412,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 							),
 							errDetails,
 						);
+						shouldCloseTemporaryPanes = true;
+					})
+					.finally(() => {
+						if (shouldCloseTemporaryPanes) closeCompletedPanes(completedPanes);
 					});
 
 				// Return immediately
@@ -3808,9 +3832,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const watcherAbort = new AbortController();
 				running.abortController = watcherAbort;
 
+				// Close after accepted delivery or explicit parent shutdown, not failed delivery.
+				let shouldCloseTemporaryPanes = false;
 				watchSubagent(running, watcherAbort.signal)
 					.then((result) => {
 						if (!shouldDeliverSubagentCompletion(running)) {
+							shouldCloseTemporaryPanes = true;
 							running.lifecycle = markDelivery(running.lifecycle, "suppressed");
 							runningSubagents.delete(running.id);
 							updateWidget();
@@ -3836,6 +3863,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 								},
 								{ triggerTurn: true, deliverAs: "steer" },
 							);
+							shouldCloseTemporaryPanes = true;
 							return;
 						}
 
@@ -3868,6 +3896,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						if (running.runtimePlan)
 							resumeDetails.runtimePlan = running.runtimePlan;
 						sendSubagentResult(completionApi, presentation, resumeDetails);
+						shouldCloseTemporaryPanes = true;
 					})
 					.catch((err) => {
 						if (!shouldDeliverSubagentCompletion(running)) {
@@ -3888,6 +3917,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 							),
 							{ name, error: err?.message, sessionFile: params.sessionPath },
 						);
+						shouldCloseTemporaryPanes = true;
+					})
+					.finally(() => {
+						if (shouldCloseTemporaryPanes)
+							closeCompletedPanes([running.surface]);
 					});
 
 				return {

@@ -16,7 +16,8 @@
     "hangWarningMinutes": 15
   },
   "panes": {
-    "mode": "tab",
-    "direction": "right"
+    "mode": "grouped",
+    "direction": "right",
+    "maxPerTab": 4
   }
 }
