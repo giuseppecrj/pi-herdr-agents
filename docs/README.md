@@ -22,7 +22,10 @@ launches fresh public reviewers, receives automatic completion delivery, and
 has the parent synthesize outcomes. Role frontmatter tool allowlists are the
 available enforcement boundary; `read,bash` is not read-only. Automated package
 acceptance covers unit tests, lint, and `npm pack --dry-run`. Deterministic
-Herdr integration is a manual release gate run from inside Herdr.
+Herdr integration is a manual release gate run from inside Herdr. The manual
+supervision transport benchmark is `../test/bench/supervision-bench.mjs`; it
+uses an isolated Herdr server and writes uncommitted raw samples to
+`/tmp/issue29-bench/`.
 
 ## ADRs
 

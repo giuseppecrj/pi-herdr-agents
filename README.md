@@ -300,6 +300,9 @@ cp config.json.example config.json
   "persistent": {
     "maxAgents": 3
   },
+  "supervision": {
+    "forcePolling": false
+  },
   "panes": {
     "mode": "tab",
     "direction": "right"
@@ -330,6 +333,31 @@ exact IDs from your authenticated model catalog:
 Set `persistent.maxAgents` to the maximum concurrently retained persistent specialists. It defaults to `3`; a persistent spawn at the cap is rejected before Herdr creates a pane or workspace, and no specialist is evicted.
 
 Set `roles.bundled` to `false` to exclude this package's bundled role definitions from listing and exact-name launch. It defaults to `true`. Registered role packs remain available, and global and project definitions keep their existing precedence. A role-pack name collides with a bundled role only while that bundled layer is enabled; when it is disabled, the role pack can supply that name.
+
+### Supervision transport
+
+On supported local filesystems, supervision uses file wake-ups plus one shared
+4.8-second pane reconciliation. A wake-up only prompts fresh evidence
+collection; it never establishes a result by itself. If the watcher or shared
+pane inspection becomes unavailable, supervision quietly returns to the legacy
+one-second polling cadence. No caller action is required.
+
+Set `supervision.forcePolling` to `true` in the package-local `config.json` to
+disable wake-ups and use that legacy cadence deliberately. The setting is read
+when the coordinator is created, so run `/reload` after changing it.
+`subagents_list` reports the active transport mode (`wake+batch`,
+`polling(forced)`, or `polling(fallback)`) and watcher count.
+`polling(fallback)` means at least one tracked child is using per-child polling;
+other children can still use wake+batch.
+
+A Linux manual benchmark on 2026-09-06 used isolated Herdr panes held pending,
+20-second windows, and the extension's completion/supervision seams. At 10
+children across three rotated rounds, wake+batch averaged 2.20 CLI launches/s
+versus 14.20 for forced polling (84.5% fewer); mean evidence-to-resolver
+latency was 3.2 ms versus 449.0 ms, and the largest reconciliation probe gap
+was 4.82 s. The benchmark measures `/proc` CPU ticks for the supervisor and
+isolated Herdr tree, not parent-model latency; raw samples are written to
+`/tmp/issue29-bench/` by `test/bench/supervision-bench.mjs`.
 
 Set `panes.mode` to `"split"` to open ordinary public `subagent` and `subagent_resume` launches, including bare forks and `/iterate`, as splits of the stable parent pane. Set `panes.direction` to `"right"` or `"down"`; it defaults to `"right"` and is ignored when mode is `"tab"`. The default `"tab"` mode preserves existing behavior. Managed worktrees still use separate workspaces, while `/btw` keeps its existing tab behavior.
 

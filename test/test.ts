@@ -80,6 +80,15 @@ import {
 	parsePersistentConfig,
 } from "../pi-extension/subagents/persistent-config.ts";
 import {
+	loadSupervisionConfig,
+	parseSupervisionConfig,
+} from "../pi-extension/subagents/supervision-config.ts";
+import { FileWakeRegistry } from "../pi-extension/subagents/wake.ts";
+import {
+	POLLING_INTERVAL_MS,
+	SupervisionCoordinator,
+} from "../pi-extension/subagents/supervision.ts";
+import {
 	advanceStatusState,
 	capStatusLines,
 	classifyStatus,
@@ -1903,6 +1912,316 @@ describe("persistent specialist configuration", () => {
 				{ maxAgents: 2 },
 			);
 		});
+	});
+});
+
+describe("supervision", () => {
+	it("parses forcePolling strictly and loads the shared example", () => {
+		assert.deepEqual(parseSupervisionConfig({}), { forcePolling: false });
+		assert.deepEqual(
+			parseSupervisionConfig({ supervision: { forcePolling: true } }),
+			{ forcePolling: true },
+		);
+		assert.throws(
+			() => parseSupervisionConfig({ supervision: { extra: true } }),
+			/supervision has unsupported key\(s\): extra/,
+		);
+		withTempDir((dir) => {
+			const example = join(dir, "config.json.example");
+			writeFileSync(
+				example,
+				JSON.stringify({ supervision: { forcePolling: true } }),
+			);
+			assert.deepEqual(
+				loadSupervisionConfig(join(dir, "config.json"), example),
+				{ forcePolling: true },
+			);
+		});
+	});
+
+	it("wakes every directory entry when fs.watch omits a filename", () => {
+		let listener:
+			| ((event: string, filename: string | Buffer | null) => void)
+			| undefined;
+		const watcher = {
+			on() {
+				return this;
+			},
+			close() {},
+			unref() {
+				return this;
+			},
+		};
+		// SAFETY: The fake implements the fs.watch behavior used by FileWakeRegistry.
+		const registry = new FileWakeRegistry(((
+			_directory: string,
+			callback: (event: string, filename: string | Buffer | null) => void,
+		) => {
+			listener = callback;
+			return watcher;
+		}) as any);
+		let wakes = 0;
+		const registration = registry.register(
+			"/tmp/child.jsonl",
+			() => {
+				wakes += 1;
+			},
+			() => assert.fail("watcher unexpectedly fell back"),
+		);
+		listener?.("change", null);
+		assert.equal(wakes, 1);
+		registration.unregister();
+		registry.close();
+	});
+
+	it("wakes on sidecar rename and releases registrations", async () => {
+		const dir = createTestDir();
+		const sessionFile = join(dir, "child.jsonl");
+		let wakes = 0;
+		const registry = new FileWakeRegistry();
+		const registration = registry.register(
+			sessionFile,
+			() => {
+				wakes += 1;
+			},
+			() => assert.fail("watcher unexpectedly fell back"),
+		);
+		try {
+			const temporary = `${sessionFile}.exit.tmp`;
+			writeFileSync(temporary, "{}");
+			renameSync(temporary, `${sessionFile}.exit`);
+			const deadline = Date.now() + 500;
+			while (wakes === 0 && Date.now() < deadline)
+				await new Promise((resolve) => setTimeout(resolve, 10));
+			assert.equal(wakes, 1);
+			registration.unregister();
+			assert.equal(registry.watcherCount, 0);
+		} finally {
+			registry.close();
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("does not apply an in-flight snapshot to a child registered after it began", async () => {
+		let resolveList:
+			| ((snapshot: {
+					complete: boolean;
+					panes: Array<{
+						paneId: string;
+						workspaceId: string;
+					}>;
+			  }) => void)
+			| undefined;
+		let fallbackInspections = 0;
+		const supervisor = new SupervisionCoordinator(
+			() =>
+				new Promise((resolve) => {
+					resolveList = resolve;
+				}),
+			async () => {
+				fallbackInspections += 1;
+				return { kind: "present", agentStatus: "idle", observedAt: Date.now() };
+			},
+		);
+		const dir = createTestDir();
+		try {
+			const one = supervisor.register(join(dir, "one.jsonl"), "one");
+			const two = supervisor.register(join(dir, "two.jsonl"), "two");
+			resolveList?.({
+				complete: true,
+				panes: [{ paneId: "one", workspaceId: "workspace" }],
+			});
+			await Promise.all([
+				one.wait(new AbortController().signal),
+				two.wait(new AbortController().signal),
+			]);
+			assert.equal((await two.inspectPane()).kind, "present");
+			assert.equal(fallbackInspections, 1);
+			one.unregister();
+			two.unregister();
+		} finally {
+			supervisor.close();
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("confirms empty complete-list absence with a pane inspection", async () => {
+		let fallbackInspections = 0;
+		const supervisor = new SupervisionCoordinator(
+			async () => ({ complete: true, panes: [] }),
+			async () => {
+				fallbackInspections += 1;
+				return { kind: "present", agentStatus: "idle", observedAt: Date.now() };
+			},
+		);
+		const dir = createTestDir();
+		try {
+			const registration = supervisor.register(
+				join(dir, "child.jsonl"),
+				"child",
+			);
+			await registration.wait(new AbortController().signal);
+			assert.equal((await registration.inspectPane()).kind, "present");
+			assert.equal(fallbackInspections, 1);
+			registration.unregister();
+		} finally {
+			supervisor.close();
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps watcherless entries on the legacy polling cadence", async () => {
+		let fallbackInspections = 0;
+		// SAFETY: This fake fs.watch always throws to model an unavailable watcher.
+		const registry = new FileWakeRegistry((() => {
+			throw new Error("watch unavailable");
+		}) as any);
+		const supervisor = new SupervisionCoordinator(
+			async () => ({
+				complete: true,
+				panes: [{ paneId: "child", workspaceId: "workspace" }],
+			}),
+			async () => {
+				fallbackInspections += 1;
+				return { kind: "present", agentStatus: "idle", observedAt: Date.now() };
+			},
+			false,
+			registry,
+		);
+		const dir = createTestDir();
+		try {
+			const registration = supervisor.register(
+				join(dir, "child.jsonl"),
+				"child",
+			);
+			await registration.wait(new AbortController().signal);
+			assert.equal(supervisor.diagnostics().mode, "polling(fallback)");
+			assert.equal((await registration.inspectPane()).kind, "present");
+			await new Promise((resolve) => setImmediate(resolve));
+			await registration.wait(new AbortController().signal);
+			assert.equal((await registration.inspectPane()).kind, "present");
+			const startedAt = Date.now();
+			await registration.wait(new AbortController().signal);
+			assert.ok(Date.now() - startedAt >= POLLING_INTERVAL_MS - 100);
+			assert.equal((await registration.inspectPane()).kind, "present");
+			assert.equal(fallbackInspections, 3);
+			registration.unregister();
+		} finally {
+			supervisor.close();
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("clears the unhealthy batch retry when closed", async () => {
+		const timeouts: Array<() => void> = [];
+		const cleared: Array<() => void> = [];
+		const timers = {
+			setTimeout(callback: () => void) {
+				timeouts.push(callback);
+				// SAFETY: clearTimeout receives this opaque token only in this test.
+				return callback as any;
+			},
+			clearTimeout(timer: () => void) {
+				cleared.push(timer);
+			},
+		};
+		const supervisor = new SupervisionCoordinator(
+			async () => {
+				throw new Error("pane list unavailable");
+			},
+			async () => ({ kind: "unavailable" }),
+			false,
+			new FileWakeRegistry(),
+			timers,
+		);
+		const registration = supervisor.register("/tmp/child.jsonl", "child");
+		await new Promise((resolve) => setImmediate(resolve));
+		supervisor.close();
+		assert.equal(timeouts.length, 1);
+		assert.deepEqual(cleared, timeouts);
+		registration.unregister();
+	});
+
+	it("refuses malformed-list absence", async () => {
+		for (const snapshot of [
+			{ complete: false, panes: [] },
+			{ complete: false, panes: [{ paneId: "one", workspaceId: "workspace" }] },
+		]) {
+			let fallbackInspections = 0;
+			const supervisor = new SupervisionCoordinator(
+				async () => snapshot,
+				async () => {
+					fallbackInspections += 1;
+					return {
+						kind: "present",
+						agentStatus: "idle",
+						observedAt: Date.now(),
+					};
+				},
+			);
+			const dir = createTestDir();
+			try {
+				const registration = supervisor.register(join(dir, "one.jsonl"), "one");
+				await registration.wait(new AbortController().signal);
+				assert.equal((await registration.inspectPane()).kind, "present");
+				assert.equal(fallbackInspections, 1);
+				registration.unregister();
+			} finally {
+				supervisor.close();
+				rmSync(dir, { recursive: true, force: true });
+			}
+		}
+	});
+
+	it("keeps a queued reconciliation when a wake arrives before the next wait", async () => {
+		let listener:
+			| ((event: string, filename: string | Buffer | null) => void)
+			| undefined;
+		const watcher = {
+			on() {
+				return this;
+			},
+			close() {},
+			unref() {
+				return this;
+			},
+		};
+		// SAFETY: The fake implements the fs.watch behavior used by FileWakeRegistry.
+		const registry = new FileWakeRegistry(((
+			_directory: string,
+			callback: (event: string, filename: string | Buffer | null) => void,
+		) => {
+			listener = callback;
+			return watcher;
+		}) as any);
+		const supervisor = new SupervisionCoordinator(
+			async () => ({
+				complete: true,
+				panes: [{ paneId: "one", workspaceId: "workspace" }],
+			}),
+			async () => ({
+				kind: "present",
+				agentStatus: "idle",
+				observedAt: Date.now(),
+			}),
+			false,
+			registry,
+		);
+		try {
+			const registration = supervisor.register("/tmp/child.jsonl", "one");
+			// Let the registration-triggered reconciliation settle and queue its
+			// pending "reconcile" reason before any waiter exists.
+			await new Promise((resolve) => setImmediate(resolve));
+			await new Promise((resolve) => setImmediate(resolve));
+			listener?.("rename", null);
+			assert.equal(
+				await registration.wait(new AbortController().signal),
+				"reconcile",
+			);
+			registration.unregister();
+		} finally {
+			supervisor.close();
+		}
 	});
 });
 
@@ -4158,6 +4477,21 @@ describe("lifecycle.ts", () => {
 		assert.equal(projectLifecycle(lifecycle, 120_000).kind, "active");
 	});
 
+	it("uses activity as a fallback after a status-unknown pane snapshot", () => {
+		let lifecycle = createLifecycle(1_000);
+		lifecycle = observePaneInspection(
+			lifecycle,
+			{ kind: "present", observedAt: 2_000, agentStatus: "unknown" },
+			2_000,
+		);
+		lifecycle = observeLifecycleActivity(
+			lifecycle,
+			{ ok: true, activity: activity() },
+			2_000,
+		);
+		assert.equal(projectLifecycle(lifecycle, 3_000).kind, "active");
+	});
+
 	it("uses activity only as detail and does not override herdr waiting", () => {
 		let lifecycle = createLifecycle(1_000);
 		lifecycle = observePaneInspection(
@@ -4340,6 +4674,43 @@ describe("completion.ts", () => {
 			assert.equal(existsSync(`${sessionFile}.exit`), false);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("prefers semantic sidecars published during a zero-exit terminal read", async () => {
+		for (const [payload, expected] of [
+			[
+				{ type: "ping", name: "Scout", message: "need input" },
+				{
+					reason: "ping",
+					exitCode: 0,
+					ping: { name: "Scout", message: "need input" },
+				},
+			],
+			[
+				{ type: "error", errorMessage: "late semantic failure" },
+				{
+					reason: "error",
+					exitCode: 1,
+					errorMessage: "late semantic failure",
+				},
+			],
+		] as const) {
+			const dir = mkdtempSync(join(tmpdir(), "completion-zero-race-"));
+			const sessionFile = join(dir, "child.jsonl");
+			try {
+				const result = await waitForCompletion(new AbortController().signal, {
+					intervalMs: 1,
+					sessionFile,
+					readTerminalTail: async () => {
+						writeFileSync(`${sessionFile}.exit`, JSON.stringify(payload));
+						return "__SUBAGENT_DONE_0__";
+					},
+				});
+				assert.deepEqual(result, expected);
+			} finally {
+				rmSync(dir, { recursive: true, force: true });
+			}
 		}
 	});
 
@@ -7301,6 +7672,31 @@ describe("herdr.ts", () => {
 						isLinkedWorktree: true,
 					},
 				],
+			);
+		});
+
+		it("accepts only complete, unique pane snapshots", () => {
+			const snapshot = (
+				panes: Array<{ pane_id?: string; workspace_id?: string } | null>,
+			) => JSON.stringify({ result: { type: "pane_list", panes } });
+			assert.deepEqual(__herdrTest__.parseHerdrPaneSnapshot(snapshot([])), []);
+			assert.equal(__herdrTest__.parseHerdrPaneSnapshot('{"result":{}}'), null);
+			assert.equal(
+				__herdrTest__.parseHerdrPaneSnapshot(
+					snapshot([
+						{ pane_id: "p1", workspace_id: "w1" },
+						{ pane_id: "p1", workspace_id: "w1" },
+					]),
+				),
+				null,
+			);
+			assert.equal(
+				__herdrTest__.parseHerdrPaneSnapshot(snapshot([{ pane_id: "p1" }])),
+				null,
+			);
+			assert.equal(
+				__herdrTest__.parseHerdrPaneSnapshot(snapshot([null, {}])),
+				null,
 			);
 		});
 

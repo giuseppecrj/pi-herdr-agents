@@ -403,7 +403,9 @@ export function observeActivity(
 			};
 		} else if (
 			lifecycle.pane.kind === "unknown" ||
-			lifecycle.pane.kind === "read-error"
+			lifecycle.pane.kind === "read-error" ||
+			(lifecycle.pane.kind === "present" &&
+				lifecycle.pane.agentStatus === "unknown")
 		) {
 			turn = {
 				kind: "active",
