@@ -1354,6 +1354,7 @@ interface RunningSubagent {
 	/** One active no-progress warning episode, reset when durable progress resumes. */
 	noProgressEpisode?: {
 		active: true;
+		progressAt: number;
 		idleMs: number;
 		classification: NoProgressClassification;
 		lastEntryKind: NoProgressSessionTail["lastEntryKind"];
@@ -1808,7 +1809,7 @@ function evaluateNoProgressAdvisory(
 		return previous
 			? {
 					kind: "recovered",
-					idleMs: previous.idleMs,
+					idleMs: Math.max(0, now - previous.progressAt),
 					classification: previous.classification,
 					lastEntryKind: previous.lastEntryKind,
 					notify: !running.interactive,
@@ -1829,7 +1830,7 @@ function evaluateNoProgressAdvisory(
 		// A session can disappear between stat and read; preserve a facts-only
 		// generic advisory rather than failing the status loop.
 	}
-	running.noProgressEpisode = { active: true, idleMs, ...tail };
+	running.noProgressEpisode = { active: true, progressAt, idleMs, ...tail };
 	return { kind: "warning", idleMs, ...tail, notify: !running.interactive };
 }
 

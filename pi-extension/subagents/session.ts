@@ -758,18 +758,32 @@ export function inspectNoProgressSessionTail(
 		if (entry.type !== "message" || !isRecord(entry.message)) continue;
 		if (entry.message.role !== "assistant") continue;
 		const content = entry.message.content;
-		const hasToolCall =
-			Array.isArray(content) &&
-			content.some((block) => isRecord(block) && block.type === "toolCall");
-		const hasToolResultAfter = entries
-			.slice(index + 1)
-			.some(
-				(entry) =>
+		const toolCallIds = new Set(
+			Array.isArray(content)
+				? content.flatMap((block) =>
+						isRecord(block) && block.type === "toolCall" && isString(block.id)
+							? [block.id]
+							: [],
+					)
+				: [],
+		);
+		const resolvedToolCallIds = new Set(
+			entries
+				.slice(index + 1)
+				.flatMap((entry) =>
 					entry.type === "message" &&
 					isRecord(entry.message) &&
-					entry.message.role === "toolResult",
-			);
-		if (hasToolCall && !hasToolResultAfter) {
+					entry.message.role === "toolResult" &&
+					isString(entry.message.toolCallId)
+						? [entry.message.toolCallId]
+						: [],
+				),
+		);
+		const hasToolCall = toolCallIds.size > 0;
+		const hasOutstandingToolCall = [...toolCallIds].some(
+			(toolCallId) => !resolvedToolCallIds.has(toolCallId),
+		);
+		if (hasToolCall && hasOutstandingToolCall) {
 			return { classification: "blocked-tool", lastEntryKind };
 		}
 		if (entry.message.stopReason === "toolUse" && !hasToolCall) {

@@ -530,7 +530,66 @@ describe("session.ts", () => {
 					{
 						type: "message",
 						id: "result",
-						message: { role: "toolResult", content: [] },
+						message: {
+							role: "toolResult",
+							toolCallId: "call-1",
+							content: [],
+						},
+					},
+				]);
+				assert.deepEqual(inspectNoProgressSessionTail(session), {
+					classification: "generic-no-progress",
+					lastEntryKind: "tool-result",
+				});
+
+				writeTail([
+					assistant(
+						[
+							{ type: "toolCall", id: "call-1", name: "bash" },
+							{ type: "toolCall", id: "call-2", name: "read" },
+						],
+						"toolUse",
+					),
+					{
+						type: "message",
+						id: "result-1",
+						message: {
+							role: "toolResult",
+							toolCallId: "call-1",
+							content: [],
+						},
+					},
+				]);
+				assert.deepEqual(inspectNoProgressSessionTail(session), {
+					classification: "blocked-tool",
+					lastEntryKind: "tool-result",
+				});
+
+				writeTail([
+					assistant(
+						[
+							{ type: "toolCall", id: "call-1", name: "bash" },
+							{ type: "toolCall", id: "call-2", name: "read" },
+						],
+						"toolUse",
+					),
+					{
+						type: "message",
+						id: "result-1",
+						message: {
+							role: "toolResult",
+							toolCallId: "call-1",
+							content: [],
+						},
+					},
+					{
+						type: "message",
+						id: "result-2",
+						message: {
+							role: "toolResult",
+							toolCallId: "call-2",
+							content: [],
+						},
 					},
 				]);
 				assert.deepEqual(inspectNoProgressSessionTail(session), {
@@ -4696,19 +4755,21 @@ describe("no-progress advisories", () => {
 				undefined,
 			);
 
-			utimesSync(sessionFile, 0, (now + 2_000) / 1_000);
+			const recoveredAt = 5 * 60 * 60_000;
+			utimesSync(sessionFile, 0, recoveredAt / 1_000);
 			const recovered = subagentsModule.__test__.evaluateNoProgressAdvisory(
 				running,
-				projectLifecycle(running.lifecycle, now + 2_000),
-				now + 2_000,
+				projectLifecycle(running.lifecycle, recoveredAt),
+				recoveredAt,
 				1,
 			);
 			assert.equal(recovered?.kind, "recovered");
+			assert.equal(recovered?.idleMs, recoveredAt);
 			assert.equal(
 				subagentsModule.__test__.evaluateNoProgressAdvisory(
 					running,
-					projectLifecycle(running.lifecycle, now + 130_000),
-					now + 130_000,
+					projectLifecycle(running.lifecycle, recoveredAt + 130_000),
+					recoveredAt + 130_000,
 					1,
 				)?.kind,
 				"warning",
@@ -4716,7 +4777,7 @@ describe("no-progress advisories", () => {
 		});
 	});
 
-	it("ignores idle and interactive runs while fresh heartbeats prevent warnings", () => {
+	it("skips idle runs, resets on fresh heartbeats, and suppresses interactive steers", () => {
 		withTempDir((dir) => {
 			const sessionFile = join(dir, "child.jsonl");
 			writeFileSync(sessionFile, "{}\n");

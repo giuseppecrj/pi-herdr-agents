@@ -364,9 +364,9 @@ a 30-minute advisory budget:
 
 While a child projects active or blocked, the parent compares durable session
 JSONL and activity-snapshot updates against this budget. An advisory is warning-only, fires once per no-progress episode, and
-never interrupts, kills, retries, or restarts a child. It identifies either a
-`blocked-tool` (an outstanding tool call may still complete) or a
-`truncated-turn` (a `toolUse` turn without a tool call cannot self-heal), then
+never interrupts, kills, retries, or restarts a child. It identifies `blocked-tool` (an outstanding tool call may still complete),
+`truncated-turn` (a `toolUse` turn without a tool call cannot self-heal), or
+`generic-no-progress` when neither condition is established, then
 includes the session path and manual recovery options. Interactive children stay
 quiet just as they do for stalled/recovered notices; their widget state still
 updates. A later durable update clears the episode and sends the corresponding

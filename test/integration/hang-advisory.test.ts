@@ -30,7 +30,8 @@ function activeChild(sessionFile: string, interactive = false) {
 }
 
 describe("hang advisory integration", () => {
-	it("notifies once for a blocked active child, recovers on progress, and stays quiet when interactive", () => {
+	// This drives the evaluator seam directly, rather than startStatusRefresh.
+	it("notifies once for a blocked active child, recovers on progress, and suppresses interactive steers", () => {
 		const root = mkdtempSync(join(tmpdir(), "pi-hang-advisory-integ-"));
 		try {
 			const sessionFile = join(root, "child.jsonl");
