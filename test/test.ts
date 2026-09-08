@@ -497,6 +497,61 @@ describe("session.ts", () => {
 			assert.equal(findLastAssistantMessage([msg]), null);
 		});
 
+		it("preserves an assistant record that starts exactly at the bounded tail", () => {
+			withTempDir((dir) => {
+				const session = join(dir, "exact-boundary.jsonl");
+				const assistant = JSON.stringify({
+					type: "message",
+					id: "assistant",
+					message: {
+						role: "assistant",
+						content: [{ type: "toolCall", id: "call-1", name: "bash" }],
+						stopReason: "toolUse",
+					},
+				});
+				const tail = `${assistant}\n${"x".repeat(
+					128 * 1024 - Buffer.byteLength(assistant) - 1,
+				)}`;
+				writeFileSync(session, `{"type":"session"}\n${tail}`);
+
+				assert.deepEqual(inspectNoProgressSessionTail(session), {
+					classification: "blocked-tool",
+					lastEntryKind: "assistant",
+				});
+			});
+		});
+
+		it("skips a mid-record cut before a multibyte character", () => {
+			withTempDir((dir) => {
+				const session = join(dir, "mid-record-boundary.jsonl");
+				const assistant = JSON.stringify({
+					type: "message",
+					id: "assistant",
+					message: {
+						role: "assistant",
+						content: [{ type: "toolCall", id: "call-1", name: "bash" }],
+						stopReason: "toolUse",
+					},
+				});
+				const beforeBoundary = Buffer.from(`partial-${"é"}`);
+				const afterBoundary = Buffer.from(`\n${assistant}\n`);
+				const tail = Buffer.concat([
+					beforeBoundary.subarray(-1),
+					afterBoundary,
+					Buffer.alloc(128 * 1024 - 1 - afterBoundary.length, "x"),
+				]);
+				writeFileSync(
+					session,
+					Buffer.concat([beforeBoundary.subarray(0, -1), tail]),
+				);
+
+				assert.deepEqual(inspectNoProgressSessionTail(session), {
+					classification: "blocked-tool",
+					lastEntryKind: "assistant",
+				});
+			});
+		});
+
 		it("classifies bounded JSONL tails without trusting malformed trailing lines", () => {
 			withTempDir((dir) => {
 				const session = join(dir, "hang.jsonl");

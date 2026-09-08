@@ -719,20 +719,25 @@ export function inspectNoProgressSessionTail(
 ): NoProgressSessionTail {
 	const fd = openSync(sessionFile, "r");
 	let raw: string;
-	let truncated = false;
+	let startsWithinLine = false;
 	try {
 		const size = fstatSync(fd).size;
 		const start = Math.max(0, size - NO_PROGRESS_TAIL_BYTES);
-		truncated = start > 0;
+		if (start > 0) {
+			const preceding = Buffer.alloc(1);
+			startsWithinLine =
+				readSync(fd, preceding, 0, preceding.length, start - 1) !== 1 ||
+				preceding[0] !== 0x0a;
+		}
 		const buffer = Buffer.alloc(size - start);
-		readSync(fd, buffer, 0, buffer.length, start);
-		raw = buffer.toString("utf8");
+		const bytesRead = readSync(fd, buffer, 0, buffer.length, start);
+		raw = buffer.subarray(0, bytesRead).toString("utf8");
 	} finally {
 		closeSync(fd);
 	}
 
 	const lines = raw.split("\n");
-	if (truncated) lines.shift();
+	if (startsWithinLine) lines.shift();
 	const entries = lines.flatMap((line) => {
 		if (!line.trim()) return [];
 		try {
