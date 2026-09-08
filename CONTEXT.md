@@ -18,6 +18,12 @@ The parent-facing handoff of a child run's observed outcome and available
 evidence. Receiving it does not establish that the work is correct or accepted.
 _Avoid_: Wake-up signal, acceptance
 
+**No-progress advisory**:
+An internal warning that an active child shows no durable progress in its session
+JSONL or activity snapshot. It is advisory only and never changes the child's
+outcome or triggers recovery.
+_Avoid_: Hang verdict, automatic recovery, stall replacement
+
 **Legacy external CLI role**:
 An old role definition that contains `cli`. Discovery reports a migration
 diagnostic, and launch fails before Herdr creates a pane or worktree. Remove

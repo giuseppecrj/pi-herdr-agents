@@ -1,10 +1,14 @@
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
 	appendFileSync,
+	closeSync,
 	copyFileSync,
 	existsSync,
+	fstatSync,
 	mkdirSync,
+	openSync,
 	readFileSync,
+	readSync,
 	readdirSync,
 	renameSync,
 	rmSync,
@@ -692,6 +696,89 @@ function readEntries(sessionFile: string): SessionEntry[] {
 		.split("\n")
 		.filter((line) => line.trim())
 		.map(parseEntry);
+}
+
+export type NoProgressClassification =
+	| "blocked-tool"
+	| "truncated-turn"
+	| "generic-no-progress";
+
+export interface NoProgressSessionTail {
+	classification: NoProgressClassification;
+	lastEntryKind: "assistant" | "tool-result" | "message" | "other" | "none";
+}
+
+const NO_PROGRESS_TAIL_BYTES = 128 * 1024;
+
+/**
+ * Read only the final portion of a session when a no-progress warning is due.
+ * Torn or malformed JSONL lines are ignored because Pi can be writing the tail.
+ */
+export function inspectNoProgressSessionTail(
+	sessionFile: string,
+): NoProgressSessionTail {
+	const fd = openSync(sessionFile, "r");
+	let raw: string;
+	let truncated = false;
+	try {
+		const size = fstatSync(fd).size;
+		const start = Math.max(0, size - NO_PROGRESS_TAIL_BYTES);
+		truncated = start > 0;
+		const buffer = Buffer.alloc(size - start);
+		readSync(fd, buffer, 0, buffer.length, start);
+		raw = buffer.toString("utf8");
+	} finally {
+		closeSync(fd);
+	}
+
+	const lines = raw.split("\n");
+	if (truncated) lines.shift();
+	const entries = lines.flatMap((line) => {
+		if (!line.trim()) return [];
+		try {
+			const value: unknown = JSON.parse(line);
+			return isRecord(value) ? [value] : [];
+		} catch {
+			return [];
+		}
+	});
+	const last = entries.at(-1);
+	const lastEntryKind: NoProgressSessionTail["lastEntryKind"] = !last
+		? "none"
+		: last.type === "message" && isRecord(last.message)
+			? last.message.role === "assistant"
+				? "assistant"
+				: last.message.role === "toolResult"
+					? "tool-result"
+					: "message"
+			: "other";
+
+	for (let index = entries.length - 1; index >= 0; index--) {
+		const entry = entries[index];
+		if (entry.type !== "message" || !isRecord(entry.message)) continue;
+		if (entry.message.role !== "assistant") continue;
+		const content = entry.message.content;
+		const hasToolCall =
+			Array.isArray(content) &&
+			content.some((block) => isRecord(block) && block.type === "toolCall");
+		const hasToolResultAfter = entries
+			.slice(index + 1)
+			.some(
+				(entry) =>
+					entry.type === "message" &&
+					isRecord(entry.message) &&
+					entry.message.role === "toolResult",
+			);
+		if (hasToolCall && !hasToolResultAfter) {
+			return { classification: "blocked-tool", lastEntryKind };
+		}
+		if (entry.message.stopReason === "toolUse" && !hasToolCall) {
+			return { classification: "truncated-turn", lastEntryKind };
+		}
+		break;
+	}
+
+	return { classification: "generic-no-progress", lastEntryKind };
 }
 
 /**

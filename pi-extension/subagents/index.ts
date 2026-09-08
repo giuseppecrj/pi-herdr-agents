@@ -62,6 +62,9 @@ import {
 	appendPersistentDeliveryLedger,
 	findLastAssistantMessage,
 	findObservedSessionRuntime,
+	inspectNoProgressSessionTail,
+	type NoProgressClassification,
+	type NoProgressSessionTail,
 	getNewEntries,
 	createBtwSessionSnapshot,
 	readPersistentDeliveryLedger,
@@ -1348,6 +1351,13 @@ interface RunningSubagent {
 	lifecycle: SubagentLifecycle;
 	/** Last projected kind used to detect stalled/recovered transitions. */
 	lastProjectedKind?: LifecycleProjection["kind"];
+	/** One active no-progress warning episode, reset when durable progress resumes. */
+	noProgressEpisode?: {
+		active: true;
+		idleMs: number;
+		classification: NoProgressClassification;
+		lastEntryKind: NoProgressSessionTail["lastEntryKind"];
+	};
 	/**
 	 * When true, status transitions (stalled/recovered) do not wake the parent
 	 * session via a steer message. The widget still updates locally. Used for
@@ -1744,6 +1754,107 @@ function observeRunningSubagent(
 		read,
 		observedAt,
 	);
+}
+
+type NoProgressAdvisoryEvent =
+	| {
+			kind: "warning";
+			idleMs: number;
+			classification: NoProgressClassification;
+			lastEntryKind: NoProgressSessionTail["lastEntryKind"];
+			notify: boolean;
+	  }
+	| {
+			kind: "recovered";
+			idleMs: number;
+			classification: NoProgressClassification;
+			lastEntryKind: NoProgressSessionTail["lastEntryKind"];
+			notify: boolean;
+	  };
+
+function evaluateNoProgressAdvisory(
+	running: RunningSubagent,
+	projection: LifecycleProjection,
+	now: number,
+	hangWarningMinutes: number,
+): NoProgressAdvisoryEvent | undefined {
+	if (hangWarningMinutes === 0) {
+		delete running.noProgressEpisode;
+		return;
+	}
+	if (projection.kind !== "active" && projection.kind !== "blocked") {
+		delete running.noProgressEpisode;
+		return;
+	}
+
+	let sessionMtime: number;
+	try {
+		sessionMtime = statSync(running.sessionFile).mtimeMs;
+	} catch {
+		// Session evidence is unavailable; do not turn that I/O problem into a hang.
+		return;
+	}
+	const progressAt = Math.min(
+		now,
+		Math.max(
+			sessionMtime,
+			running.activity?.updatedAt ?? Number.NEGATIVE_INFINITY,
+		),
+	);
+	const idleMs = Math.max(0, now - progressAt);
+	if (idleMs <= hangWarningMinutes * 60_000) {
+		const previous = running.noProgressEpisode;
+		delete running.noProgressEpisode;
+		return previous
+			? {
+					kind: "recovered",
+					idleMs: previous.idleMs,
+					classification: previous.classification,
+					lastEntryKind: previous.lastEntryKind,
+					notify: !running.interactive,
+				}
+			: undefined;
+	}
+	if (running.noProgressEpisode) return;
+
+	let tail: NoProgressSessionTail = {
+		classification: "generic-no-progress",
+		lastEntryKind: "other",
+	};
+	try {
+		// The bounded reader is deliberately cold-path only: mtime/snapshot checks
+		// above run on every refresh, but JSONL parsing happens once per episode.
+		tail = inspectNoProgressSessionTail(running.sessionFile);
+	} catch {
+		// A session can disappear between stat and read; preserve a facts-only
+		// generic advisory rather than failing the status loop.
+	}
+	running.noProgressEpisode = { active: true, idleMs, ...tail };
+	return { kind: "warning", idleMs, ...tail, notify: !running.interactive };
+}
+
+function formatNoProgressAdvisoryLine(
+	running: RunningSubagent,
+	event: NoProgressAdvisoryEvent,
+): string {
+	const name = normalizeStatusName(running.name);
+	const persistentIds = running.persistent
+		? ` Logical ID: ${running.logicalId ?? "unknown"}; generation ID: ${running.generationId ?? "unknown"}.`
+		: "";
+	if (event.kind === "recovered") {
+		return `${name} no-progress advisory recovered after ${formatElapsedDuration(event.idleMs)}.${persistentIds}`;
+	}
+	const classification =
+		event.classification === "blocked-tool"
+			? "blocked-tool; the outstanding tool may still complete"
+			: event.classification === "truncated-turn"
+				? "truncated-turn; the recorded turn cannot self-heal"
+				: "generic no-progress";
+	const options =
+		event.classification === "truncated-turn"
+			? "kill + subagent_resume or kill + new spawn"
+			: "interrupt, kill + subagent_resume, or kill + new spawn";
+	return `${name} no-progress advisory: ${formatElapsedDuration(event.idleMs)} idle while active. Classification: ${classification}. Last entry: ${event.lastEntryKind}. Session: ${running.sessionFile}. Recovery options: ${options}.${persistentIds}`;
 }
 
 function resolveInterruptTarget(params: {
@@ -2180,6 +2291,16 @@ function startStatusRefresh(pi: ExtensionAPI) {
 					),
 				);
 			}
+
+			const noProgress = evaluateNoProgressAdvisory(
+				running,
+				projection,
+				now,
+				supervisionConfig.hangWarningMinutes,
+			);
+			if (noProgress?.notify) {
+				transitionLines.push(formatNoProgressAdvisoryLine(running, noProgress));
+			}
 		}
 
 		if (shouldRefreshWidget) updateWidget();
@@ -2244,6 +2365,8 @@ export const __test__ = {
 	buildBtwLaunchCommand,
 	resolveEffectivePersistent,
 	observeRunningSubagent,
+	evaluateNoProgressAdvisory,
+	formatNoProgressAdvisoryLine,
 	resolveDenyTools,
 	resolveInterruptTarget,
 	requestSubagentInterrupt,

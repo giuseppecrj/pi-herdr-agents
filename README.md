@@ -301,7 +301,8 @@ cp config.json.example config.json
     "maxAgents": 3
   },
   "supervision": {
-    "forcePolling": false
+    "forcePolling": false,
+    "hangWarningMinutes": 15
   },
   "panes": {
     "mode": "tab",
@@ -347,6 +348,29 @@ disable wake-ups and use that legacy cadence deliberately. The setting is read
 when the coordinator is created, so run `/reload` after changing it.
 `subagents_list` reports the active transport mode (`wake+batch`,
 `polling(forced)`, or `polling(fallback)`) and watcher count.
+
+`supervision.hangWarningMinutes` defaults to `15`; set it to `0` to disable
+no-progress advisories. For example, this keeps the default transport and sets
+a 30-minute advisory budget:
+
+```json
+{
+  "supervision": {
+    "forcePolling": false,
+    "hangWarningMinutes": 30
+  }
+}
+```
+
+While a child projects active or blocked, the parent compares durable session
+JSONL and activity-snapshot updates against this budget. An advisory is warning-only, fires once per no-progress episode, and
+never interrupts, kills, retries, or restarts a child. It identifies either a
+`blocked-tool` (an outstanding tool call may still complete) or a
+`truncated-turn` (a `toolUse` turn without a tool call cannot self-heal), then
+includes the session path and manual recovery options. Interactive children stay
+quiet just as they do for stalled/recovered notices; their widget state still
+updates. A later durable update clears the episode and sends the corresponding
+recovered notice for non-interactive children.
 `polling(fallback)` means at least one tracked child is using per-child polling;
 other children can still use wake+batch.
 

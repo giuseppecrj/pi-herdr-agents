@@ -12,7 +12,8 @@
     "maxAgents": 3
   },
   "supervision": {
-    "forcePolling": false
+    "forcePolling": false,
+    "hangWarningMinutes": 15
   },
   "panes": {
     "mode": "tab",
