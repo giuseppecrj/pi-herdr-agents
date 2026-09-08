@@ -365,9 +365,14 @@ a 30-minute advisory budget:
 While a child projects active or blocked, the parent compares durable session
 JSONL and activity-snapshot updates against this budget. An advisory is warning-only, fires once per no-progress episode, and
 never interrupts, kills, retries, or restarts a child. It identifies `blocked-tool` (an outstanding tool call may still complete),
-`truncated-turn` (a `toolUse` turn without a tool call cannot self-heal), or
+`truncated-turn` (an observed `toolUse` stop with no tool call; its cause is unknown), or
 `generic-no-progress` when neither condition is established, then
-includes the session path and manual recovery options. Interactive children stay
+includes the session path and manual recovery options. Ordinary children can be
+interrupted or, after manual termination, resumed or newly spawned. Persistent
+ordinary-pane specialists can be interrupted or stopped with `subagent_stop` and
+replaced; they cannot be resumed. Managed-worktree children, including persistent
+ones, retain their workspace and continue there only after the previous process
+has exited; do not use `subagent_resume` or start a concurrent writer. Interactive children stay
 quiet just as they do for stalled/recovered notices; their widget state still
 updates. A later durable update clears the episode and sends the corresponding
 recovered notice for non-interactive children.

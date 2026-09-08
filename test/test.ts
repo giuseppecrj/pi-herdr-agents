@@ -4777,6 +4777,89 @@ describe("no-progress advisories", () => {
 		});
 	});
 
+	it("formats evidence-based recovery guidance for every child policy", () => {
+		const event = {
+			kind: "warning" as const,
+			idleMs: 60_000,
+			classification: "generic-no-progress" as const,
+			lastEntryKind: "assistant" as const,
+			notify: true,
+		};
+		const running = activeRunning("/tmp/child.jsonl");
+		const worktree = {
+			path: "/tmp/worktree",
+			workspaceId: "workspace",
+			paneId: "pane",
+			branch: "branch",
+			baseRef: "HEAD",
+			baseSha: "sha",
+			manifestFile: "manifest",
+		};
+		const cases = [
+			{
+				name: "ordinary",
+				running,
+				expected:
+					"interrupt, or after manual termination use subagent_resume or a new spawn",
+				forbidden: undefined,
+			},
+			{
+				name: "persistent",
+				running: { ...running, persistent: true },
+				expected:
+					"interrupt, or use subagent_stop then replace with a new persistent specialist",
+				forbidden: /subagent_resume/,
+			},
+			{
+				name: "worktree",
+				running: { ...running, worktree },
+				expected:
+					"interrupt, or retain the workspace and continue there after confirming the previous process exited",
+				forbidden: /subagent_resume|new spawn/,
+			},
+			{
+				name: "persistent worktree",
+				running: { ...running, persistent: true, worktree },
+				expected:
+					"interrupt, or retain the workspace and continue there after confirming the previous process exited",
+				forbidden: /subagent_resume|new persistent specialist/,
+			},
+		];
+
+		for (const testCase of cases) {
+			const line = subagentsModule.__test__.formatNoProgressAdvisoryLine(
+				testCase.running,
+				event,
+			);
+			assert.ok(line.includes(`Recovery options: ${testCase.expected}`));
+			if (testCase.forbidden) assert.doesNotMatch(line, testCase.forbidden);
+			assert.doesNotMatch(line, /cannot self-heal/);
+		}
+
+		const truncated = subagentsModule.__test__.formatNoProgressAdvisoryLine(
+			running,
+			{ ...event, classification: "truncated-turn" },
+		);
+		assert.match(
+			truncated,
+			/truncated-turn; observed toolUse stop with no tool call; cause unknown/,
+		);
+
+		for (const classification of [
+			"blocked-tool",
+			"truncated-turn",
+			"generic-no-progress",
+		] as const) {
+			assert.doesNotMatch(
+				subagentsModule.__test__.formatNoProgressAdvisoryLine(running, {
+					...event,
+					classification,
+				}),
+				/cannot self-heal/,
+			);
+		}
+	});
+
 	it("skips idle runs, resets on fresh heartbeats, and suppresses interactive steers", () => {
 		withTempDir((dir) => {
 			const sessionFile = join(dir, "child.jsonl");

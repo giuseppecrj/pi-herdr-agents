@@ -60,7 +60,7 @@ describe("hang advisory integration", () => {
 			assert.equal(advisory?.notify, true);
 			assert.match(
 				subagentsModule.__test__.formatNoProgressAdvisoryLine(child, advisory!),
-				/Recovery options: interrupt, kill \+ subagent_resume, or kill \+ new spawn/,
+				/Recovery options: interrupt, or after manual termination use subagent_resume or a new spawn/,
 			);
 			assert.equal(
 				subagentsModule.__test__.evaluateNoProgressAdvisory(

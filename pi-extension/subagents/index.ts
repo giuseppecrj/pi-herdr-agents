@@ -1849,12 +1849,13 @@ function formatNoProgressAdvisoryLine(
 		event.classification === "blocked-tool"
 			? "blocked-tool; the outstanding tool may still complete"
 			: event.classification === "truncated-turn"
-				? "truncated-turn; the recorded turn cannot self-heal"
+				? "truncated-turn; observed toolUse stop with no tool call; cause unknown"
 				: "generic no-progress";
-	const options =
-		event.classification === "truncated-turn"
-			? "kill + subagent_resume or kill + new spawn"
-			: "interrupt, kill + subagent_resume, or kill + new spawn";
+	const options = running.worktree
+		? "interrupt, or retain the workspace and continue there after confirming the previous process exited"
+		: running.persistent
+			? "interrupt, or use subagent_stop then replace with a new persistent specialist"
+			: "interrupt, or after manual termination use subagent_resume or a new spawn";
 	return `${name} no-progress advisory: ${formatElapsedDuration(event.idleMs)} idle while active. Classification: ${classification}. Last entry: ${event.lastEntryKind}. Session: ${running.sessionFile}. Recovery options: ${options}.${persistentIds}`;
 }
 
