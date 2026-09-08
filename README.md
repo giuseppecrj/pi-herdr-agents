@@ -301,7 +301,8 @@ cp config.json.example config.json
     "maxAgents": 3
   },
   "supervision": {
-    "forcePolling": false
+    "forcePolling": false,
+    "hangWarningMinutes": 15
   },
   "panes": {
     "mode": "tab",
@@ -347,6 +348,34 @@ disable wake-ups and use that legacy cadence deliberately. The setting is read
 when the coordinator is created, so run `/reload` after changing it.
 `subagents_list` reports the active transport mode (`wake+batch`,
 `polling(forced)`, or `polling(fallback)`) and watcher count.
+
+`supervision.hangWarningMinutes` defaults to `15`; set it to `0` to disable
+no-progress advisories. For example, this keeps the default transport and sets
+a 30-minute advisory budget:
+
+```json
+{
+  "supervision": {
+    "forcePolling": false,
+    "hangWarningMinutes": 30
+  }
+}
+```
+
+While a child projects active or blocked, the parent compares durable session
+JSONL and activity-snapshot updates against this budget. An advisory is warning-only, fires once per no-progress episode, and
+never interrupts, kills, retries, or restarts a child. It identifies `blocked-tool` (an outstanding tool call may still complete),
+`truncated-turn` (an observed `toolUse` stop with no tool call; its cause is unknown), or
+`generic-no-progress` when neither condition is established, then
+includes the session path and manual recovery options. Ordinary children can be
+interrupted or, after manual termination, resumed or newly spawned. Persistent
+ordinary-pane specialists can be interrupted or stopped with `subagent_stop` and
+replaced; they cannot be resumed. Managed-worktree children, including persistent
+ones, retain their workspace and continue there only after the previous process
+has exited; do not use `subagent_resume` or start a concurrent writer. Interactive children stay
+quiet just as they do for stalled/recovered notices; their widget state still
+updates. A later durable update clears the episode and sends the corresponding
+recovered notice for non-interactive children.
 `polling(fallback)` means at least one tracked child is using per-child polling;
 other children can still use wake+batch.
 

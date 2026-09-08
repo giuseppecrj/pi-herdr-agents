@@ -8,6 +8,7 @@ import {
 	mkdirSync,
 	renameSync,
 	rmSync,
+	utimesSync,
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -37,6 +38,7 @@ import {
 	getNewEntries,
 	findLastAssistantMessage,
 	inspectFinalAssistantMessage,
+	inspectNoProgressSessionTail,
 	findObservedSessionRuntime,
 	appendBranchSummary,
 	copySessionFile,
@@ -493,6 +495,185 @@ describe("session.ts", () => {
 				},
 			};
 			assert.equal(findLastAssistantMessage([msg]), null);
+		});
+
+		it("preserves an assistant record that starts exactly at the bounded tail", () => {
+			withTempDir((dir) => {
+				const session = join(dir, "exact-boundary.jsonl");
+				const assistant = JSON.stringify({
+					type: "message",
+					id: "assistant",
+					message: {
+						role: "assistant",
+						content: [{ type: "toolCall", id: "call-1", name: "bash" }],
+						stopReason: "toolUse",
+					},
+				});
+				const tail = `${assistant}\n${"x".repeat(
+					128 * 1024 - Buffer.byteLength(assistant) - 1,
+				)}`;
+				writeFileSync(session, `{"type":"session"}\n${tail}`);
+
+				assert.deepEqual(inspectNoProgressSessionTail(session), {
+					classification: "blocked-tool",
+					lastEntryKind: "assistant",
+				});
+			});
+		});
+
+		it("skips a mid-record cut before a multibyte character", () => {
+			withTempDir((dir) => {
+				const session = join(dir, "mid-record-boundary.jsonl");
+				const assistant = JSON.stringify({
+					type: "message",
+					id: "assistant",
+					message: {
+						role: "assistant",
+						content: [{ type: "toolCall", id: "call-1", name: "bash" }],
+						stopReason: "toolUse",
+					},
+				});
+				const beforeBoundary = Buffer.from(`partial-${"é"}`);
+				const afterBoundary = Buffer.from(`\n${assistant}\n`);
+				const tail = Buffer.concat([
+					beforeBoundary.subarray(-1),
+					afterBoundary,
+					Buffer.alloc(128 * 1024 - 1 - afterBoundary.length, "x"),
+				]);
+				writeFileSync(
+					session,
+					Buffer.concat([beforeBoundary.subarray(0, -1), tail]),
+				);
+
+				assert.deepEqual(inspectNoProgressSessionTail(session), {
+					classification: "blocked-tool",
+					lastEntryKind: "assistant",
+				});
+			});
+		});
+
+		it("classifies bounded JSONL tails without trusting malformed trailing lines", () => {
+			withTempDir((dir) => {
+				const session = join(dir, "hang.jsonl");
+				const writeTail = (entries: unknown[]) =>
+					writeFileSync(
+						session,
+						`${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n{torn`,
+					);
+				const assistant = (content: unknown[], stopReason?: string) => ({
+					type: "message",
+					id: "assistant",
+					message: { role: "assistant", content, stopReason },
+				});
+
+				writeTail([
+					assistant(
+						[{ type: "toolCall", id: "call-1", name: "bash" }],
+						"toolUse",
+					),
+				]);
+				assert.deepEqual(inspectNoProgressSessionTail(session), {
+					classification: "blocked-tool",
+					lastEntryKind: "assistant",
+				});
+
+				writeTail([
+					assistant(
+						[{ type: "toolCall", id: "call-1", name: "bash" }],
+						"toolUse",
+					),
+					{
+						type: "message",
+						id: "result",
+						message: {
+							role: "toolResult",
+							toolCallId: "call-1",
+							content: [],
+						},
+					},
+				]);
+				assert.deepEqual(inspectNoProgressSessionTail(session), {
+					classification: "generic-no-progress",
+					lastEntryKind: "tool-result",
+				});
+
+				writeTail([
+					assistant(
+						[
+							{ type: "toolCall", id: "call-1", name: "bash" },
+							{ type: "toolCall", id: "call-2", name: "read" },
+						],
+						"toolUse",
+					),
+					{
+						type: "message",
+						id: "result-1",
+						message: {
+							role: "toolResult",
+							toolCallId: "call-1",
+							content: [],
+						},
+					},
+				]);
+				assert.deepEqual(inspectNoProgressSessionTail(session), {
+					classification: "blocked-tool",
+					lastEntryKind: "tool-result",
+				});
+
+				writeTail([
+					assistant(
+						[
+							{ type: "toolCall", id: "call-1", name: "bash" },
+							{ type: "toolCall", id: "call-2", name: "read" },
+						],
+						"toolUse",
+					),
+					{
+						type: "message",
+						id: "result-1",
+						message: {
+							role: "toolResult",
+							toolCallId: "call-1",
+							content: [],
+						},
+					},
+					{
+						type: "message",
+						id: "result-2",
+						message: {
+							role: "toolResult",
+							toolCallId: "call-2",
+							content: [],
+						},
+					},
+				]);
+				assert.deepEqual(inspectNoProgressSessionTail(session), {
+					classification: "generic-no-progress",
+					lastEntryKind: "tool-result",
+				});
+
+				writeTail([
+					assistant(
+						[
+							{ type: "thinking", thinking: "need a tool" },
+							{ type: "text", text: "Running it." },
+						],
+						"toolUse",
+					),
+				]);
+				assert.deepEqual(inspectNoProgressSessionTail(session), {
+					classification: "truncated-turn",
+					lastEntryKind: "assistant",
+				});
+
+				writeTail([
+					assistant([{ type: "text", text: "still working" }], "stop"),
+				]);
+				assert.deepEqual(inspectNoProgressSessionTail(session), {
+					classification: "generic-no-progress",
+					lastEntryKind: "assistant",
+				});
+			});
 		});
 	});
 
@@ -1916,12 +2097,30 @@ describe("persistent specialist configuration", () => {
 });
 
 describe("supervision", () => {
-	it("parses forcePolling strictly and loads the shared example", () => {
-		assert.deepEqual(parseSupervisionConfig({}), { forcePolling: false });
+	it("parses hang warning configuration strictly and loads the shared example", () => {
+		assert.deepEqual(parseSupervisionConfig({}), {
+			forcePolling: false,
+			hangWarningMinutes: 15,
+		});
 		assert.deepEqual(
-			parseSupervisionConfig({ supervision: { forcePolling: true } }),
-			{ forcePolling: true },
+			parseSupervisionConfig({
+				supervision: { forcePolling: true, hangWarningMinutes: 20 },
+			}),
+			{ forcePolling: true, hangWarningMinutes: 20 },
 		);
+		assert.deepEqual(
+			parseSupervisionConfig({ supervision: { hangWarningMinutes: 0 } }),
+			{ forcePolling: false, hangWarningMinutes: 0 },
+		);
+		for (const value of [-1, 1.5, "15"]) {
+			assert.throws(
+				() =>
+					parseSupervisionConfig({
+						supervision: { hangWarningMinutes: value },
+					}),
+				/supervision\.hangWarningMinutes must be a non-negative integer/,
+			);
+		}
 		assert.throws(
 			() => parseSupervisionConfig({ supervision: { extra: true } }),
 			/supervision has unsupported key\(s\): extra/,
@@ -1930,11 +2129,11 @@ describe("supervision", () => {
 			const example = join(dir, "config.json.example");
 			writeFileSync(
 				example,
-				JSON.stringify({ supervision: { forcePolling: true } }),
+				JSON.stringify({ supervision: { hangWarningMinutes: 20 } }),
 			);
 			assert.deepEqual(
 				loadSupervisionConfig(join(dir, "config.json"), example),
-				{ forcePolling: true },
+				{ forcePolling: false, hangWarningMinutes: 20 },
 			);
 		});
 	});
@@ -4553,6 +4752,214 @@ describe("lifecycle.ts", () => {
 		assert.equal(projection.kind, "active");
 		assert.equal(projection.label, "bash");
 		assert.equal(projection.stateDurationSince, 2_000);
+	});
+});
+
+describe("no-progress advisories", () => {
+	function activeRunning(sessionFile: string, interactive = false) {
+		return {
+			id: "child",
+			name: "Worker",
+			task: "",
+			surface: "pane",
+			startTime: 0,
+			sessionFile,
+			interactive,
+			runtimePlan: undefined,
+			lifecycle: observePaneInspection(
+				createLifecycle(0),
+				{ kind: "present", observedAt: 1, agentStatus: "working" },
+				1,
+			),
+		};
+	}
+
+	it("warns once per active no-progress episode and rearms after durable progress", () => {
+		withTempDir((dir) => {
+			const sessionFile = join(dir, "child.jsonl");
+			writeFileSync(
+				sessionFile,
+				JSON.stringify({
+					type: "message",
+					message: {
+						role: "assistant",
+						content: [{ type: "toolCall", id: "call", name: "bash" }],
+						stopReason: "toolUse",
+					},
+				}) + "\n",
+			);
+			utimesSync(sessionFile, 0, 0);
+			const running = activeRunning(sessionFile);
+			const now = 120_000;
+			const first = subagentsModule.__test__.evaluateNoProgressAdvisory(
+				running,
+				projectLifecycle(running.lifecycle, now),
+				now,
+				1,
+			);
+			assert.equal(first?.kind, "warning");
+			assert.equal(first?.classification, "blocked-tool");
+			assert.equal(first?.lastEntryKind, "assistant");
+			assert.equal(
+				subagentsModule.__test__.evaluateNoProgressAdvisory(
+					running,
+					projectLifecycle(running.lifecycle, now + 1_000),
+					now + 1_000,
+					1,
+				),
+				undefined,
+			);
+
+			const recoveredAt = 5 * 60 * 60_000;
+			utimesSync(sessionFile, 0, recoveredAt / 1_000);
+			const recovered = subagentsModule.__test__.evaluateNoProgressAdvisory(
+				running,
+				projectLifecycle(running.lifecycle, recoveredAt),
+				recoveredAt,
+				1,
+			);
+			assert.equal(recovered?.kind, "recovered");
+			assert.equal(recovered?.idleMs, recoveredAt);
+			assert.equal(
+				subagentsModule.__test__.evaluateNoProgressAdvisory(
+					running,
+					projectLifecycle(running.lifecycle, recoveredAt + 130_000),
+					recoveredAt + 130_000,
+					1,
+				)?.kind,
+				"warning",
+			);
+		});
+	});
+
+	it("formats evidence-based recovery guidance for every child policy", () => {
+		const event = {
+			kind: "warning" as const,
+			idleMs: 60_000,
+			classification: "generic-no-progress" as const,
+			lastEntryKind: "assistant" as const,
+			notify: true,
+		};
+		const running = activeRunning("/tmp/child.jsonl");
+		const worktree = {
+			path: "/tmp/worktree",
+			workspaceId: "workspace",
+			paneId: "pane",
+			branch: "branch",
+			baseRef: "HEAD",
+			baseSha: "sha",
+			manifestFile: "manifest",
+		};
+		const cases = [
+			{
+				name: "ordinary",
+				running,
+				expected:
+					"interrupt, or after manual termination use subagent_resume or a new spawn",
+				forbidden: undefined,
+			},
+			{
+				name: "persistent",
+				running: { ...running, persistent: true },
+				expected:
+					"interrupt, or use subagent_stop then replace with a new persistent specialist",
+				forbidden: /subagent_resume/,
+			},
+			{
+				name: "worktree",
+				running: { ...running, worktree },
+				expected:
+					"interrupt, or retain the workspace and continue there after confirming the previous process exited",
+				forbidden: /subagent_resume|new spawn/,
+			},
+			{
+				name: "persistent worktree",
+				running: { ...running, persistent: true, worktree },
+				expected:
+					"interrupt, or retain the workspace and continue there after confirming the previous process exited",
+				forbidden: /subagent_resume|new persistent specialist/,
+			},
+		];
+
+		for (const testCase of cases) {
+			const line = subagentsModule.__test__.formatNoProgressAdvisoryLine(
+				testCase.running,
+				event,
+			);
+			assert.ok(line.includes(`Recovery options: ${testCase.expected}`));
+			if (testCase.forbidden) assert.doesNotMatch(line, testCase.forbidden);
+			assert.doesNotMatch(line, /cannot self-heal/);
+		}
+
+		const truncated = subagentsModule.__test__.formatNoProgressAdvisoryLine(
+			running,
+			{ ...event, classification: "truncated-turn" },
+		);
+		assert.match(
+			truncated,
+			/truncated-turn; observed toolUse stop with no tool call; cause unknown/,
+		);
+
+		for (const classification of [
+			"blocked-tool",
+			"truncated-turn",
+			"generic-no-progress",
+		] as const) {
+			assert.doesNotMatch(
+				subagentsModule.__test__.formatNoProgressAdvisoryLine(running, {
+					...event,
+					classification,
+				}),
+				/cannot self-heal/,
+			);
+		}
+	});
+
+	it("skips idle runs, resets on fresh heartbeats, and suppresses interactive steers", () => {
+		withTempDir((dir) => {
+			const sessionFile = join(dir, "child.jsonl");
+			writeFileSync(sessionFile, "{}\n");
+			utimesSync(sessionFile, 0, 0);
+			const now = 20 * 60_000;
+			const waiting = activeRunning(sessionFile);
+			waiting.lifecycle = observePaneInspection(
+				waiting.lifecycle,
+				{ kind: "present", observedAt: 2, agentStatus: "idle" },
+				2,
+			);
+			assert.equal(
+				subagentsModule.__test__.evaluateNoProgressAdvisory(
+					waiting,
+					projectLifecycle(waiting.lifecycle, now),
+					now,
+					1,
+				),
+				undefined,
+			);
+
+			const heartbeating = activeRunning(sessionFile);
+			utimesSync(sessionFile, 0, (now - 1) / 1_000);
+			assert.equal(
+				subagentsModule.__test__.evaluateNoProgressAdvisory(
+					heartbeating,
+					projectLifecycle(heartbeating.lifecycle, now),
+					now,
+					1,
+				),
+				undefined,
+			);
+
+			utimesSync(sessionFile, 0, 0);
+			const interactive = activeRunning(sessionFile, true);
+			const event = subagentsModule.__test__.evaluateNoProgressAdvisory(
+				interactive,
+				projectLifecycle(interactive.lifecycle, now),
+				now,
+				1,
+			);
+			assert.equal(event?.kind, "warning");
+			assert.equal(event?.notify, false);
+		});
 	});
 });
 
