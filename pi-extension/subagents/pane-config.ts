@@ -1,19 +1,25 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isPlainObject, isString } from "./type-guards.ts";
+import { isFiniteNumber, isPlainObject, isString } from "./type-guards.ts";
 
 const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const DEFAULT_PANE_CONFIG_PATH = join(PACKAGE_ROOT, "config.json");
 const PANE_CONFIG_EXAMPLE_PATH = join(PACKAGE_ROOT, "config.json.example");
 
-export type PaneMode = "tab" | "split";
+export type PaneMode = "tab" | "split" | "side-column";
 export type PaneDirection = "right" | "down";
 
 export interface PaneConfig {
 	mode: PaneMode;
 	direction: PaneDirection;
+	/** Max visible side-column panes per tab (0 = unlimited). Only used by side-column mode. */
+	maxVisible: number;
+	/** Split ratio applied when the second side-column pane opens. (0, 1) exclusive. */
+	sideColumnRatio: number;
 }
+
+export const DEFAULT_SIDE_COLUMN_RATIO = 0.34;
 
 type PaneCreator = (name: string) => string;
 type SplitPaneCreator = (name: string, direction: PaneDirection) => string;
@@ -30,14 +36,23 @@ export function parsePaneConfig(
 		invalidPaneConfig(source, "root must be an object");
 	}
 	if (!Object.hasOwn(rawConfig, "panes")) {
-		return { mode: "tab", direction: "right" };
+		return {
+			mode: "tab",
+			direction: "right",
+			maxVisible: 0,
+			sideColumnRatio: DEFAULT_SIDE_COLUMN_RATIO,
+		};
 	}
 	if (!isPlainObject(rawConfig.panes)) {
 		invalidPaneConfig(source, "panes must be an object");
 	}
 
 	const unsupportedKeys = Object.keys(rawConfig.panes).filter(
-		(key) => key !== "mode" && key !== "direction",
+		(key) =>
+			key !== "mode" &&
+			key !== "direction" &&
+			key !== "maxVisible" &&
+			key !== "sideColumnRatio",
 	);
 	if (unsupportedKeys.length > 0) {
 		invalidPaneConfig(
@@ -50,9 +65,14 @@ export function parsePaneConfig(
 	if (Object.hasOwn(rawConfig.panes, "mode")) {
 		if (
 			!isString(rawConfig.panes.mode) ||
-			(rawConfig.panes.mode !== "tab" && rawConfig.panes.mode !== "split")
+			(rawConfig.panes.mode !== "tab" &&
+				rawConfig.panes.mode !== "split" &&
+				rawConfig.panes.mode !== "side-column")
 		) {
-			invalidPaneConfig(source, 'panes.mode must be "tab" or "split"');
+			invalidPaneConfig(
+				source,
+				'panes.mode must be "tab", "split", or "side-column"',
+			);
 		}
 		mode = rawConfig.panes.mode;
 	}
@@ -69,7 +89,37 @@ export function parsePaneConfig(
 		direction = rawConfig.panes.direction;
 	}
 
-	return { mode, direction };
+	let maxVisible = 0;
+	if (Object.hasOwn(rawConfig.panes, "maxVisible")) {
+		if (
+			!isFiniteNumber(rawConfig.panes.maxVisible) ||
+			!Number.isInteger(rawConfig.panes.maxVisible) ||
+			rawConfig.panes.maxVisible < 0
+		) {
+			invalidPaneConfig(
+				source,
+				"panes.maxVisible must be a non-negative integer (0 = unlimited)",
+			);
+		}
+		maxVisible = rawConfig.panes.maxVisible;
+	}
+
+	let sideColumnRatio = DEFAULT_SIDE_COLUMN_RATIO;
+	if (Object.hasOwn(rawConfig.panes, "sideColumnRatio")) {
+		if (
+			!isFiniteNumber(rawConfig.panes.sideColumnRatio) ||
+			rawConfig.panes.sideColumnRatio <= 0 ||
+			rawConfig.panes.sideColumnRatio >= 1
+		) {
+			invalidPaneConfig(
+				source,
+				"panes.sideColumnRatio must be a number between 0 and 1 (exclusive)",
+			);
+		}
+		sideColumnRatio = rawConfig.panes.sideColumnRatio;
+	}
+
+	return { mode, direction, maxVisible, sideColumnRatio };
 }
 
 interface PaneConfigSource {
@@ -128,7 +178,13 @@ export function createSubagentPaneFactory(
 	config: PaneConfig,
 	createTab: PaneCreator,
 	createSplit: SplitPaneCreator,
+	createSideColumn?: PaneCreator,
 ): PaneCreator {
+	if (config.mode === "side-column") {
+		// Older callers pass only tab/split creators; fall back to a plain
+		// split of the current pane rather than crashing.
+		return createSideColumn ?? ((name) => createSplit(name, config.direction));
+	}
 	return config.mode === "split"
 		? (name) => createSplit(name, config.direction)
 		: createTab;

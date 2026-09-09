@@ -17,6 +17,8 @@
   },
   "panes": {
     "mode": "tab",
-    "direction": "right"
+    "direction": "right",
+    "maxVisible": 0,
+    "sideColumnRatio": 0.34
   }
 }
