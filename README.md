@@ -25,6 +25,15 @@ Delegate investigation, implementation, and review without blocking the parent s
 
 Other terminal multiplexers are not supported. Worktrees isolate Git checkouts, not processes or permissions; child agents and installed Pi packages run with your user account's access.
 
+The extension registers its tools and commands only when `HERDR_ENV=1` and the
+`herdr` CLI are both present. Outside Herdr no `subagent*` tool and no `/btw`,
+`/btw-close`, `/worktree`, `/subagent`, `/iterate`, or `/plan` command is
+registered, so the model is never offered a surface that can only answer with a
+setup hint, and another subagent package installed alongside this one stays
+unambiguous in its own terminal. Exposure follows exactly the same predicate the
+operations already enforce, so there is no configuration that can register a
+surface Herdr cannot serve.
+
 ## Install
 
 Install from npm:
