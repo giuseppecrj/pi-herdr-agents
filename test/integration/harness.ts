@@ -163,8 +163,10 @@ export interface TestEnv {
 	backend: MuxBackend;
 	/** Dedicated workspace owned by this test environment. */
 	workspaceId: string;
-	/** Parent workspace restored after cleanup. */
+	/** Parent Herdr identity restored after cleanup. */
 	previousWorkspaceId: string | undefined;
+	previousPaneId: string | undefined;
+	previousTabId: string | undefined;
 	/** Agent configuration restored after cleanup. */
 	previousAgentDir: string | undefined;
 	/** Surfaces created directly by the harness. */
@@ -213,7 +215,7 @@ function writeTestProviderConfig(agentDir: string): void {
 	);
 }
 
-function createTestWorkspace(cwd: string): string {
+function createTestWorkspace(cwd: string) {
 	const output = execFileSync(
 		"herdr",
 		[
@@ -229,12 +231,23 @@ function createTestWorkspace(cwd: string): string {
 	);
 	const parsed = JSON.parse(output);
 	const workspaceId = parsed.result?.workspace?.workspace_id;
-	if (!isNonEmptyString(workspaceId)) {
+	const paneId = parsed.result?.root_pane?.pane_id;
+	const tabId = parsed.result?.root_pane?.tab_id;
+	if (
+		!isNonEmptyString(workspaceId) ||
+		!isNonEmptyString(paneId) ||
+		!isNonEmptyString(tabId)
+	) {
 		throw new Error(
 			`Unexpected herdr workspace create output: ${output.trim() || "(empty)"}`,
 		);
 	}
-	return workspaceId;
+	return { workspaceId, paneId, tabId };
+}
+
+function restoreEnv(name: string, value: string | undefined): void {
+	if (value === undefined) delete process.env[name];
+	else process.env[name] = value;
 }
 
 /**
@@ -246,51 +259,77 @@ export function createTestEnv(backend: MuxBackend): TestEnv {
 	const agentsDir = join(dir, ".pi", "agents");
 	const agentDir = join(dir, ".pi", "agent");
 	const previousWorkspaceId = process.env.HERDR_WORKSPACE_ID;
+	const previousPaneId = process.env.HERDR_PANE_ID;
+	const previousTabId = process.env.HERDR_TAB_ID;
 	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 	if (!previousWorkspaceId)
 		throw new Error("HERDR_WORKSPACE_ID is required for integration tests");
-	const workspaceId = createTestWorkspace(dir);
-	// Herdr creates subagent tabs in the workspace identified by this env var.
-	// Point the harness at its dedicated workspace without changing the parent's pane.
+	const { workspaceId, paneId, tabId } = createTestWorkspace(dir);
+	// Use the returned root identity so headless launches target this fixture,
+	// never the outer user's pane. These snapshots also support nested fixtures.
 	process.env.HERDR_WORKSPACE_ID = workspaceId;
-	mkdirSync(agentsDir, { recursive: true });
-	if (USE_TEST_PROVIDER) {
-		// Nested coordinator children use automatic extension discovery. Point the
-		// isolated agent home at this worktree instead of an installed snapshot.
-		mkdirSync(join(agentDir, "extensions"), { recursive: true });
-		writeFileSync(
-			join(agentDir, "extensions", "subagents.ts"),
-			`export { default } from ${JSON.stringify(EXTENSION_SOURCE)};\n`,
-			"utf8",
-		);
-		writeTestProviderConfig(agentDir);
-		process.env.PI_CODING_AGENT_DIR = agentDir;
-	}
+	process.env.HERDR_PANE_ID = paneId;
+	process.env.HERDR_TAB_ID = tabId;
+	try {
+		mkdirSync(agentsDir, { recursive: true });
+		if (USE_TEST_PROVIDER) {
+			// Nested coordinator children use automatic extension discovery. Point the
+			// isolated agent home at this worktree instead of an installed snapshot.
+			mkdirSync(join(agentDir, "extensions"), { recursive: true });
+			writeFileSync(
+				join(agentDir, "extensions", "subagents.ts"),
+				`export { default } from ${JSON.stringify(EXTENSION_SOURCE)};\n`,
+				"utf8",
+			);
+			writeTestProviderConfig(agentDir);
+			process.env.PI_CODING_AGENT_DIR = agentDir;
+		}
 
-	// Copy test agent definitions into the project-local agents dir and pin
-	// every child subagent to the same model selected for the outer Pi sessions.
-	// Without this rewrite, fixture frontmatter can silently bypass PI_TEST_MODEL.
-	if (existsSync(TEST_AGENTS_SRC)) {
-		for (const file of readdirSync(TEST_AGENTS_SRC)) {
-			if (file.endsWith(".md")) {
-				const source = readFileSync(join(TEST_AGENTS_SRC, file), "utf8");
-				const configured = /^model:\s*.*$/m.test(source)
-					? source.replace(/^model:\s*.*$/m, `model: ${TEST_MODEL}`)
-					: source.replace(/^---\n/, `---\nmodel: ${TEST_MODEL}\n`);
-				writeFileSync(join(agentsDir, file), configured, "utf8");
+		// Copy test agent definitions into the project-local agents dir and pin
+		// every child subagent to the same model selected for the outer Pi sessions.
+		// Without this rewrite, fixture frontmatter can silently bypass PI_TEST_MODEL.
+		if (existsSync(TEST_AGENTS_SRC)) {
+			for (const file of readdirSync(TEST_AGENTS_SRC)) {
+				if (file.endsWith(".md")) {
+					const source = readFileSync(join(TEST_AGENTS_SRC, file), "utf8");
+					const configured = /^model:\s*.*$/m.test(source)
+						? source.replace(/^model:\s*.*$/m, `model: ${TEST_MODEL}`)
+						: source.replace(/^---\n/, `---\nmodel: ${TEST_MODEL}\n`);
+					writeFileSync(join(agentsDir, file), configured, "utf8");
+				}
 			}
 		}
-	}
 
-	return {
-		dir,
-		backend,
-		workspaceId,
-		previousWorkspaceId,
-		previousAgentDir,
-		surfaces: [],
-		tempFiles: [],
-	};
+		return {
+			dir,
+			backend,
+			workspaceId,
+			previousWorkspaceId,
+			previousPaneId,
+			previousTabId,
+			previousAgentDir,
+			surfaces: [],
+			tempFiles: [],
+		};
+	} catch (error) {
+		try {
+			execFileSync("herdr", ["workspace", "close", workspaceId], {
+				encoding: "utf8",
+			});
+		} catch {
+			// Best effort; preserve the original setup error.
+		}
+		restoreEnv("HERDR_WORKSPACE_ID", previousWorkspaceId);
+		restoreEnv("HERDR_PANE_ID", previousPaneId);
+		restoreEnv("HERDR_TAB_ID", previousTabId);
+		restoreEnv("PI_CODING_AGENT_DIR", previousAgentDir);
+		try {
+			rmSync(dir, { recursive: true, force: true });
+		} catch {
+			// Best effort after closing the owned workspace.
+		}
+		throw error;
+	}
 }
 
 /**
@@ -313,16 +352,10 @@ export function cleanupTestEnv(env: TestEnv): void {
 	} catch {
 		// Best effort; the workspace can already be closed.
 	}
-	if (env.previousWorkspaceId) {
-		process.env.HERDR_WORKSPACE_ID = env.previousWorkspaceId;
-	} else {
-		delete process.env.HERDR_WORKSPACE_ID;
-	}
-	if (env.previousAgentDir) {
-		process.env.PI_CODING_AGENT_DIR = env.previousAgentDir;
-	} else {
-		delete process.env.PI_CODING_AGENT_DIR;
-	}
+	restoreEnv("HERDR_WORKSPACE_ID", env.previousWorkspaceId);
+	restoreEnv("HERDR_PANE_ID", env.previousPaneId);
+	restoreEnv("HERDR_TAB_ID", env.previousTabId);
+	restoreEnv("PI_CODING_AGENT_DIR", env.previousAgentDir);
 	for (const file of env.tempFiles) {
 		try {
 			unlinkSync(file);

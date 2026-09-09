@@ -3223,7 +3223,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					runtime.pi,
 				);
 				const {
-					running,
+					running: initialRunning,
 					index: initialPlanIndex,
 					launchFailures: initialLaunchFailures,
 				} = await launchSubagentWithFallbacks(
@@ -3232,6 +3232,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					parentThinking,
 					runtimePlans,
 				);
+
+				let running = initialRunning;
 
 				// Create a separate AbortController for the watcher
 				// (the tool's signal completes when we return)
@@ -3259,11 +3261,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					initialLaunchFailures,
 				)
 					.then(({ running: completedRunning, result }) => {
-						if (completedRunning.persistent)
-							drainPersistentTaskEvents(
-								completedRunning,
-								selectCompletionApi(pi, runtime.pi),
-							);
+						running = completedRunning;
 						if (completedRunning.stopTimeout)
 							clearTimeout(completedRunning.stopTimeout);
 						if (completedRunning.persistent) {
@@ -3271,6 +3269,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 								shouldCloseTemporaryPanes = true;
 								return;
 							}
+							drainPersistentTaskEvents(
+								completedRunning,
+								selectCompletionApi(pi, runtime.pi),
+							);
 							completedRunning.lifecycle = markDelivery(
 								completedRunning.lifecycle,
 								"delivered",

@@ -134,33 +134,25 @@ interface HerdrCurrentPaneInfo {
 }
 
 function getHerdrCurrentPaneInfo(): HerdrCurrentPaneInfo {
-	const paneId = process.env.HERDR_PANE_ID;
-	const tabId = process.env.HERDR_TAB_ID;
-	const workspaceId = process.env.HERDR_WORKSPACE_ID;
-
-	// Fall back to `herdr pane current` if any identity env var is missing —
-	// older herdr versions may not set all three.
-	if (!paneId || !tabId || !workspaceId) {
-		const output = herdrExec(buildCurrentPaneArgs());
-		const parsed = parseHerdrJson(output);
-		const pane = parsed?.result?.pane;
-		if (
-			!isString(pane?.pane_id) ||
-			!isString(pane?.tab_id) ||
-			!isString(pane?.workspace_id)
-		) {
-			throw new Error(
-				`Unexpected herdr pane current output: ${output.trim() || "(empty)"}`,
-			);
-		}
-		return {
-			pane_id: pane.pane_id,
-			tab_id: pane.tab_id,
-			workspace_id: pane.workspace_id,
-		};
+	// Inherited IDs go stale after a pane moves. Herdr resolves the calling
+	// terminal's original identity to its live pane, tab, and workspace.
+	const output = herdrExec(buildCurrentPaneArgs());
+	const parsed = parseHerdrJson(output);
+	const pane = parsed?.result?.pane;
+	if (
+		!isString(pane?.pane_id) ||
+		!isString(pane?.tab_id) ||
+		!isString(pane?.workspace_id)
+	) {
+		throw new Error(
+			`Unexpected herdr pane current output: ${output.trim() || "(empty)"}`,
+		);
 	}
-
-	return { pane_id: paneId, tab_id: tabId, workspace_id: workspaceId };
+	return {
+		pane_id: pane.pane_id,
+		tab_id: pane.tab_id,
+		workspace_id: pane.workspace_id,
+	};
 }
 
 function buildTabCreateArgs(

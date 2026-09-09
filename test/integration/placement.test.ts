@@ -15,6 +15,7 @@ import {
 	createSubagentWorktree,
 	waitForShellReady,
 	runScriptInPane,
+	shellQuote,
 } from "../../pi-extension/subagents/terminal.ts";
 import {
 	createSubagentPaneFactory,
@@ -95,6 +96,102 @@ for (const backend of getAvailableBackends()) {
 				},
 			};
 		}
+
+		it("places an unmatched child in the live caller workspace after its parent pane moves", async () => {
+			const identities = (workspaceId: string) =>
+				panes(workspaceId).map(({ pane_id, tab_id, cwd }) => ({
+					pane_id,
+					tab_id,
+					cwd,
+				}));
+			const sourceBaseline = identities(env.workspaceId);
+			const destination = createTestEnv(backend);
+			try {
+				const focus = getFocusedSurface(backend);
+				const destinationBaseline = identities(destination.workspaceId);
+				const parent = JSON.parse(
+					execFileSync(
+						"herdr",
+						[
+							"tab",
+							"create",
+							"--workspace",
+							env.workspaceId,
+							"--cwd",
+							env.dir,
+							"--label",
+							"moved-parent",
+							"--no-focus",
+						],
+						{ encoding: "utf8" },
+					),
+				).result.root_pane;
+				const script = join(env.dir, "moved-parent.mjs");
+				const report = join(env.dir, "moved-parent.json");
+				const launchUrl = new URL(
+					"../../pi-extension/subagents/launch.ts",
+					import.meta.url,
+				).href;
+				// Execute inside the original terminal: do not manufacture inherited
+				// Herdr identity in the runner. The same process moves, then launches.
+				writeFileSync(
+					script,
+					`
+import { execFileSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
+import { launchPiSubagent } from ${JSON.stringify(launchUrl)};
+const cli = (...args) => JSON.parse(execFileSync("herdr", args, { encoding: "utf8" })).result;
+const result = {};
+try {
+  result.inherited = { pane_id: process.env.HERDR_PANE_ID, tab_id: process.env.HERDR_TAB_ID, workspace_id: process.env.HERDR_WORKSPACE_ID };
+  result.before = cli("pane", "current", "--current").pane;
+  result.move = cli("pane", "move", result.before.pane_id, "--new-tab", "--workspace", ${JSON.stringify(destination.workspaceId)}, "--no-focus").move_result;
+  result.after = cli("pane", "current", "--current").pane;
+  result.child = await launchPiSubagent(${JSON.stringify(request(1))});
+} catch (error) {
+  result.error = String(error.stack ?? error);
+}
+writeFileSync(${JSON.stringify(report)}, JSON.stringify(result));
+`,
+				);
+				await waitForShellReady(parent.pane_id);
+				runScriptInPane(
+					parent.pane_id,
+					`PI_CODING_AGENT_DIR=${shellQuote(join(env.dir, ".pi", "agent"))} ${shellQuote(process.execPath)} --experimental-strip-types ${shellQuote(script)}`,
+					{ scriptPath: join(env.dir, "moved-parent.sh") },
+				);
+				const result = JSON.parse(await waitForFile(report, 60_000));
+				console.log("native moved-parent evidence", JSON.stringify(result));
+				assert.equal(result.error, undefined);
+				assert.equal(result.inherited.pane_id, parent.pane_id);
+				assert.equal(result.inherited.workspace_id, env.workspaceId);
+				assert.equal(result.before.pane_id, parent.pane_id);
+				assert.equal(result.after.workspace_id, destination.workspaceId);
+				assert.equal(result.after.pane_id, result.move.pane.pane_id);
+				assert.equal(result.after.terminal_id, result.before.terminal_id);
+				assert.notEqual(result.after.pane_id, result.inherited.pane_id);
+				assert.notEqual(result.after.tab_id, result.inherited.tab_id);
+				assert.equal(getFocusedSurface(backend), focus);
+				assert.ok(
+					panes(destination.workspaceId).some(
+						(pane) =>
+							pane.pane_id === result.child.surface && pane.cwd === env.dir,
+					),
+					"unmatched non-Git cwd must use the parent's live workspace, not inherited workspace",
+				);
+				await waitForFile(`${result.child.sessionFile}.exit`, 60_000);
+				closePane(result.child.surface);
+				closePane(result.after.pane_id);
+				assert.deepEqual(identities(env.workspaceId), sourceBaseline);
+				assert.deepEqual(
+					identities(destination.workspaceId),
+					destinationBaseline,
+				);
+				assert.equal(getFocusedSurface(backend), focus);
+			} finally {
+				cleanupTestEnv(destination);
+			}
+		});
 
 		it("fills four panes before overflow, counts user panes, and reuses their tab after all children close", async () => {
 			const focus = getFocusedSurface(backend);
@@ -271,13 +368,24 @@ for (const backend of getAvailableBackends()) {
 					"pi-integration/fallback-primary,pi-integration/fallback-secondary",
 				type: "subagent_result",
 			},
+			{
+				name: "fallback rejected delivery",
+				task: "Return exactly DELIVERED",
+				model:
+					"pi-integration/fallback-primary,pi-integration/fallback-secondary",
+				type: "subagent_result",
+			},
 		])
 			it(`${scenario.name}: closes panes only after accepted delivery`, async () => {
 				const previousId = process.env.PI_SUBAGENT_ID;
 				delete process.env.PI_SUBAGENT_ID;
 				const tools = new Map<string, any>();
 				const handlers = new Map<string, Function>();
-				const deliveries: Array<{ type: string; panes: string[] }> = [];
+				const deliveries: Array<{
+					type: string;
+					panes: string[];
+					details: any;
+				}> = [];
 				const api: Partial<ExtensionAPI> = {
 					events: createEventBus(),
 					on: (name: string, handler: Function) => handlers.set(name, handler),
@@ -287,12 +395,17 @@ for (const backend of getAvailableBackends()) {
 					registerMessageRenderer() {},
 					getThinkingLevel: () => "off",
 					getAllTools: () => [],
-					sendMessage: (message: { customType: string }) => {
+					sendMessage: (message: { customType: string; details?: any }) => {
 						deliveries.push({
 							type: message.customType,
 							panes: panes(env.workspaceId).map((pane) => pane.pane_id),
+							details: message.details,
 						});
-						if (scenario.name === "rejected delivery")
+						if (
+							scenario.name === "rejected delivery" ||
+							(scenario.name === "fallback rejected delivery" &&
+								deliveries.length === 1)
+						)
 							throw new Error("injected parent delivery failure");
 					},
 				};
@@ -360,6 +473,34 @@ for (const backend of getAvailableBackends()) {
 						delivery.panes.includes(child.pane_id),
 						"the owned pane must exist at parent result delivery",
 					);
+					if (scenario.name === "fallback rejected delivery") {
+						assert.equal(delivery.details.exitCode, 0);
+						assert.notEqual(
+							delivery.details.sessionFile,
+							started.details.sessionFile,
+							"the rejected result belongs to the successful fallback session",
+						);
+						assert.deepEqual(delivery.details.fallbackAttempts, [
+							"pi-integration/fallback-primary",
+							"pi-integration/fallback-secondary",
+						]);
+						assert.match(
+							delivery.details.fallbackFailures[0].error,
+							/deterministic fallback provider failure/,
+						);
+						assert.equal(
+							deliveries.length,
+							1,
+							"rejected fallback delivery must not send an error for the first attempt",
+						);
+						assert.equal(delivery.panes.length, baseline.size + 2);
+						assert.deepEqual(
+							panes(env.workspaceId).map((pane) => pane.pane_id),
+							delivery.panes,
+							"both attempt panes must remain until explicit cleanup",
+						);
+						return;
+					}
 					if (scenario.name === "rejected delivery") {
 						assert.ok(
 							panes(env.workspaceId).some(
@@ -420,6 +561,181 @@ for (const backend of getAvailableBackends()) {
 					}
 				} finally {
 					await handlers.get("session_shutdown")?.({ reason: "quit" }, ctx);
+					if (previousId === undefined) delete process.env.PI_SUBAGENT_ID;
+					else process.env.PI_SUBAGENT_ID = previousId;
+				}
+			});
+
+		for (const managed of [false, true])
+			it(`parent quit after rejected persistent task delivery: ${managed ? "retains managed root" : "closes ordinary pane and process"}`, async () => {
+				const previousId = process.env.PI_SUBAGENT_ID;
+				delete process.env.PI_SUBAGENT_ID;
+				const tools = new Map<string, any>();
+				const handlers = new Map<string, Function>();
+				let childSurface: string;
+				let childPid: number | undefined;
+				let rejectedDeliveries = 0;
+				let shutdown: Promise<void> | undefined;
+				let worktree: { workspaceId: string; path: string } | undefined;
+				const api: Partial<ExtensionAPI> = {
+					events: createEventBus(),
+					on: (name: string, handler: Function) => handlers.set(name, handler),
+					registerTool: (tool: any) => tools.set(tool.name, tool),
+					registerCommand() {},
+					registerShortcut() {},
+					registerMessageRenderer() {},
+					getThinkingLevel: () => "off",
+					getAllTools: () => [],
+					sendMessage: (message: { customType: string }) => {
+						assert.equal(message.customType, "subagent_result");
+						if (rejectedDeliveries++ === 0) {
+							const info = JSON.parse(
+								execFileSync(
+									"herdr",
+									["pane", "process-info", "--pane", childSurface],
+									{
+										encoding: "utf8",
+									},
+								),
+							).result.process_info;
+							childPid = info.foreground_processes.find(
+								(child: { name: string }) => child.name === "pi",
+							)?.pid;
+							// Quit while a real task event remains undelivered. A later
+							// drain would hit the same unavailable parent SDK binding.
+							shutdown = handlers.get("session_shutdown")!(
+								{ reason: "quit" },
+								ctx,
+							);
+						}
+						throw new Error("parent delivery unavailable during quit");
+					},
+				};
+				const sessionManager = SessionManager.create(env.dir, env.dir);
+				sessionManager.appendMessage({
+					role: "user",
+					content: "fixture",
+					timestamp: Date.now(),
+				});
+				const model = {
+					provider: "pi-integration",
+					id: "test",
+					reasoning: true,
+				};
+				const ctx = {
+					cwd: env.dir,
+					hasUI: false,
+					sessionManager,
+					model,
+					modelRegistry: {
+						find: () => model,
+						getAvailable: () => [model],
+						hasConfiguredAuth: () => true,
+					},
+				};
+				try {
+					if (managed) {
+						execFileSync("git", ["init", "-q", "-b", "main"], { cwd: env.dir });
+						execFileSync(
+							"git",
+							[
+								"-c",
+								"user.name=Test",
+								"-c",
+								"user.email=test@example.com",
+								"-c",
+								"commit.gpgsign=false",
+								"commit",
+								"--allow-empty",
+								"-qm",
+								"fixture",
+							],
+							{ cwd: env.dir },
+						);
+					}
+					// SAFETY: headless host implements the public SDK methods used here.
+					subagentsExtension(api as ExtensionAPI);
+					handlers.get("session_start")?.({}, ctx);
+					const baseline = panes(env.workspaceId).map((pane) => pane.pane_id);
+					type PersistentQuitParams = {
+						name: string;
+						task: string;
+						model: string;
+						tools: string;
+						persistent: boolean;
+						worktree?: { branch: string };
+					};
+					const params: PersistentQuitParams = {
+						name: "persistent-quit",
+						task: "Return exactly TASK_COMPLETE",
+						model: TEST_MODEL,
+						tools: "read",
+						persistent: true,
+					};
+					if (managed)
+						params.worktree = { branch: "placement-persistent-quit" };
+					const started = await tools
+						.get("subagent")
+						.execute("persistent-quit", params, undefined, undefined, ctx);
+					assert.equal(started.details.status, "started");
+					worktree = started.details.worktree;
+					childSurface = panes(worktree?.workspaceId ?? env.workspaceId).find(
+						(pane) => !baseline.includes(pane.pane_id),
+					)!.pane_id;
+					const deadline = Date.now() + 60_000;
+					while (!shutdown && Date.now() < deadline) await sleep(50);
+					assert.ok(shutdown, "a real task result must trigger parent quit");
+					await shutdown;
+					assert.ok(
+						childPid,
+						"the specialist must still be a live Pi process at quit",
+					);
+					if (managed) {
+						assert.deepEqual(
+							panes(worktree!.workspaceId).map((pane) => pane.pane_id),
+							[childSurface],
+						);
+					} else {
+						const closeDeadline = Date.now() + 10_000;
+						while (
+							panes(env.workspaceId).some(
+								(pane) => pane.pane_id === childSurface,
+							) &&
+							Date.now() < closeDeadline
+						)
+							await sleep(50);
+						assert.deepEqual(
+							panes(env.workspaceId).map((pane) => pane.pane_id),
+							baseline,
+							"explicit quit must close the ordinary pane despite failed event delivery",
+						);
+						while (Date.now() < closeDeadline) {
+							try {
+								process.kill(childPid, 0);
+							} catch {
+								break;
+							}
+							await sleep(50);
+						}
+						assert.throws(() => process.kill(childPid!, 0), { code: "ESRCH" });
+					}
+					assert.equal(
+						rejectedDeliveries,
+						1,
+						"quit must not drain pending task events again",
+					);
+				} finally {
+					await handlers.get("session_shutdown")?.({ reason: "quit" }, ctx);
+					if (worktree) {
+						execFileSync("herdr", [
+							"worktree",
+							"remove",
+							"--workspace",
+							worktree.workspaceId,
+							"--force",
+						]);
+						rmdirSync(dirname(worktree.path));
+					}
 					if (previousId === undefined) delete process.env.PI_SUBAGENT_ID;
 					else process.env.PI_SUBAGENT_ID = previousId;
 				}
