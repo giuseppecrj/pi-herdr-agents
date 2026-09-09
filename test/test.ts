@@ -1320,6 +1320,12 @@ describe("subagent resume launch policy", () => {
 				},
 				launchOperations(commands),
 			);
+			// The mocked launch does not start Pi, which normally writes this header.
+			writeFileSync(
+				fresh.sessionFile,
+				`${JSON.stringify({ ...SESSION_HEADER, cwd: dir })}\n`,
+				"utf8",
+			);
 			const policy = readSubagentSessionPolicy(fresh.sessionFile);
 			assert.equal(policy.version, 2);
 			assert.equal(policy.owner, "public");
@@ -1905,9 +1911,10 @@ describe("status.ts", () => {
 });
 
 describe("pane configuration", () => {
-	it("defaults to tabs and rightward splits when panes are absent", () => {
+	it("defaults to four grouped panes when panes are absent", () => {
 		assert.deepEqual(parsePaneConfig({}), {
-			mode: "tab",
+			mode: "grouped",
+			maxPerTab: 4,
 			direction: "right",
 		});
 	});
@@ -1915,8 +1922,41 @@ describe("pane configuration", () => {
 	it("parses split mode and direction", () => {
 		assert.deepEqual(
 			parsePaneConfig({ panes: { mode: "split", direction: "down" } }),
-			{ mode: "split", direction: "down" },
+			{ mode: "split", direction: "down", maxPerTab: 4 },
 		);
+	});
+
+	it("loads a strict grouped capacity independently of persistent capacity", () => {
+		withTempDir((dir) => {
+			const config = join(dir, "config.json");
+			writeFileSync(
+				config,
+				JSON.stringify({
+					panes: { maxPerTab: 2 },
+					persistent: { maxAgents: 9 },
+				}),
+			);
+			assert.deepEqual(loadPaneConfig(config), {
+				mode: "grouped",
+				direction: "right",
+				maxPerTab: 2,
+			});
+			for (const maxPerTab of [
+				0,
+				-1,
+				1.5,
+				"4",
+				null,
+				true,
+				Number.MAX_SAFE_INTEGER + 1,
+			]) {
+				writeFileSync(config, JSON.stringify({ panes: { maxPerTab } }));
+				assert.throws(
+					() => loadPaneConfig(config),
+					/panes.maxPerTab must be a positive safe integer/,
+				);
+			}
+		});
 	});
 
 	it("rejects invalid pane settings", () => {
@@ -1928,7 +1968,7 @@ describe("pane configuration", () => {
 		}
 		assert.throws(
 			() => parsePaneConfig({ panes: { mode: "window" } }),
-			/panes\.mode must be "tab" or "split"/,
+			/panes\.mode must be "grouped", "tab", or "split"/,
 		);
 		assert.throws(
 			() => parsePaneConfig({ panes: { direction: "left" } }),
@@ -1950,6 +1990,7 @@ describe("pane configuration", () => {
 
 			assert.deepEqual(loadPaneConfig(join(dir, "config.json"), examplePath), {
 				mode: "split",
+				maxPerTab: 4,
 				direction: "down",
 			});
 		});
@@ -1968,7 +2009,7 @@ describe("pane configuration", () => {
 
 		assert.equal(
 			createSubagentPaneFactory(
-				{ mode: "tab", direction: "down" },
+				{ mode: "tab", direction: "down", maxPerTab: 4 },
 				createTab,
 				createSplit,
 			)("Scout"),
@@ -1976,7 +2017,7 @@ describe("pane configuration", () => {
 		);
 		assert.equal(
 			createSubagentPaneFactory(
-				{ mode: "split", direction: "right" },
+				{ mode: "split", direction: "right", maxPerTab: 4 },
 				createTab,
 				createSplit,
 			)("Reviewer"),

@@ -83,7 +83,7 @@ Use ordinary panes for read-only agents. A single or sequential writer can work 
 
 ![Pi Herdr Agents lifecycle: spawn a child, run it in Herdr, supervise live state, and deliver one bounded result to the parent.](https://raw.githubusercontent.com/giuseppecrj/pi-herdr-agents/main/docs/assets/async-subagent-lifecycle.png)
 
-A `subagent` call creates a dedicated Herdr pane or worktree, launches a child Pi session, and returns `started`. The parent watcher combines Herdr process state with child activity details and projects the result into a live widget:
+A `subagent` call selects the target checkout, reuses its Herdr workspace, and gives the child a pane in an extension-owned `Agents` tab. Four panes fit in each tab by default; overflow opens another tab in the same workspace. A worktree is created only when explicitly requested for checkout isolation. The call launches a child Pi session and returns `started`. The parent watcher combines Herdr process state with child activity details and projects the result into a live widget:
 
 ```text
 ╭─ Subagents ──────────────────── 1 active · 1 open ─╮
@@ -92,7 +92,7 @@ A `subagent` call creates a dedicated Herdr pane or worktree, launches a child P
 ╰────────────────────────────────────────────────────╯
 ```
 
-When the child completes, the parent receives one bounded `subagent_result` message and starts a new turn with that result in context. Callers never need to poll, tail session files, or wait in a shell loop.
+When the child completes, the parent receives one bounded `subagent_result` message and starts a new turn with that result in context. Disposable ordinary panes close after result delivery; Herdr removes a tab when its last pane closes. Persistent specialists keep their pane between tasks, and managed worktree roots return to retained interactive shells. Callers never need to poll, tail session files, or wait in a shell loop.
 
 ## Troubleshooting completion delivery
 
@@ -305,8 +305,9 @@ cp config.json.example config.json
     "hangWarningMinutes": 15
   },
   "panes": {
-    "mode": "tab",
-    "direction": "right"
+    "mode": "grouped",
+    "direction": "right",
+    "maxPerTab": 4
   }
 }
 ```
@@ -388,7 +389,13 @@ was 4.82 s. The benchmark measures `/proc` CPU ticks for the supervisor and
 isolated Herdr tree, not parent-model latency; raw samples are written to
 `/tmp/issue29-bench/` by `test/bench/supervision-bench.mjs`.
 
-Set `panes.mode` to `"split"` to open ordinary public `subagent` and `subagent_resume` launches, including bare forks and `/iterate`, as splits of the stable parent pane. Set `panes.direction` to `"right"` or `"down"`; it defaults to `"right"` and is ignored when mode is `"tab"`. The default `"tab"` mode preserves existing behavior. Managed worktrees still use separate workspaces, while `/btw` keeps its existing tab behavior.
+`panes.mode` defaults to `"grouped"` when omitted. Ordinary public `subagent` and `subagent_resume` launches, including bare forks and `/iterate`, fill extension-owned `Agents`, `Agents 2`, etc. tabs in the target checkout's existing workspace. `panes.maxPerTab` is a positive safe integer, defaults to `4`, and counts all live panes in each owned tab, including user-added panes and retained shells. Overlapping launches in one parent respect this cap. It is independent of `persistent.maxAgents`.
+
+Checkout matching uses Herdr's canonical `worktree.checkout_path` and includes descendant directories. Shell working directories do not establish workspace ownership. If no checkout matches (including non-Git directories), placement uses the caller's workspace; overflow never creates a workspace. A reviewer with `cwd` set to a managed checkout joins that workspace without creating another worktree. Resume placement uses the saved session's cwd.
+
+Explicit `panes.mode: "tab"` preserves one new tab per ordinary child in the caller's workspace. Explicit `"split"` preserves splits of the stable parent pane. `panes.direction` is `"right"` (default) or `"down"` and applies to grouped and legacy splits. `maxPerTab` does not affect these legacy modes. Managed worktrees retain their separate workspaces, while `/btw` keeps its existing tab behavior.
+
+Ownership is tracked by returned pane/tab/workspace IDs, never labels. Separate parent processes own separate groups; `/reload` preserves a parent's in-memory ownership, but a full restart does not adopt old tabs. Placement never moves existing panes or renames user tabs. Background launches preserve focus; Herdr may resize sibling panes when splitting or closing. User-added panes are never closed by automatic tab cleanup. An owned tab remains reusable while user panes remain, even after all child panes close.
 
 Run `/reload` after changing role, model, or pane settings.
 
@@ -486,7 +493,7 @@ A launch with `worktree` and an effective bundled `scout`, `reviewer`, or `adver
 
 The child starts at the returned worktree root. Tell writing agents to test and commit when you want a commit-based handoff, and tell them not to push, merge, switch branches, or remove the worktree. The parent owns review and integration.
 
-Successful, failed, and help-requesting runs retain their workspace. Completion includes the worktree path, Herdr workspace, branch, base/head SHAs, commits ahead, changed and untracked files, and clean/dirty/conflicted state. Here, `clean` means no uncommitted files; the branch may still contain commits. If Git inspection fails, state is reported as unknown rather than guessed.
+Successful, failed, and help-requesting worktree runs retain their workspace and root shell. A reviewer's disposable pane can close without closing that root, tab, or checkout. Completion includes the worktree path, Herdr workspace, branch, base/head SHAs, commits ahead, changed and untracked files, and clean/dirty/conflicted state. Here, `clean` means no uncommitted files; the branch may still contain commits. If Git inspection fails, state is reported as unknown rather than guessed.
 
 An ownership manifest is written under the parent session's `artifacts/<session-id>/worktree-runs/` directory before Herdr creates resources. V1 does not automatically recover watchers after a full process restart, and `subagent_resume` does not reattach the managed worktree lifecycle.
 
@@ -597,7 +604,7 @@ Phase 5: Integrate        → Parent reviews and integrates worktree branches on
 Phase 6: Review           → Reviewer subagent checks the integrated changes
 ```
 
-The parent workspace and tab names stay unchanged. Subagents are created in newly named tabs or panes for each phase.
+The parent workspace and tab names stay unchanged. Subagents use the configured placement policy; grouped mode reuses available space in owned Agents tabs.
 
 ---
 

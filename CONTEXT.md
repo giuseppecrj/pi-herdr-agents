@@ -82,6 +82,19 @@ The append-only evidence record of persistent task dispatch and terminal
 outcomes for one session generation.
 _Avoid_: Work queue, mutable task list
 
+**Agents tab**:
+An extension-owned Herdr tab grouping delegated child panes in an existing
+checkout workspace. Ownership comes from returned IDs, not its display label.
+The pane cap includes every live pane; overflow creates another tab, not a
+workspace. Separate parent processes own separate groups.
+_Avoid_: Agent workspace, label-based ownership, automatic rearrangement
+
+**Retained checkout shell**:
+The interactive shell in a managed worktree's root pane, preserved after the
+child Pi process exits. Temporary review panes can close without deleting this
+surface or its checkout.
+_Avoid_: Completed agent process, disposable pane, automatic worktree cleanup
+
 **Worktree lease**:
 The lifetime-exclusive binding between a persistent specialist generation and
 one managed worktree, when that specialist writes in a worktree.

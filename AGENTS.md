@@ -4,7 +4,7 @@ These instructions apply to humans and coding agents changing `pi-herdr-agents`.
 
 ## What this package is
 
-`pi-herdr-agents` (Pi Herdr Agents) is a Pi extension that launches asynchronous Pi child agents exclusively in Herdr. Ordinary runs use dedicated Herdr panes/tabs. Writing tasks may opt into one isolated Herdr-managed Git worktree per branch. Legacy role definitions that request an external CLI fail before Herdr creates resources.
+`pi-herdr-agents` (Pi Herdr Agents) is a Pi extension that launches asynchronous Pi child agents exclusively in Herdr. Ordinary runs group child panes in extension-owned `Agents` tabs by default. Writing tasks may opt into one isolated Herdr-managed Git worktree per branch. Legacy role definitions that request an external CLI fail before Herdr creates resources.
 
 The extension is fire-and-forget: `subagent` returns an acknowledgement, and completion is delivered to the parent automatically. Never add polling guidance that tells callers to sleep, tail sessions, or repeatedly check status.
 
@@ -22,7 +22,7 @@ Bundled role prompts live in [`agents/`](agents/). The native `/skill:orchestrat
 ## Code map
 
 - `pi-extension/subagents/index.ts` — public tools/commands, agent discovery, launch/watch lifecycle, completion delivery, worktree manifests and handoffs
-- `pi-extension/subagents/herdr.ts` — Herdr CLI argument construction and response parsing
+- `pi-extension/subagents/herdr.ts` — Herdr CLI calls, response parsing, and ID-based Agents tab placement and capacity
 - `pi-extension/subagents/terminal.ts` — terminal adapter used by the lifecycle
 - `pi-extension/subagents/lifecycle.ts`, `status.ts`, `activity.ts` — process/turn state and widget projection
 - `pi-extension/subagents/wake.ts`, `supervision.ts`, `supervision-config.ts` — file wake-ups, shared pane reconciliation, polling fallback, and supervision configuration

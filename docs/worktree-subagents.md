@@ -46,7 +46,7 @@ For a worktree launch:
 - `worktree.branch` is a new, unique branch name. Git/Herdr rejects a branch that cannot be created or is already checked out elsewhere.
 - `worktree.base` may be any revision that resolves to a commit in the source repository. It defaults to committed `HEAD`.
 - The extension resolves `base` to an exact SHA, writes an ownership manifest, then calls `herdr worktree create --no-focus`.
-- The child starts at the root of the returned worktree, in that workspace's root pane.
+- The child starts at the root of the returned worktree, in that workspace's retained root pane and newly owned `Agents` tab. Finishing Pi returns to the interactive checkout shell; it does not close the root pane.
 - Uncommitted and untracked files from the parent checkout are not copied. Commit anything the child must see before spawning it, or pass the needed context in the task.
 - Worktree creation does not steal terminal focus.
 
@@ -139,7 +139,7 @@ For parallel read-only review, prepare one stable existing checkout of the pull 
 
 1. The parent records the canonical repository root, exact comparison base and head SHAs, and exact task/spec evidence. It makes sure no writer changes the checkout while review runs.
 2. Decide explicitly whether staged, unstaged, and untracked files are in scope. For included dirty state, record a bounded inventory and fingerprint; a commit SHA alone cannot pin it.
-3. Start each read-only child in an ordinary pane with `cwd` set to that checkout. Omit `worktree`.
+3. Start each read-only child in an ordinary pane with `cwd` set to that checkout. Omit `worktree`. With default grouped placement, the extension reuses that checkout's workspace and available space in this parent's owned Agents tabs, including a retained writer's root tab. It never moves the writer or creates another worktree. Separate parent processes do not adopt one another's tabs by label.
 4. Give every reviewer the same exact scope. Require it to report the repository root and `git rev-parse HEAD` before its review result.
 5. Before each dependent review wave and before reporting, recheck the head and dirty-state fingerprint. Drift makes prior evidence stale; review the new state again instead of mixing revisions.
 
@@ -205,7 +205,9 @@ This manual continuation is not watched by the original parent lifecycle. Do not
 
 ## Cleanup
 
-Cleanup is always explicit. First make sure commits, patches, or uncommitted files are no longer needed. Then remove the Herdr worktree workspace:
+Worktree and branch cleanup is always explicit. Ordinary temporary reviewer panes close after result delivery; Herdr removes their tab only if its last pane closes. The retained worktree root shell is excluded from automatic cleanup, and user-added panes are preserved. Persistent specialists retain their pane between tasks and follow the existing explicit stop semantics.
+
+First make sure commits, patches, or uncommitted files are no longer needed. Then remove the Herdr worktree workspace:
 
 ```bash
 herdr worktree remove --workspace <workspace-id>
