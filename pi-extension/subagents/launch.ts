@@ -23,6 +23,7 @@ import {
 } from "./session.ts";
 import {
 	closePane,
+	createSideColumnPane,
 	createSubagentPane,
 	createSubagentWorktree,
 	splitCurrentPane,
@@ -189,6 +190,7 @@ const defaultOperations: PiLaunchOperations = {
 		paneConfig,
 		createSubagentPane,
 		splitCurrentPane,
+		(name) => createSideColumnPane(name, paneConfig),
 	),
 	createWorktree: createSubagentWorktree,
 	waitForShellReady,

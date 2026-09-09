@@ -3,11 +3,15 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
 	closeHerdrSurface,
+	createHerdrSideSplit,
 	createHerdrSurface,
 	createHerdrSurfaceSplit,
 	createHerdrWorktree,
 	focusHerdrWorkspace,
+	getHerdrCurrentPaneInfo,
+	getHerdrParentPaneId,
 	getHerdrPaneProcessInfo,
+	listHerdrPaneIdsSync,
 	waitForHerdrPiReady,
 	waitForHerdrShellReady,
 	isHerdrAvailable,
@@ -23,7 +27,16 @@ import {
 	waitForHerdrPaneAbsence,
 	waitForProcessesExit,
 	type HerdrPaneProcessInfo,
+	type HerdrSplitTarget,
 } from "./herdr.ts";
+import type { PaneConfig } from "./pane-config.ts";
+import {
+	createSideColumnPane as resolveSideColumnPane,
+	loadSideColumnState,
+	saveSideColumnState,
+	sideColumnStateFile,
+	type SideColumnSplitPlan,
+} from "./side-column.ts";
 
 export type PaneId = string;
 export type SplitDirection = "right" | "down";
@@ -72,6 +85,43 @@ export function splitCurrentPane(
 ): PaneId {
 	assertTerminalAvailable();
 	return createHerdrSurfaceSplit(name, direction);
+}
+
+/**
+ * Open the next slot of the side column (parent stays left, subagents stack
+ * right) and return the child pane ID. The column chain is file-backed per
+ * parent pane, so it survives pi reloads; dead panes are pruned live.
+ */
+export function createSideColumnPane(name: string, config: PaneConfig): PaneId {
+	assertTerminalAvailable();
+	const parentPaneId = getHerdrParentPaneId();
+	const statePath = sideColumnStateFile(parentPaneId);
+	return resolveSideColumnPane(
+		name,
+		{
+			firstDirection: config.direction,
+			ratio: config.sideColumnRatio,
+			maxVisible: config.maxVisible,
+		},
+		{
+			tabId: getHerdrCurrentPaneInfo().tab_id,
+			listAlivePaneIds: () => listHerdrPaneIdsSync(),
+			split: (splitName: string, plan: SideColumnSplitPlan) => {
+				const target: HerdrSplitTarget =
+					plan.target.kind === "current"
+						? { kind: "current" }
+						: { kind: "pane", paneId: plan.target.paneId };
+				return createHerdrSideSplit(
+					splitName,
+					target,
+					plan.direction,
+					plan.ratio,
+				);
+			},
+			loadState: () => loadSideColumnState(statePath),
+			saveState: (state) => saveSideColumnState(statePath, state),
+		},
+	);
 }
 
 export function renameCurrentTab(title: string): void {

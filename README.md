@@ -306,10 +306,21 @@ cp config.json.example config.json
   },
   "panes": {
     "mode": "tab",
-    "direction": "right"
+    "direction": "right",
+    "maxVisible": 0,
+    "sideColumnRatio": 0.34
   }
 }
 ```
+
+Set `panes.mode` to `"side-column"` to keep the parent session on the left
+while subagents stack in a narrow right column (top/middle/bottom) instead of
+opening full tabs. The first subagent splits the parent (`direction`), the
+second splits the side pane down with `sideColumnRatio`, and the rest split
+the last side pane down in even halves — the parent never gets narrower.
+The column chain is file-backed per parent pane, so it survives pi reloads
+and prunes panes closed outside pi. Set `panes.maxVisible` (e.g. `3`) to
+refuse new side panes while the column is full; `0` means unlimited.
 
 If `config.json` is absent, status, role, pane, and persistent-specialist settings fall back to `config.json.example`.
 Model routing does not read the example: no model overrides apply until a real

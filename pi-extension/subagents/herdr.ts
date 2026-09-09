@@ -113,7 +113,7 @@ async function herdrExecAsync(args: string[]): Promise<string> {
 	return stdout;
 }
 
-function getHerdrParentPaneId(): string {
+export function getHerdrParentPaneId(): string {
 	const paneId = process.env.HERDR_PANE_ID;
 	if (!paneId) {
 		throw new Error("HERDR_PANE_ID not set");
@@ -125,13 +125,13 @@ function buildCurrentPaneArgs(): string[] {
 	return ["pane", "current", "--current"];
 }
 
-interface HerdrCurrentPaneInfo {
+export interface HerdrCurrentPaneInfo {
 	pane_id: string;
 	tab_id: string;
 	workspace_id: string;
 }
 
-function getHerdrCurrentPaneInfo(): HerdrCurrentPaneInfo {
+export function getHerdrCurrentPaneInfo(): HerdrCurrentPaneInfo {
 	const paneId = process.env.HERDR_PANE_ID;
 	const tabId = process.env.HERDR_TAB_ID;
 	const workspaceId = process.env.HERDR_WORKSPACE_ID;
@@ -351,6 +351,54 @@ export function createHerdrWorktree(
 			);
 		}
 		throw parseError;
+	}
+}
+
+export type HerdrSplitTarget =
+	| { kind: "current" }
+	| { kind: "pane"; paneId: string };
+
+function buildSideSplitArgs(
+	target: HerdrSplitTarget,
+	direction: "right" | "down",
+	ratio: number | undefined,
+	cwd: string,
+): string[] {
+	const args = ["pane", "split"];
+	if (target.kind === "current") args.push("--current");
+	else args.push("--pane", target.paneId);
+	args.push("--direction", direction);
+	if (ratio !== undefined) args.push("--ratio", String(ratio));
+	args.push("--no-focus", "--cwd", cwd);
+	return args;
+}
+
+/** Split for the side-column layout and return the child pane ID. */
+export function createHerdrSideSplit(
+	name: string,
+	target: HerdrSplitTarget,
+	direction: "right" | "down",
+	ratio: number | undefined,
+): string {
+	const output = herdrExec(
+		buildSideSplitArgs(target, direction, ratio, process.cwd()),
+	);
+	const paneId = extractHerdrPaneId(output, "pane split");
+	try {
+		herdrExec(["pane", "rename", paneId, name]);
+	} catch {
+		// Optional.
+	}
+	return paneId;
+}
+
+/** Sync pane ID list for layout decisions; null when unverifiable. */
+export function listHerdrPaneIdsSync(): string[] | null {
+	try {
+		const entries = parseHerdrPaneSnapshot(herdrExec(["pane", "list"]));
+		return entries === null ? null : entries.map((entry) => entry.paneId);
+	} catch {
+		return null;
 	}
 }
 

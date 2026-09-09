@@ -1909,13 +1909,39 @@ describe("pane configuration", () => {
 		assert.deepEqual(parsePaneConfig({}), {
 			mode: "tab",
 			direction: "right",
+			maxVisible: 0,
+			sideColumnRatio: 0.34,
 		});
 	});
 
 	it("parses split mode and direction", () => {
 		assert.deepEqual(
 			parsePaneConfig({ panes: { mode: "split", direction: "down" } }),
-			{ mode: "split", direction: "down" },
+			{
+				mode: "split",
+				direction: "down",
+				maxVisible: 0,
+				sideColumnRatio: 0.34,
+			},
+		);
+	});
+
+	it("parses side-column mode with limits", () => {
+		assert.deepEqual(
+			parsePaneConfig({
+				panes: {
+					mode: "side-column",
+					direction: "right",
+					maxVisible: 3,
+					sideColumnRatio: 0.5,
+				},
+			}),
+			{
+				mode: "side-column",
+				direction: "right",
+				maxVisible: 3,
+				sideColumnRatio: 0.5,
+			},
 		);
 	});
 
@@ -1928,7 +1954,7 @@ describe("pane configuration", () => {
 		}
 		assert.throws(
 			() => parsePaneConfig({ panes: { mode: "window" } }),
-			/panes\.mode must be "tab" or "split"/,
+			/panes\.mode must be "tab", "split", or "side-column"/,
 		);
 		assert.throws(
 			() => parsePaneConfig({ panes: { direction: "left" } }),
@@ -1937,6 +1963,22 @@ describe("pane configuration", () => {
 		assert.throws(
 			() => parsePaneConfig({ panes: { mode: "tab", extra: true } }),
 			/panes has unsupported key\(s\): extra/,
+		);
+		assert.throws(
+			() => parsePaneConfig({ panes: { maxVisible: -1 } }),
+			/panes\.maxVisible must be a non-negative integer/,
+		);
+		assert.throws(
+			() => parsePaneConfig({ panes: { maxVisible: 1.5 } }),
+			/panes\.maxVisible must be a non-negative integer/,
+		);
+		assert.throws(
+			() => parsePaneConfig({ panes: { sideColumnRatio: 0 } }),
+			/panes\.sideColumnRatio must be a number between 0 and 1/,
+		);
+		assert.throws(
+			() => parsePaneConfig({ panes: { sideColumnRatio: 1 } }),
+			/panes\.sideColumnRatio must be a number between 0 and 1/,
 		);
 	});
 
@@ -1951,6 +1993,8 @@ describe("pane configuration", () => {
 			assert.deepEqual(loadPaneConfig(join(dir, "config.json"), examplePath), {
 				mode: "split",
 				direction: "down",
+				maxVisible: 0,
+				sideColumnRatio: 0.34,
 			});
 		});
 	});
