@@ -227,6 +227,13 @@ function restoreEnvVar(name: string, value: string | undefined) {
 	process.env[name] = value;
 }
 
+/**
+ * The extension only registers its surface inside Herdr. Unit tests inspect the
+ * registered tools and commands from a plain process, so force registration for
+ * the whole suite and unset it explicitly in the gate tests below.
+ */
+process.env.PI_HERDR_FORCE = "1";
+
 function withMockedNow<T>(now: number, fn: () => T): T {
 	const originalNow = Date.now;
 	Date.now = () => now;
@@ -5472,6 +5479,41 @@ describe("commands", () => {
 });
 
 describe("tool registration", () => {
+	it("only registers the Herdr surface when Herdr hosts the session", () => {
+		const testApi = subagentsModule.__test__;
+
+		assert.equal(testApi.isHerdrSurfaceRegistrable(true, undefined), true);
+		assert.equal(testApi.isHerdrSurfaceRegistrable(false, undefined), false);
+		assert.equal(testApi.isHerdrSurfaceRegistrable(false, "1"), true);
+		assert.equal(testApi.isHerdrSurfaceRegistrable(false, "0"), false);
+		assert.equal(testApi.isHerdrSurfaceRegistrable(false, "true"), false);
+	});
+
+	it("registers no tools or commands outside Herdr", () => {
+		const previousForce = process.env.PI_HERDR_FORCE;
+		const previousHerdrEnv = process.env.HERDR_ENV;
+		delete process.env.PI_HERDR_FORCE;
+		delete process.env.HERDR_ENV;
+		try {
+			const { api, registeredTools, registeredCommands } =
+				createMockExtensionApi();
+			subagentsModule.default(api);
+
+			assert.deepEqual(
+				registeredTools.map((tool) => tool.name),
+				[],
+				"an unusable surface must not be offered to the model",
+			);
+			assert.deepEqual(
+				registeredCommands.map((command) => command.name),
+				[],
+			);
+		} finally {
+			restoreEnvVar("PI_HERDR_FORCE", previousForce);
+			restoreEnvVar("HERDR_ENV", previousHerdrEnv);
+		}
+	});
+
 	it("refreshes subagent routing guidance from the live authenticated model registry", () => {
 		const { api, registeredTools, eventHandlers } = createMockExtensionApi();
 		subagentsModule.default(api);

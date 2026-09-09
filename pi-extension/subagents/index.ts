@@ -2356,7 +2356,27 @@ function buildBtwLaunchCommand(params: {
 	return `cd ${shellQuote(params.cwd)} && ${envPrefix}${parts.join(" ")}`;
 }
 
+/**
+ * Decide whether this session may expose the Herdr surface.
+ *
+ * The extension drives Herdr exclusively, so outside a Herdr terminal every
+ * tool and command can only fail with a setup hint. Registering them anyway
+ * offers the model a surface it cannot use and, when another subagent package
+ * is installed alongside this one, makes the correct framework ambiguous.
+ * Gating registration keeps the exposed surface equal to the usable surface.
+ *
+ * `PI_HERDR_FORCE=1` restores registration for environments where detection is
+ * not possible but the Herdr CLI is reachable.
+ */
+function isHerdrSurfaceRegistrable(
+	terminalAvailable: boolean,
+	force: string | undefined,
+): boolean {
+	return terminalAvailable || force === "1";
+}
+
 export const __test__ = {
+	isHerdrSurfaceRegistrable,
 	borderLine,
 	renderSubagentWidgetLines,
 	loadAgentDefaults,
@@ -3100,7 +3120,18 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			.filter(Boolean),
 	);
 
-	const shouldRegister = (name: string) => !deniedTools.has(name);
+	const herdrSurfaceRegistrable = isHerdrSurfaceRegistrable(
+		isTerminalAvailable(),
+		process.env.PI_HERDR_FORCE,
+	);
+
+	const shouldRegister = (name: string) =>
+		herdrSurfaceRegistrable && !deniedTools.has(name);
+
+	const registerCommand: typeof pi.registerCommand = (name, definition) => {
+		if (!herdrSurfaceRegistrable) return;
+		pi.registerCommand(name, definition);
+	};
 
 	// ── subagent tool ──
 	if (shouldRegister("subagent"))
@@ -3939,7 +3970,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			},
 		});
 
-	pi.registerCommand("btw", {
+	registerCommand("btw", {
 		description:
 			"Open an ephemeral side-question session in a background Herdr tab",
 		handler: async (args, ctx) => {
@@ -4022,7 +4053,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerCommand("btw-close", {
+	registerCommand("btw-close", {
 		description: "Close the current BTW side-question session",
 		handler: async (_args, ctx) => {
 			try {
@@ -4040,7 +4071,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerCommand("worktree", {
+	registerCommand("worktree", {
 		description:
 			"Fork this session into a worktree; use /worktree list to inspect them",
 		handler: async (args, ctx) => {
@@ -4153,7 +4184,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	});
 
 	// /iterate command — fork the session into a subagent
-	pi.registerCommand("iterate", {
+	registerCommand("iterate", {
 		description:
 			"Fork session into a subagent for focused work (bugfixes, iteration)",
 		handler: async (args, _ctx) => {
@@ -4166,7 +4197,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	});
 
 	// /subagent command — spawn a subagent by name, or list available agents
-	pi.registerCommand("subagent", {
+	registerCommand("subagent", {
 		description:
 			"Spawn a subagent: /subagent <agent> <task>; list agents: /subagent list",
 		handler: async (args, ctx) => {
@@ -4404,7 +4435,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	});
 
 	// /plan command — start the full planning workflow
-	pi.registerCommand("plan", {
+	registerCommand("plan", {
 		description: "Start a planning session: /plan <what to build>",
 		handler: async (args, ctx) => {
 			const task = args.trim();
