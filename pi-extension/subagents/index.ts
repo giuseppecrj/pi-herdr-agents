@@ -2356,27 +2356,7 @@ function buildBtwLaunchCommand(params: {
 	return `cd ${shellQuote(params.cwd)} && ${envPrefix}${parts.join(" ")}`;
 }
 
-/**
- * Decide whether this session may expose the Herdr surface.
- *
- * The extension drives Herdr exclusively, so outside a Herdr terminal every
- * tool and command can only fail with a setup hint. Registering them anyway
- * offers the model a surface it cannot use and, when another subagent package
- * is installed alongside this one, makes the correct framework ambiguous.
- * Gating registration keeps the exposed surface equal to the usable surface.
- *
- * `PI_HERDR_FORCE=1` restores registration for environments where detection is
- * not possible but the Herdr CLI is reachable.
- */
-function isHerdrSurfaceRegistrable(
-	terminalAvailable: boolean,
-	force: string | undefined,
-): boolean {
-	return terminalAvailable || force === "1";
-}
-
 export const __test__ = {
-	isHerdrSurfaceRegistrable,
 	borderLine,
 	renderSubagentWidgetLines,
 	loadAgentDefaults,
@@ -3024,7 +3004,25 @@ async function watchSubagentWithFallbacks(
 	}
 }
 
-export default function subagentsExtension(pi: ExtensionAPI) {
+/**
+ * Options accepted by the extension factory.
+ *
+ * Pi invokes the factory with the extension API alone, so these exist purely as
+ * a test seam.
+ */
+export interface SubagentsExtensionOptions {
+	/**
+	 * Register the Herdr surface even when no Herdr session is detected. Unit
+	 * tests inspect the registered tools and commands from a plain process.
+	 * Guarded operations still require a real Herdr session at execution time.
+	 */
+	registerWithoutHerdr?: boolean;
+}
+
+export default function subagentsExtension(
+	pi: ExtensionAPI,
+	options: SubagentsExtensionOptions = {},
+) {
 	runtime.pi = pi;
 	let btwChild: BtwChild | undefined;
 
@@ -3120,10 +3118,15 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			.filter(Boolean),
 	);
 
-	const herdrSurfaceRegistrable = isHerdrSurfaceRegistrable(
-		isTerminalAvailable(),
-		process.env.PI_HERDR_FORCE,
-	);
+	/**
+	 * Every tool and command in this extension drives Herdr, so outside a Herdr
+	 * session they could only answer with a setup hint. Registering them anyway
+	 * offers the model a surface it cannot use and makes the correct framework
+	 * ambiguous when another subagent package is installed alongside this one.
+	 * Registration therefore follows the same predicate the operations enforce.
+	 */
+	const herdrSurfaceRegistrable =
+		isTerminalAvailable() || options.registerWithoutHerdr === true;
 
 	const shouldRegister = (name: string) =>
 		herdrSurfaceRegistrable && !deniedTools.has(name);

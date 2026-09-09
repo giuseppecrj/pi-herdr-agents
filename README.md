@@ -30,8 +30,9 @@ The extension registers its tools and commands only when `HERDR_ENV=1` and the
 `/btw-close`, `/worktree`, `/subagent`, `/iterate`, or `/plan` command is
 registered, so the model is never offered a surface that can only answer with a
 setup hint, and another subagent package installed alongside this one stays
-unambiguous in its own terminal. Set `PI_HERDR_FORCE=1` to register the surface
-anyway when detection is impossible but the Herdr CLI is reachable.
+unambiguous in its own terminal. Exposure follows exactly the same predicate the
+operations already enforce, so there is no configuration that can register a
+surface Herdr cannot serve.
 
 ## Install
 
