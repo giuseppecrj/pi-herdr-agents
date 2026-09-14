@@ -77,6 +77,12 @@ export function findLatestAssistantError(
 	return null;
 }
 
+const THRESHOLD_COMPACTION_RECOVERY_MESSAGE =
+	"Continue the task. Context was compacted after an interrupted turn.";
+const THRESHOLD_COMPACTION_RECOVERY_CUSTOM_TYPE =
+	"subagent_threshold_compaction_recovery";
+const RECOVERABLE_ABORT_ERROR_MESSAGE = "This operation was aborted";
+
 export function buildCompletionSidecar(
 	messages: any[] | undefined,
 ):
@@ -224,6 +230,8 @@ export default function (pi: ExtensionAPI) {
 	let latestAgentMessages: any[] | undefined;
 	let completionFinalized = false;
 	let sessionContext: { shutdown(): void } | undefined;
+	let thresholdCompactionRecoveryCandidate = false;
+	let thresholdCompactionRecoveryAttempted = false;
 
 	// Show widget + status bar on session start
 	pi.on("session_start", (_event, ctx) => {
@@ -250,11 +258,18 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("agent_start", () => {
 		agentStarted = true;
+		thresholdCompactionRecoveryCandidate = false;
 		recorder.agentStart();
 	});
 
 	pi.on("agent_end", (event) => {
 		latestAgentMessages = event.messages;
+		const latestAssistant = [...event.messages]
+			.reverse()
+			.find((message) => message?.role === "assistant");
+		thresholdCompactionRecoveryCandidate =
+			latestAssistant?.stopReason === "error" &&
+			latestAssistant?.errorMessage === RECOVERABLE_ABORT_ERROR_MESSAGE;
 		recorder.agentEndWaiting();
 		if (autoExit) {
 			// Reset any recorded manual input marker. Auto-exit is decided by whether
@@ -263,7 +278,37 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
+	pi.on("session_compact", (event, ctx) => {
+		if (
+			autoExit &&
+			!persistent &&
+			!completionFinalized &&
+			thresholdCompactionRecoveryCandidate &&
+			event.reason === "threshold" &&
+			event.willRetry === false &&
+			!thresholdCompactionRecoveryAttempted &&
+			!ctx.hasPendingMessages()
+		) {
+			thresholdCompactionRecoveryCandidate = false;
+			thresholdCompactionRecoveryAttempted = true;
+			try {
+				pi.sendMessage(
+					{
+						customType: THRESHOLD_COMPACTION_RECOVERY_CUSTOM_TYPE,
+						content: THRESHOLD_COMPACTION_RECOVERY_MESSAGE,
+						display: false,
+					},
+					{ triggerTurn: true, deliverAs: "followUp" },
+				);
+			} catch {
+				// Settlement finalizes the original error when queueing fails.
+			}
+		}
+	});
+
 	pi.on("agent_settled", (_event, ctx) => {
+		thresholdCompactionRecoveryCandidate = false;
+
 		if (persistent && !completionFinalized) {
 			let messages = latestAgentMessages;
 			try {
@@ -299,11 +344,10 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		if (!shouldAutoExitOnAgentEnd(userTookOver, messages)) return;
+
 		completionFinalized = true;
 
-		// Surface a settled stopReason: "error" to the parent via the .exit
-		// sidecar. Transient errors followed by retry or compaction never reach
-		// this point as the latest assistant message.
+		// Surface the final assistant outcome to the parent via the .exit sidecar.
 		const sessionFile = process.env.PI_SUBAGENT_SESSION;
 		if (sessionFile) {
 			try {

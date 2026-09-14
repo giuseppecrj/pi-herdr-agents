@@ -857,6 +857,7 @@ When set to `true`, the agent session shuts down on Pi's `agent_settled` event u
 
 - Low-level `agent_end` events do not close the session because Pi may still retry, compact and retry, or process a queued continuation.
 - After `agent_settled`, a normal or error stop exits, while an aborted stop stays open.
+- After a post-run threshold compaction (`willRetry: false`) follows an abort-shaped `agent_end` (`stopReason: "error"`, `errorMessage: "This operation was aborted"`), the extension queues one hidden continuation during `session_compact`, before `agent_settled`. It skips recovery when Pi already has a pending message; a failed or no-op send falls through to the original settlement error. A manual abort (`stopReason: "aborted"`) remains open and never queues recovery.
 - User input does not permanently disable auto-exit; the latest settled assistant stop reason determines whether the session exits.
 - The modeHint injected into the agent's task is adjusted accordingly: autonomous agents see "Complete your task autonomously." rather than instructions to call `subagent_done`
 

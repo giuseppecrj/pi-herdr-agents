@@ -35,6 +35,14 @@ npm run test:integration
 
 Run that suite from inside Herdr. It uses real Pi and Herdr processes with the local deterministic provider, so it needs no provider credentials or network access.
 
+When a release changes `pi-extension/subagents/subagent-done.ts` compaction or auto-exit behavior, also run the pinned Pi 0.84.4 regression (required before pushing that release commit; not run in GitHub Actions):
+
+```bash
+npm run test:pi-0844
+```
+
+See `test/pi-0844/README.md` for what this proves, its provenance, and its limitations.
+
 The optional live-provider smoke test is not a release gate:
 
 ```bash

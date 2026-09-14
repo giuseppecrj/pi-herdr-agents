@@ -1,0 +1,352 @@
+import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { Type } from "typebox";
+import { afterEach, describe, expect, it } from "vitest";
+import subagentDoneExtension from "__SUBAGENT_DONE_PATH__";
+import { createHarness, type Harness } from "./suite/harness.ts";
+
+// Ported from a working investigation harness validated against the pinned
+// upstream commit (see test/pi-0844/README.md for provenance). The
+// `session_before_compact` handlers below return a stub compaction summary;
+// they only satisfy Pi's required event contract and do not assert on
+// summarization quality. The `stopReason: "error"` / "This operation was
+// aborted" response in the third case is a synthetic, injected provider
+// response chosen to reproduce the abort-shaped error the issue describes;
+// it is not proof that native Pi compaction alone produces that error.
+//
+// Tests 2 and 3 bind a real `shutdownHandler` via `session.bindExtensions()`
+// (the same AgentSession API the production CLI uses) so `ctx.shutdown()` in
+// subagent-done.ts invokes a genuine, observable callback here, instead of a
+// synthetic event that merely claims the process would exit. The bound
+// handler counts invocations and captures the `.exit` sidecar file's content
+// at the moment it fires, proving the sidecar is written before shutdown is
+// requested and that shutdown fires exactly once, only after settlement.
+describe("issue 47 regression against pinned Pi 0.84.4", () => {
+	const harnesses: Harness[] = [];
+	afterEach(() => {
+		while (harnesses.length > 0) harnesses.pop()?.cleanup();
+	});
+
+	it("emits agent_settled only after same-run threshold compaction and continuation", async () => {
+		const largeTool: AgentTool = {
+			name: "large_result",
+			label: "Large result",
+			description: "Crosses the compaction threshold",
+			parameters: Type.Object({}),
+			execute: async () => ({
+				content: [{ type: "text", text: `large-tool-result:${"x".repeat(6800)}` }],
+				details: {},
+			}),
+		};
+		const order: string[] = [];
+		const harness = await createHarness({
+			models: [{ id: "faux-1", contextWindow: 2600, maxTokens: 100 }],
+			settings: { compaction: { enabled: true, reserveTokens: 400, keepRecentTokens: 1750 } },
+			tools: [largeTool],
+			extensionFactories: [
+				(pi) => {
+					pi.on("agent_start", () => order.push("agent_start"));
+					pi.on("agent_end", (event) => {
+						const last = [...event.messages].reverse().find((message) => message.role === "assistant");
+						order.push(`agent_end:${last?.role === "assistant" ? last.stopReason : "none"}`);
+					});
+					pi.on("agent_settled", (_event, ctx) => {
+						const last = ctx.sessionManager
+							.getBranch()
+							.flatMap((entry) => (entry.type === "message" ? [entry.message] : []))
+							.reverse()
+							.find((message) => message.role === "assistant");
+						order.push(`agent_settled:${last?.role === "assistant" ? last.stopReason : "none"}`);
+					});
+					pi.on("session_before_compact", (event) => {
+						order.push(`session_before_compact:${event.reason}`);
+						return {
+							compaction: {
+								summary: "compacted history",
+								firstKeptEntryId: event.preparation.firstKeptEntryId,
+								tokensBefore: event.preparation.tokensBefore,
+								details: {},
+							},
+						};
+					});
+					pi.on("session_compact", (event) => {
+						order.push(`session_compact:${event.reason}:willRetry=${event.willRetry}`);
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage(`old-history:${"a".repeat(800)}`),
+			fauxAssistantMessage(`recent-history:${"b".repeat(800)}`),
+			fauxAssistantMessage(fauxToolCall("large_result", {}), { stopReason: "toolUse" }),
+			fauxAssistantMessage("finished after compaction"),
+		]);
+
+		await harness.session.prompt("seed old history");
+		await harness.session.prompt("seed recent history");
+		order.length = 0;
+		await harness.session.prompt("run the large tool");
+
+		expect(order).toEqual([
+			"agent_start",
+			"session_before_compact:threshold",
+			"session_compact:threshold:willRetry=false",
+			"agent_end:stop",
+			"agent_settled:stop",
+		]);
+	});
+
+	it("lets the v1.7.0 auto-exit extension finalize only after native threshold compaction", async () => {
+		const previousAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+		const previousSession = process.env.PI_SUBAGENT_SESSION;
+		const sessionFile = `/tmp/issue47-${process.pid}-${Date.now()}.jsonl`;
+		process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+		process.env.PI_SUBAGENT_SESSION = sessionFile;
+		const largeTool: AgentTool = {
+			name: "large_result",
+			label: "Large result",
+			description: "Crosses the compaction threshold",
+			parameters: Type.Object({}),
+			execute: async () => ({
+				content: [{ type: "text", text: `large-tool-result:${"x".repeat(6800)}` }],
+				details: {},
+			}),
+		};
+		const order: string[] = [];
+		let shutdownCount = 0;
+		let sidecarAtShutdown: unknown;
+		try {
+			const harness = await createHarness({
+				models: [{ id: "faux-1", contextWindow: 2600, maxTokens: 100 }],
+				settings: { compaction: { enabled: true, reserveTokens: 400, keepRecentTokens: 1750 } },
+				tools: [largeTool],
+				extensionFactories: [
+					subagentDoneExtension,
+					(pi) => {
+						pi.on("agent_start", () => order.push("agent_start"));
+						pi.on("agent_end", (event) => {
+							const last = [...event.messages].reverse().find((message) => message.role === "assistant");
+							order.push(`agent_end:${last?.role === "assistant" ? last.stopReason : "none"}`);
+						});
+						pi.on("agent_settled", (_event, ctx) => {
+							const last = ctx.sessionManager
+								.getBranch()
+								.flatMap((entry) => (entry.type === "message" ? [entry.message] : []))
+								.reverse()
+								.find((message) => message.role === "assistant");
+							order.push(`agent_settled:${last?.role === "assistant" ? last.stopReason : "none"}`);
+						});
+						pi.on("session_before_compact", (event) => ({
+							compaction: {
+								summary: "compacted history",
+								firstKeptEntryId: event.preparation.firstKeptEntryId,
+								tokensBefore: event.preparation.tokensBefore,
+								details: {},
+							},
+						}));
+						pi.on("session_compact", (event) => {
+							order.push(`session_compact:${event.reason}:willRetry=${event.willRetry}`);
+						});
+					},
+				],
+			});
+			harnesses.push(harness);
+
+			// Real AgentSession shutdown binding (see file header comment): proves
+			// subagent-done.ts's ctx.shutdown() call actually fires, not merely that
+			// the .exit sidecar file was written.
+			await harness.session.bindExtensions({
+				shutdownHandler: () => {
+					shutdownCount++;
+					order.push(`shutdown:${shutdownCount}`);
+					sidecarAtShutdown = existsSync(`${sessionFile}.exit`)
+						? JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8"))
+						: undefined;
+				},
+			});
+
+			const seededMessages = [
+				{ role: "user" as const, content: [{ type: "text" as const, text: "seed old history" }], timestamp: Date.now() - 3_000 },
+				fauxAssistantMessage(`old-history:${"a".repeat(800)}`, { timestamp: Date.now() - 2_000 }),
+				{ role: "user" as const, content: [{ type: "text" as const, text: "seed recent history" }], timestamp: Date.now() - 1_000 },
+				fauxAssistantMessage(`recent-history:${"b".repeat(800)}`, { timestamp: Date.now() - 500 }),
+			];
+			for (const message of seededMessages) harness.sessionManager.appendMessage(message);
+			harness.session.messages.push(...seededMessages);
+			harness.setResponses([
+				fauxAssistantMessage(fauxToolCall("large_result", {}), { stopReason: "toolUse" }),
+				fauxAssistantMessage("finished after compaction"),
+			]);
+
+			expect(shutdownCount).toBe(0);
+			expect(existsSync(`${sessionFile}.exit`)).toBe(false);
+
+			await harness.session.prompt("run the large tool");
+
+			// subagent-done.ts's agent_settled handler (registered first, via
+			// subagentDoneExtension above) writes the sidecar and calls
+			// ctx.shutdown() synchronously before this test's own agent_settled
+			// handler (registered second) runs, so "shutdown:1" is observed
+			// before this file's "agent_settled:stop" push — both are still
+			// dispatch of the same agent_settled event, strictly after
+			// compaction completes.
+			expect(order).toEqual([
+				"agent_start",
+				"session_compact:threshold:willRetry=false",
+				"agent_end:stop",
+				"shutdown:1",
+				"agent_settled:stop",
+			]);
+			expect(shutdownCount).toBe(1);
+			expect(sidecarAtShutdown).toEqual({ type: "done" });
+
+			expect(harness.eventsOfType("compaction_end").at(-1)).toMatchObject({
+				reason: "threshold",
+				aborted: false,
+			});
+			expect(harness.session.getLastAssistantText()).toBe("finished after compaction");
+			expect(existsSync(`${sessionFile}.exit`)).toBe(true);
+			expect(JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8"))).toEqual({ type: "done" });
+		} finally {
+			if (previousAutoExit === undefined) delete process.env.PI_SUBAGENT_AUTO_EXIT;
+			else process.env.PI_SUBAGENT_AUTO_EXIT = previousAutoExit;
+			if (previousSession === undefined) delete process.env.PI_SUBAGENT_SESSION;
+			else process.env.PI_SUBAGENT_SESSION = previousSession;
+			rmSync(`${sessionFile}.exit`, { force: true });
+			rmSync(`${sessionFile}.activity`, { force: true });
+		}
+	});
+
+	it("continues once after post-run threshold compaction leaves the abort-shaped error latest", async () => {
+		const previousAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+		const previousSession = process.env.PI_SUBAGENT_SESSION;
+		const sessionFile = `/tmp/issue47-post-run-${process.pid}-${Date.now()}.jsonl`;
+		process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+		process.env.PI_SUBAGENT_SESSION = sessionFile;
+		const order: string[] = [];
+		let shutdownCount = 0;
+		let sidecarAtShutdown: unknown;
+		try {
+			const harness = await createHarness({
+				models: [{ id: "faux-1", contextWindow: 2600, maxTokens: 100 }],
+				settings: {
+					compaction: { enabled: true, reserveTokens: 400, keepRecentTokens: 100 },
+					retry: { enabled: false },
+				},
+				extensionFactories: [
+					subagentDoneExtension,
+					(pi) => {
+						pi.on("agent_start", () => order.push("agent_start"));
+						pi.on("agent_end", (event) => {
+							const last = [...event.messages].reverse().find((message) => message.role === "assistant");
+							order.push(`agent_end:${last?.role === "assistant" ? last.stopReason : "none"}`);
+						});
+						pi.on("session_before_compact", (event) => {
+							order.push(`session_before_compact:${event.reason}`);
+							return {
+								compaction: {
+									summary: "compacted after error",
+									firstKeptEntryId: event.preparation.firstKeptEntryId,
+									tokensBefore: event.preparation.tokensBefore,
+									details: {},
+								},
+							};
+						});
+						pi.on("session_compact", (event) => {
+							order.push(`session_compact:${event.reason}:willRetry=${event.willRetry}`);
+						});
+						pi.on("agent_settled", (_event, ctx) => {
+							const last = ctx.sessionManager
+								.getBranch()
+								.flatMap((entry) => (entry.type === "message" ? [entry.message] : []))
+								.reverse()
+								.find((message) => message.role === "assistant");
+							order.push(`agent_settled:${last?.role === "assistant" ? last.stopReason : "none"}`);
+						});
+					},
+				],
+			});
+			harnesses.push(harness);
+
+			// Real AgentSession shutdown binding (see file header comment): proves
+			// no shutdown happens before recovery finishes, and exactly one
+			// shutdown happens after the final .exit sidecar is written.
+			await harness.session.bindExtensions({
+				shutdownHandler: () => {
+					shutdownCount++;
+					order.push(`shutdown:${shutdownCount}`);
+					sidecarAtShutdown = existsSync(`${sessionFile}.exit`)
+						? JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8"))
+						: undefined;
+				},
+			});
+
+			const model = harness.getModel();
+			const seedUser = {
+				role: "user" as const,
+				content: [{ type: "text" as const, text: "seed context" }],
+				timestamp: Date.now() - 2_000,
+			};
+			const seedAssistant = {
+				...fauxAssistantMessage(`prior success:${"p".repeat(5000)}`, { timestamp: Date.now() - 1_000 }),
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				usage: {
+					input: 2100,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 2100,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+			};
+			harness.sessionManager.appendMessage(seedUser);
+			harness.sessionManager.appendMessage(seedAssistant);
+			harness.session.messages.push(seedUser, seedAssistant);
+			// Synthetic injected provider response: reproduces the abort-shaped
+			// error latest at settlement; not proof native compaction alone
+			// causes it. See test/pi-0844/README.md.
+			harness.setResponses([
+				fauxAssistantMessage("", {
+					stopReason: "error",
+					errorMessage: "This operation was aborted",
+					timestamp: Date.now(),
+				}),
+				fauxAssistantMessage("finished after one recovery"),
+			]);
+
+			expect(shutdownCount).toBe(0);
+			expect(existsSync(`${sessionFile}.exit`)).toBe(false);
+
+			await harness.session.prompt(`continue:${"c".repeat(1000)}`);
+
+			// See the shutdown-vs-agent_settled ordering note in the previous test:
+			// subagent-done.ts's agent_settled handler shuts down synchronously
+			// before this file's own agent_settled handler logs.
+			expect(order).toEqual([
+				"agent_start",
+				"agent_end:error",
+				"session_before_compact:threshold",
+				"session_compact:threshold:willRetry=false",
+				"agent_start",
+				"agent_end:stop",
+				"shutdown:1",
+				"agent_settled:stop",
+			]);
+			expect(shutdownCount).toBe(1);
+			expect(sidecarAtShutdown).toEqual({ type: "done" });
+			expect(harness.faux.state.callCount).toBe(2);
+			expect(JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8"))).toEqual({ type: "done" });
+		} finally {
+			if (previousAutoExit === undefined) delete process.env.PI_SUBAGENT_AUTO_EXIT;
+			else process.env.PI_SUBAGENT_AUTO_EXIT = previousAutoExit;
+			if (previousSession === undefined) delete process.env.PI_SUBAGENT_SESSION;
+			else process.env.PI_SUBAGENT_SESSION = previousSession;
+			rmSync(`${sessionFile}.exit`, { force: true });
+			rmSync(`${sessionFile}.activity`, { force: true });
+		}
+	});
+});

@@ -172,7 +172,10 @@ function withTempDir(run: (dir: string) => void) {
 	}
 }
 
-function createMockExtensionApi(extensionEvents = createEventBus()) {
+function createMockExtensionApi(
+	extensionEvents = createEventBus(),
+	config: { sendMessage?: (message: any, options?: any) => void } = {},
+) {
 	const registeredTools: Array<any> = [];
 	const registeredCommands: Array<any> = [];
 	const registeredMessageRenderers: Array<any> = [];
@@ -209,14 +212,95 @@ function createMockExtensionApi(extensionEvents = createEventBus()) {
 			sendUserMessage(message: string) {
 				sentUserMessages.push(message);
 			},
-			sendMessage(message: any, options?: any) {
-				sentMessages.push({ message, options });
+			sendMessage(message: any, messageOptions?: any) {
+				if (config.sendMessage) {
+					config.sendMessage(message, messageOptions);
+					return;
+				}
+				sentMessages.push({ message, options: messageOptions });
 			},
 			getAllTools() {
 				return [];
 			},
 		} as any,
 	};
+}
+
+function createAutoExitLifecycleFixture(
+	sessionFile: string,
+	config: { sendMessage?: (message: any, options?: any) => void } = {},
+) {
+	const mock = createMockExtensionApi(createEventBus(), config);
+	subagentDoneExtension(mock.api);
+	const getHandler = (name: string) => {
+		const handlers = mock.eventHandlers.get(name);
+		assert.ok(handlers, `missing ${name} handler list`);
+		assert.equal(handlers.length, 1, `expected one ${name} handler`);
+		const handler = handlers[0];
+		assert.ok(handler, `missing ${name} handler`);
+		return handler;
+	};
+	let branch: any[] = [];
+	let pendingMessages = false;
+	let shutdowns = 0;
+	const ctx = {
+		shutdown: () => shutdowns++,
+		sessionManager: { getBranch: () => branch },
+		hasPendingMessages: () => pendingMessages,
+	};
+	return {
+		...mock,
+		sessionFile,
+		agentStart: getHandler("agent_start"),
+		agentEnd: getHandler("agent_end"),
+		sessionCompact: getHandler("session_compact"),
+		agentSettled: getHandler("agent_settled"),
+		ctx,
+		setBranch: (value: any[]) => {
+			branch = value;
+		},
+		setPendingMessages: (value: boolean) => {
+			pendingMessages = value;
+		},
+		getShutdowns: () => shutdowns,
+	};
+}
+
+function withAutoExitLifecycle(
+	run: (fixture: ReturnType<typeof createAutoExitLifecycleFixture>) => void,
+	config: {
+		sendMessage?: (message: any, options?: any) => void;
+		persistent?: boolean;
+		autoExit?: boolean;
+	} = {},
+) {
+	withTempDir((dir) => {
+		const previousAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+		const previousPersistent = process.env.PI_SUBAGENT_PERSISTENT;
+		const previousSession = process.env.PI_SUBAGENT_SESSION;
+		const sessionFile = join(dir, "child.jsonl");
+		if (config.autoExit === false) delete process.env.PI_SUBAGENT_AUTO_EXIT;
+		else process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+		if (config.persistent) process.env.PI_SUBAGENT_PERSISTENT = "1";
+		else delete process.env.PI_SUBAGENT_PERSISTENT;
+		process.env.PI_SUBAGENT_SESSION = sessionFile;
+		const fixture = createAutoExitLifecycleFixture(sessionFile, config);
+		try {
+			run(fixture);
+		} finally {
+			if (config.persistent) {
+				const shutdownHandlers = fixture.eventHandlers.get("session_shutdown");
+				assert.ok(shutdownHandlers);
+				assert.equal(shutdownHandlers.length, 1);
+				const shutdownHandler = shutdownHandlers[0];
+				assert.ok(shutdownHandler);
+				shutdownHandler({ reason: "reload" });
+			}
+			restoreEnvVar("PI_SUBAGENT_AUTO_EXIT", previousAutoExit);
+			restoreEnvVar("PI_SUBAGENT_PERSISTENT", previousPersistent);
+			restoreEnvVar("PI_SUBAGENT_SESSION", previousSession);
+		}
+	});
 }
 
 function restoreEnvVar(name: string, value: string | undefined) {
@@ -4073,6 +4157,215 @@ describe("subagent-done.ts", () => {
 				restoreEnvVar("PI_SUBAGENT_SESSION", previousSession);
 			}
 		});
+	});
+
+	it("queues recovery before the continuation settles", () => {
+		withAutoExitLifecycle((fixture) => {
+			const { agentStart, agentEnd, sessionCompact, agentSettled, ctx } =
+				fixture;
+			const aborted = {
+				role: "assistant",
+				stopReason: "error",
+				errorMessage: "This operation was aborted",
+			};
+			const completed = { role: "assistant", stopReason: "stop" };
+			fixture.setBranch([{ type: "message", message: aborted }]);
+			agentStart();
+			agentEnd({ messages: [aborted] }, ctx);
+			sessionCompact({ reason: "threshold", willRetry: false }, ctx);
+			assert.equal(existsSync(`${fixture.sessionFile}.exit`), false);
+			assert.equal(fixture.getShutdowns(), 0);
+			assert.deepEqual(fixture.sentMessages, [
+				{
+					message: {
+						customType: "subagent_threshold_compaction_recovery",
+						content:
+							"Continue the task. Context was compacted after an interrupted turn.",
+						display: false,
+					},
+					options: { triggerTurn: true, deliverAs: "followUp" },
+				},
+			]);
+			fixture.setBranch([{ type: "message", message: completed }]);
+			agentStart();
+			agentEnd({ messages: [completed] }, ctx);
+			agentSettled({}, ctx);
+			assert.deepEqual(
+				JSON.parse(readFileSync(`${fixture.sessionFile}.exit`, "utf8")),
+				{
+					type: "done",
+				},
+			);
+			assert.equal(fixture.getShutdowns(), 1);
+		});
+	});
+
+	it("finalizes the error after the one recovery attempt fails", () => {
+		withAutoExitLifecycle((fixture) => {
+			const { agentStart, agentEnd, sessionCompact, agentSettled, ctx } =
+				fixture;
+			const aborted = {
+				role: "assistant",
+				stopReason: "error",
+				errorMessage: "This operation was aborted",
+			};
+			fixture.setBranch([{ type: "message", message: aborted }]);
+			agentStart();
+			agentEnd({ messages: [aborted] }, ctx);
+			sessionCompact({ reason: "threshold", willRetry: false }, ctx);
+			assert.equal(fixture.sentMessages.length, 1);
+			fixture.setBranch([{ type: "message", message: aborted }]);
+			agentStart();
+			agentEnd({ messages: [aborted] }, ctx);
+			sessionCompact({ reason: "threshold", willRetry: false }, ctx);
+			agentSettled({}, ctx);
+			assert.equal(fixture.sentMessages.length, 1);
+			assert.deepEqual(
+				JSON.parse(readFileSync(`${fixture.sessionFile}.exit`, "utf8")),
+				{
+					type: "error",
+					errorMessage: "This operation was aborted",
+					stopReason: "error",
+				},
+			);
+			assert.equal(fixture.getShutdowns(), 1);
+		});
+	});
+
+	it("fails closed when sendMessage is a no-op or throws", () => {
+		for (const sendMessage of [
+			() => {},
+			() => {
+				throw new Error("send failed");
+			},
+		]) {
+			withAutoExitLifecycle(
+				(fixture) => {
+					const { agentStart, agentEnd, sessionCompact, agentSettled, ctx } =
+						fixture;
+					const aborted = {
+						role: "assistant",
+						stopReason: "error",
+						errorMessage: "This operation was aborted",
+					};
+					fixture.setBranch([{ type: "message", message: aborted }]);
+					agentStart();
+					agentEnd({ messages: [aborted] }, ctx);
+					sessionCompact({ reason: "threshold", willRetry: false }, ctx);
+					agentSettled({}, ctx);
+					assert.deepEqual(
+						JSON.parse(readFileSync(`${fixture.sessionFile}.exit`, "utf8")),
+						{
+							type: "error",
+							errorMessage: "This operation was aborted",
+							stopReason: "error",
+						},
+					);
+					assert.equal(fixture.getShutdowns(), 1);
+				},
+				{ sendMessage },
+			);
+		}
+	});
+
+	it("does not recover from overflow or a mid-run compaction", () => {
+		withAutoExitLifecycle((fixture) => {
+			const { agentStart, agentEnd, sessionCompact, agentSettled, ctx } =
+				fixture;
+			const normal = { role: "assistant", stopReason: "stop" };
+			const aborted = {
+				role: "assistant",
+				stopReason: "error",
+				errorMessage: "This operation was aborted",
+			};
+			fixture.setBranch([{ type: "message", message: normal }]);
+			agentStart();
+			agentEnd({ messages: [normal] }, ctx);
+			sessionCompact({ reason: "threshold", willRetry: false }, ctx);
+			agentEnd({ messages: [aborted] }, ctx);
+			agentSettled({}, ctx);
+			assert.equal(fixture.sentMessages.length, 0);
+			assert.equal(fixture.getShutdowns(), 1);
+		});
+
+		withAutoExitLifecycle((fixture) => {
+			const { agentStart, agentEnd, sessionCompact, agentSettled, ctx } =
+				fixture;
+			const aborted = {
+				role: "assistant",
+				stopReason: "error",
+				errorMessage: "This operation was aborted",
+			};
+			fixture.setBranch([{ type: "message", message: aborted }]);
+			agentStart();
+			agentEnd({ messages: [aborted] }, ctx);
+			sessionCompact({ reason: "overflow", willRetry: true }, ctx);
+			agentSettled({}, ctx);
+			assert.equal(fixture.sentMessages.length, 0);
+			assert.equal(fixture.getShutdowns(), 1);
+		});
+	});
+
+	it("clears a prior-run candidate and avoids duplicate pending continuations", () => {
+		withAutoExitLifecycle((fixture) => {
+			const { agentStart, agentEnd, sessionCompact, agentSettled, ctx } =
+				fixture;
+			const normal = { role: "assistant", stopReason: "stop" };
+			const manualAbort = { role: "assistant", stopReason: "aborted" };
+			const laterError = {
+				role: "assistant",
+				stopReason: "error",
+				errorMessage: "This operation was aborted",
+			};
+			fixture.setBranch([{ type: "message", message: normal }]);
+			agentStart();
+			agentEnd({ messages: [normal] }, ctx);
+			sessionCompact({ reason: "threshold", willRetry: false }, ctx);
+			fixture.setBranch([{ type: "message", message: manualAbort }]);
+			agentEnd({ messages: [manualAbort] }, ctx);
+			agentSettled({}, ctx);
+			assert.equal(existsSync(`${fixture.sessionFile}.exit`), false);
+
+			fixture.setBranch([{ type: "message", message: laterError }]);
+			agentStart();
+			agentEnd({ messages: [laterError] }, ctx);
+			agentSettled({}, ctx);
+			assert.equal(fixture.sentMessages.length, 0);
+			assert.equal(fixture.getShutdowns(), 1);
+		});
+
+		withAutoExitLifecycle((fixture) => {
+			const { agentStart, agentEnd, sessionCompact, ctx } = fixture;
+			const aborted = {
+				role: "assistant",
+				stopReason: "error",
+				errorMessage: "This operation was aborted",
+			};
+			fixture.setBranch([{ type: "message", message: aborted }]);
+			agentStart();
+			agentEnd({ messages: [aborted] }, ctx);
+			fixture.setPendingMessages(true);
+			sessionCompact({ reason: "threshold", willRetry: false }, ctx);
+			assert.equal(fixture.sentMessages.length, 0);
+		});
+	});
+
+	it("excludes persistent and non-auto-exit sessions", () => {
+		for (const config of [{ persistent: true }, { autoExit: false }]) {
+			withAutoExitLifecycle((fixture) => {
+				const { agentStart, agentEnd, sessionCompact, ctx } = fixture;
+				const aborted = {
+					role: "assistant",
+					stopReason: "error",
+					errorMessage: "This operation was aborted",
+				};
+				fixture.setBranch([{ type: "message", message: aborted }]);
+				agentStart();
+				agentEnd({ messages: [aborted] }, ctx);
+				sessionCompact({ reason: "threshold", willRetry: false }, ctx);
+				assert.equal(fixture.sentMessages.length, 0);
+			}, config);
+		}
 	});
 
 	it("uses the settled branch instead of a stale agent_end error", () => {
