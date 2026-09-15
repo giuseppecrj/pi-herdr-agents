@@ -3141,7 +3141,7 @@ describe("subagent discovery", () => {
 				(request: { register(path: string): void }) =>
 					request.register(rolesDir),
 			);
-			subagentsModule.default(api);
+			subagentsModule.default(api, { registerWithoutHerdr: true });
 
 			const listTool = registeredTools.find(
 				(tool) => tool.name === "subagents_list",
@@ -3180,7 +3180,7 @@ describe("subagent discovery", () => {
 			const plugin = createMockExtensionApi(eventBus);
 			rolePackExample(plugin.api);
 			const host = createMockExtensionApi(eventBus);
-			subagentsModule.default(host.api);
+			subagentsModule.default(host.api, { registerWithoutHerdr: true });
 			const listTool = host.registeredTools.find(
 				(tool) => tool.name === "subagents_list",
 			);
@@ -3251,7 +3251,7 @@ describe("subagent discovery", () => {
 					request.register(secondRoles);
 				},
 			);
-			subagentsModule.default(api);
+			subagentsModule.default(api, { registerWithoutHerdr: true });
 
 			const listTool = registeredTools.find(
 				(tool) => tool.name === "subagents_list",
@@ -3323,7 +3323,7 @@ describe("subagent discovery", () => {
 					(request: { register(path: string): void }) =>
 						request.register(rolesDir),
 				);
-				subagentsModule.default(api);
+				subagentsModule.default(api, { registerWithoutHerdr: true });
 
 				const listTool = registeredTools.find(
 					(tool) => tool.name === "subagents_list",
@@ -3360,7 +3360,7 @@ describe("subagent discovery", () => {
 				);
 
 				const { api, registeredTools } = createMockExtensionApi();
-				subagentsModule.default(api);
+				subagentsModule.default(api, { registerWithoutHerdr: true });
 
 				const tool = registeredTools.find(
 					(tool) => tool.name === "subagents_list",
@@ -3502,7 +3502,7 @@ describe("subagent discovery", () => {
 				(request: { register(path: string): void }) =>
 					request.register(rolesDir),
 			);
-			subagentsModule.default(api);
+			subagentsModule.default(api, { registerWithoutHerdr: true });
 
 			const listTool = registeredTools.find(
 				(tool) => tool.name === "subagents_list",
@@ -3636,7 +3636,7 @@ describe("subagent discovery", () => {
 					(request: { register(path: string): void }) =>
 						request.register(rolesDir),
 				);
-				subagentsModule.default(api);
+				subagentsModule.default(api, { registerWithoutHerdr: true });
 
 				const catalog = testApi.discoverAgentCatalog(api);
 				assert.equal(
@@ -3710,7 +3710,7 @@ describe("subagent discovery", () => {
 					["description: Legacy scout override", "cli: claude"].join("\n"),
 				);
 				const { api, registeredTools } = createMockExtensionApi();
-				subagentsModule.default(api);
+				subagentsModule.default(api, { registerWithoutHerdr: true });
 
 				const tool = registeredTools.find(
 					(tool) => tool.name === "subagents_list",
@@ -3780,7 +3780,7 @@ describe("subagent discovery", () => {
 			);
 
 			const { api, registeredTools } = createMockExtensionApi();
-			subagentsModule.default(api);
+			subagentsModule.default(api, { registerWithoutHerdr: true });
 
 			const tool = registeredTools.find(
 				(tool) => tool.name === "subagents_list",
@@ -3835,7 +3835,7 @@ describe("subagent discovery", () => {
 				);
 
 				const { api, registeredTools } = createMockExtensionApi();
-				subagentsModule.default(api);
+				subagentsModule.default(api, { registerWithoutHerdr: true });
 
 				const tool = registeredTools.find(
 					(tool) => tool.name === "subagents_list",
@@ -5339,7 +5339,7 @@ describe("commands", () => {
 
 				const { api, registeredCommands, sentUserMessages } =
 					createMockExtensionApi();
-				subagentsModule.default(api);
+				subagentsModule.default(api, { registerWithoutHerdr: true });
 				const subagent = registeredCommands.find(
 					(command) => command.name === "subagent",
 				);
@@ -5371,7 +5371,7 @@ describe("commands", () => {
 
 	it("registers /worktree with only its list subcommand", async () => {
 		const { api, registeredCommands } = createMockExtensionApi();
-		subagentsModule.default(api);
+		subagentsModule.default(api, { registerWithoutHerdr: true });
 
 		const worktree = registeredCommands.find(
 			(command) => command.name === "worktree",
@@ -5406,7 +5406,7 @@ describe("commands", () => {
 	it("registers direct BTW commands without steering the parent", async () => {
 		const { api, registeredCommands, sentUserMessages } =
 			createMockExtensionApi();
-		subagentsModule.default(api);
+		subagentsModule.default(api, { registerWithoutHerdr: true });
 
 		const btw = registeredCommands.find((command) => command.name === "btw");
 		const close = registeredCommands.find(
@@ -5455,7 +5455,7 @@ describe("commands", () => {
 		const { api, registeredCommands, sentUserMessages } =
 			createMockExtensionApi();
 
-		subagentsModule.default(api);
+		subagentsModule.default(api, { registerWithoutHerdr: true });
 
 		const iterate = registeredCommands.find(
 			(command) => command.name === "iterate",
@@ -5472,9 +5472,56 @@ describe("commands", () => {
 });
 
 describe("tool registration", () => {
+	it("registers no tools or commands outside Herdr", () => {
+		const previousHerdrEnv = process.env.HERDR_ENV;
+		delete process.env.HERDR_ENV;
+		try {
+			const { api, registeredTools, registeredCommands } =
+				createMockExtensionApi();
+			subagentsModule.default(api);
+
+			assert.deepEqual(
+				registeredTools.map((tool) => tool.name),
+				[],
+				"an unusable surface must not be offered to the model",
+			);
+			assert.deepEqual(
+				registeredCommands.map((command) => command.name),
+				[],
+			);
+		} finally {
+			restoreEnvVar("HERDR_ENV", previousHerdrEnv);
+		}
+	});
+
+	it("registers the full surface when Herdr hosts the session", () => {
+		const previousHerdrEnv = process.env.HERDR_ENV;
+		delete process.env.HERDR_ENV;
+		try {
+			const { api, registeredTools, registeredCommands } =
+				createMockExtensionApi();
+			subagentsModule.default(api, { registerWithoutHerdr: true });
+
+			assert.deepEqual(registeredTools.map((tool) => tool.name).sort(), [
+				"subagent",
+				"subagent_interrupt",
+				"subagent_resume",
+				"subagent_send",
+				"subagent_stop",
+				"subagents_list",
+			]);
+			assert.deepEqual(
+				registeredCommands.map((command) => command.name).sort(),
+				["btw", "btw-close", "iterate", "plan", "subagent", "worktree"],
+			);
+		} finally {
+			restoreEnvVar("HERDR_ENV", previousHerdrEnv);
+		}
+	});
+
 	it("refreshes subagent routing guidance from the live authenticated model registry", () => {
 		const { api, registeredTools, eventHandlers } = createMockExtensionApi();
-		subagentsModule.default(api);
+		subagentsModule.default(api, { registerWithoutHerdr: true });
 
 		const subagent = registeredTools.find((tool) => tool.name === "subagent");
 		assert.ok(subagent);
@@ -5528,7 +5575,7 @@ describe("tool registration", () => {
 			"subagent,subagent_interrupt,subagent_resume,subagents_list";
 		try {
 			const { api, registeredTools } = createMockExtensionApi();
-			subagentsModule.default(api);
+			subagentsModule.default(api, { registerWithoutHerdr: true });
 			assert.equal(
 				registeredTools.some((tool) => tool.name === "subagent"),
 				true,
@@ -5547,7 +5594,7 @@ describe("tool registration", () => {
 		process.env.PI_DENY_TOOLS = "subagent,subagent_interrupt";
 		try {
 			const { api, registeredTools } = createMockExtensionApi();
-			subagentsModule.default(api);
+			subagentsModule.default(api, { registerWithoutHerdr: true });
 			assert.equal(
 				registeredTools.some((tool) => tool.name === "subagent"),
 				false,
@@ -5577,7 +5624,7 @@ describe("tool registration", () => {
 
 	it("exposes worktree branch and optional base on the subagent tool", () => {
 		const { api, registeredTools } = createMockExtensionApi();
-		subagentsModule.default(api);
+		subagentsModule.default(api, { registerWithoutHerdr: true });
 
 		const subagentTool = registeredTools.find(
 			(tool) => tool.name === "subagent",
@@ -5717,7 +5764,7 @@ describe("tool registration", () => {
 
 	it("renders partial subagent tool-call args without throwing", () => {
 		const { api, registeredTools } = createMockExtensionApi();
-		subagentsModule.default(api);
+		subagentsModule.default(api, { registerWithoutHerdr: true });
 
 		const subagentTool = registeredTools.find(
 			(tool) => tool.name === "subagent",
@@ -5740,7 +5787,7 @@ describe("tool registration", () => {
 
 	it("registers subagent_resume with an autoExit override", () => {
 		const { api, registeredTools } = createMockExtensionApi();
-		subagentsModule.default(api);
+		subagentsModule.default(api, { registerWithoutHerdr: true });
 
 		const resumeTool = registeredTools.find(
 			(tool) => tool.name === "subagent_resume",
@@ -6282,7 +6329,7 @@ describe("persistent subagent send", () => {
 				generation: running.generationId,
 			});
 			const { api, sentMessages } = createMockExtensionApi();
-			subagentsModule.default(api);
+			subagentsModule.default(api, { registerWithoutHerdr: true });
 			testApi.notifyPersistentCrash(running, api);
 
 			assert.equal(
@@ -6792,7 +6839,7 @@ describe("subagent interruption", () => {
 	it("registers subagent_interrupt in the main session extension", () => {
 		const { api, registeredTools } = createMockExtensionApi();
 
-		subagentsModule.default(api);
+		subagentsModule.default(api, { registerWithoutHerdr: true });
 
 		assert.equal(
 			registeredTools.some((tool) => tool.name === "subagent_interrupt"),
@@ -7614,7 +7661,7 @@ describe("subagent status renderer", () => {
 
 	it("keeps recovery session details in expanded unexpected-error results", () => {
 		const { api, registeredMessageRenderers } = createMockExtensionApi();
-		subagentsModule.default(api);
+		subagentsModule.default(api, { registerWithoutHerdr: true });
 
 		const rendererEntry = registeredMessageRenderers.find(
 			(entry) => entry.name === "subagent_result",
@@ -7649,7 +7696,7 @@ describe("subagent status renderer", () => {
 
 	it("recognizes the neutral provider error header when rendering expanded results", () => {
 		const { api, registeredMessageRenderers } = createMockExtensionApi();
-		subagentsModule.default(api);
+		subagentsModule.default(api, { registerWithoutHerdr: true });
 		const rendererEntry = registeredMessageRenderers.find(
 			(entry) => entry.name === "subagent_result",
 		);
@@ -7688,7 +7735,7 @@ describe("subagent status renderer", () => {
 
 	it("renders result details while keeping the custom message context small", () => {
 		const { api, registeredMessageRenderers } = createMockExtensionApi();
-		subagentsModule.default(api);
+		subagentsModule.default(api, { registerWithoutHerdr: true });
 
 		const rendererEntry = registeredMessageRenderers.find(
 			(entry) => entry.name === "subagent_result",
@@ -7724,7 +7771,7 @@ describe("subagent status renderer", () => {
 
 	it("renders only capped lines plus overflow", () => {
 		const { api, registeredMessageRenderers } = createMockExtensionApi();
-		subagentsModule.default(api);
+		subagentsModule.default(api, { registerWithoutHerdr: true });
 
 		const rendererEntry = registeredMessageRenderers.find(
 			(entry) => entry.name === "subagent_status",
@@ -7766,7 +7813,7 @@ describe("subagent status renderer", () => {
 
 	it("stays within narrow widths", () => {
 		const { api, registeredMessageRenderers } = createMockExtensionApi();
-		subagentsModule.default(api);
+		subagentsModule.default(api, { registerWithoutHerdr: true });
 
 		const rendererEntry = registeredMessageRenderers.find(
 			(entry) => entry.name === "subagent_status",
