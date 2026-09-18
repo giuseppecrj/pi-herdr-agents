@@ -186,6 +186,7 @@ function withTempDir(run: (dir: string) => void) {
 function createMockExtensionApi(extensionEvents = createEventBus()) {
 	const registeredTools: Array<any> = [];
 	const registeredCommands: Array<any> = [];
+	const registeredShortcuts: Array<any> = [];
 	const registeredMessageRenderers: Array<any> = [];
 	const eventHandlers = new Map<string, Array<Function>>();
 	const sentUserMessages: string[] = [];
@@ -193,6 +194,7 @@ function createMockExtensionApi(extensionEvents = createEventBus()) {
 	return {
 		registeredTools,
 		registeredCommands,
+		registeredShortcuts,
 		registeredMessageRenderers,
 		eventHandlers,
 		sentUserMessages,
@@ -216,7 +218,9 @@ function createMockExtensionApi(extensionEvents = createEventBus()) {
 			registerMessageRenderer(name: string, renderer: any) {
 				registeredMessageRenderers.push({ name, renderer });
 			},
-			registerShortcut() {},
+			registerShortcut(key: string, shortcut: any) {
+				registeredShortcuts.push({ key, ...shortcut });
+			},
 			sendUserMessage(message: string) {
 				sentUserMessages.push(message);
 			},
@@ -4255,6 +4259,63 @@ describe("subagent-done.ts", () => {
 		assert.equal(event.task, "task-1");
 		assert.equal(event.generation, "generation-1");
 		assert.ok(event.at);
+	});
+
+	it("registers no keyboard shortcut and renders no Ctrl+J hint", () => {
+		const previousAgent = process.env.PI_SUBAGENT_AGENT;
+		const previousDenyTools = process.env.PI_DENY_TOOLS;
+		process.env.PI_SUBAGENT_AGENT = "shortcut-test-agent";
+		process.env.PI_DENY_TOOLS = "browser_navigate, subagent";
+		try {
+			const { api, registeredShortcuts, eventHandlers } =
+				createMockExtensionApi();
+			api.getAllTools = () => [{ name: "read" }, { name: "bash" }];
+			subagentDoneExtension(api);
+			assert.deepEqual(registeredShortcuts, []);
+
+			const theme = {
+				fg: (_color: string, text: string) => text,
+				bg: (_color: string, text: string) => text,
+				bold: (text: string) => text,
+			};
+			let widgetFactory: Function | undefined;
+			const ctx = {
+				ui: {
+					setWidget(_name: string, factory: Function) {
+						widgetFactory = factory;
+					},
+				},
+			};
+			for (const handler of eventHandlers.get("session_start") ?? []) {
+				handler({}, ctx);
+			}
+			assert.deepEqual(
+				registeredShortcuts,
+				[],
+				"session start must not register keyboard shortcuts",
+			);
+			assert.ok(widgetFactory, "tools widget should still be rendered");
+			const widget = widgetFactory?.({}, theme);
+			const lines: string[] = widget.render(80);
+			assert.equal(
+				lines.length,
+				1,
+				`widget must render one compact line: ${JSON.stringify(lines)}`,
+			);
+			const rendered = lines[0];
+			assert.ok(
+				rendered.includes("[shortcut-test-agent] — 2 tools · 2 denied"),
+				`widget must show tool and denied counts: ${JSON.stringify(rendered)}`,
+			);
+			assert.equal(
+				rendered.includes("Ctrl+J"),
+				false,
+				`widget must not mention Ctrl+J: ${JSON.stringify(rendered)}`,
+			);
+		} finally {
+			restoreEnvVar("PI_SUBAGENT_AGENT", previousAgent);
+			restoreEnvVar("PI_DENY_TOOLS", previousDenyTools);
+		}
 	});
 
 	it("does not register subagent_done for auto-exit children", () => {

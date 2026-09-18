@@ -1063,13 +1063,10 @@ spawning: false
 
 ## Tools Widget
 
-Every sub-agent session displays a compact tools widget showing available and denied tools. Toggle with `Ctrl+J`:
+Every sub-agent session displays a compact one-line tools widget summarizing available and denied tools:
 
 ```
-[scout] — 12 tools · 4 denied  (Ctrl+J)              ← collapsed
-[scout] — 12 available  (Ctrl+J to collapse)          ← expanded
-  read, bash, edit, write, ...
-  denied: subagent, subagents_list, ...
+[scout] — 12 tools · 4 denied
 ```
 
 ---
