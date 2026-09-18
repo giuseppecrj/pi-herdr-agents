@@ -141,10 +141,19 @@ _Avoid_: Implicit commit, stash, discard
 An ordered authenticated model shortlist in `models.tasks` for `coding`,
 `review`, `recon`, `qa`, `architecture`, or `docs`. Recon maps to scouts,
 architecture to planning and diagnosis, coding to workers, review to reviewers,
-QA to software runners, and docs to documentation workers. `task:<category>`
-is tool-only deterministic routing; reviews use exact IDs when author-family
-exclusion is needed.
-_Avoid_: Generic tier, reviewer-family enforcement
+QA to software and test runners, and docs to documentation workers. Categories
+describe work, not complexity. `/subagents-init [preferences]` drafts them from
+the active extension-loaded registry's synchronous snapshot and existing saved
+choices, with source-based research when available. A dynamic provider awaiting
+its initial catalog refresh might be absent. `task:<category>` is a subagent
+model selector, not a command or parent model change. Ordered authenticated
+candidate plans resolve before launch; ordinary nonpersistent runs can retry
+after launch failure or a running child's provider/agent error, not a completed
+negative task result. Persistent specialists do not advance after a running-child
+error. Worktrees select the first authenticated candidate only, without fallback
+retries. Reviews use exact IDs from a different author family when the author
+is known.
+_Avoid_: Generic tier, reviewer-family enforcement, per-step routing
 
 **Loop template**:
 A future reusable orchestration definition beside `models`, describing stages,

@@ -1,3 +1,4 @@
+import "./isolated-agent-dir.ts";
 import { describe, it, before, after } from "node:test";
 import { cleanupFixture } from "./worktree-cleanup-fixture.ts";
 import assert from "node:assert/strict";
@@ -27,6 +28,7 @@ import {
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
+import { Value } from "@sinclair/typebox/value";
 import * as subagentsModule from "../pi-extension/subagents/index.ts";
 import {
 	isPlainObject,
@@ -2234,6 +2236,60 @@ describe("model configuration", () => {
 		}
 		assert.deepEqual(parseModelConfig({ models: { tasks: {} } }), {
 			agents: {},
+		});
+	});
+
+	it("rejects exact duplicate task candidates after trimming without changing case-sensitive IDs", () => {
+		assert.throws(
+			() =>
+				parseModelConfig({
+					models: { tasks: { coding: [" fake/Worker ", "fake/Worker"] } },
+				}),
+			/models\.tasks\.coding.*duplicate.*fake\/Worker/,
+		);
+		assert.deepEqual(
+			parseModelConfig({
+				models: {
+					tasks: { coding: [" fake/Worker ", "fake/worker", "proxy/Worker"] },
+				},
+			}).tasks,
+			{ coding: ["fake/Worker", "fake/worker", "proxy/Worker"] },
+		);
+	});
+
+	it("returns normalized saved preferences and missing categories after atomic replacement", () => {
+		withTempDir((dir) => {
+			const configPath = join(dir, "config.json");
+			const tasksMeta = {
+				generatedAt: "2026-09-18T00:00:00Z",
+				method: "registry-only" as const,
+			};
+			const result = writeTaskModelConfig(
+				configPath,
+				getSubagentsConfigExamplePath(),
+				{ coding: [" fake/worker "] },
+				tasksMeta,
+				(candidate) => candidate === "fake/worker",
+			);
+			assert.deepEqual(result, {
+				configPath,
+				tasks: { coding: ["fake/worker"] },
+				tasksMeta,
+				missingCategories: ["review", "recon", "qa", "architecture", "docs"],
+			});
+			const before = readFileSync(configPath, "utf8");
+			assert.throws(
+				() =>
+					writeTaskModelConfig(
+						configPath,
+						getSubagentsConfigExamplePath(),
+						{ coding: ["fake/worker", " fake/worker "] },
+						tasksMeta,
+						() => true,
+					),
+				/duplicate/,
+			);
+			assert.equal(readFileSync(configPath, "utf8"), before);
 		});
 	});
 
@@ -5734,13 +5790,358 @@ describe("commands", () => {
 			(command) => command.name === "subagents-init",
 		);
 		assert.ok(init, "expected /subagents-init to be registered");
-		await init.handler("", {});
+		await init.handler("", {
+			modelRegistry: { find: () => undefined, getAvailable: () => [] },
+		});
 		assert.equal(sentUserMessages.length, 1);
 		assert.match(sentUserMessages[0], /registry object/);
 		assert.match(sentUserMessages[0], /web search/);
 		assert.match(sentUserMessages[0], /registry-only/);
 		assert.match(sentUserMessages[0], /subagents_write_task_models/);
 		assert.match(sentUserMessages[0], /\/reload/);
+	});
+
+	it("injects every live available model with sanitized facts, preferences, and category definitions", async () => {
+		const dir = createTestDir();
+		const previous = process.env.PI_CODING_AGENT_DIR;
+		process.env.PI_CODING_AGENT_DIR = dir;
+		try {
+			const { api, registeredCommands, sentUserMessages } =
+				createMockExtensionApi();
+			subagentsModule.default(api);
+			// Written after registration: init must read the current saved preferences, not the module snapshot.
+			const configPath = getSubagentsConfigPath();
+			mkdirSync(dirname(configPath), { recursive: true });
+			writeFileSync(
+				configPath,
+				JSON.stringify({
+					privateSetting: "secret-unrelated-config",
+					models: {
+						default: "plain/old",
+						agents: { worker: "plain/old" },
+						tasks: { coding: ["plain/old"] },
+						tasksMeta: {
+							generatedAt: "2026-09-17T00:00:00Z",
+							method: "registry-only",
+						},
+					},
+				}),
+			);
+			const before = readFileSync(configPath, "utf8");
+			const models = Array.from({ length: 30 }, (_, i) => ({
+				provider: i === 29 ? "extension-bridge" : "plain",
+				id: `model-${String(i).padStart(2, "0")}`,
+				name: "Upstream model display name",
+				api: "openai-completions",
+				baseUrl: "https://secret-endpoint",
+				headers: { authorization: "secret-header" },
+				apiKey: "secret-key",
+				token: "secret-token",
+				reasoning: i === 29,
+				thinkingLevelMap: {
+					minimal: null,
+					low: null,
+					medium: null,
+					high: "secret-effort-value",
+					xhigh: null,
+					max: "max",
+				},
+				input: i === 29 ? ["text", "image"] : ["text"],
+				contextWindow: 200001 + i,
+				maxTokens: 16001 + i,
+				cost:
+					i === 0
+						? undefined
+						: { input: 0, output: 2, cacheRead: 0, secret: "secret-cost" },
+			}));
+			const registry = {
+				getAvailable: () => models.slice().reverse(),
+				find: (provider: string, id: string) =>
+					models.find((m) => m.provider === provider && m.id === id),
+				getAll: () => {
+					throw new Error("init must not read the unauthenticated catalog");
+				},
+				getRegisteredProviderIds: () => ["extension-bridge"],
+				getProviderAuthStatus: (provider: string) => ({
+					configured: true,
+					source: provider === "plain" ? "stored" : "secret-auth-source",
+					label: "secret-auth-label",
+				}),
+			};
+			const init = registeredCommands.find(
+				(command) => command.name === "subagents-init",
+			)!;
+			await init.handler(
+				"  Prefer capability over price; keep\nexisting coding choices.  ",
+				{ modelRegistry: registry },
+			);
+			assert.equal(sentUserMessages.length, 1);
+			const message = sentUserMessages[0];
+			assert.doesNotMatch(
+				message,
+				/secret-|baseUrl|apiKey|authorization|thinkingLevelMap/,
+			);
+			const json = message.match(/```json\n([\s\S]*?)\n```/);
+			assert.ok(json, "init must supply a structured registry brief");
+			const brief = JSON.parse(json[1]);
+			assert.equal(
+				brief.operatorPreferences,
+				"Prefer capability over price; keep\nexisting coding choices.",
+			);
+			assert.deepEqual(brief.categories, {
+				coding: "Implementation workers",
+				review: "Code reviewers",
+				recon: "Reconnaissance scouts",
+				qa: "Software and test runners",
+				architecture: "Planning and diagnosis",
+				docs: "Documentation workers",
+			});
+			assert.deepEqual(brief.current, {
+				default: "plain/old",
+				agents: { worker: "plain/old" },
+				tasks: { coding: ["plain/old"] },
+				tasksMeta: {
+					generatedAt: "2026-09-17T00:00:00Z",
+					method: "registry-only",
+				},
+			});
+			assert.equal(brief.models.length, 30);
+			assert.deepEqual(
+				brief.models.map((m: any) => m.ref),
+				[
+					"extension-bridge/model-29",
+					...Array.from(
+						{ length: 29 },
+						(_, i) => `plain/model-${String(i).padStart(2, "0")}`,
+					),
+				],
+			);
+			assert.deepEqual(brief.models[0], {
+				ref: "extension-bridge/model-29",
+				provider: "extension-bridge",
+				id: "model-29",
+				name: "Upstream model display name",
+				extensionRegistered: true,
+				auth: { configured: true },
+				reasoning: true,
+				supportedThinkingLevels: ["off", "high", "max"],
+				input: ["text", "image"],
+				contextWindow: 200030,
+				maxTokens: 16030,
+				cost: { input: 0, output: 2, cacheRead: 0 },
+			});
+			assert.equal(Object.hasOwn(brief.models[1], "cost"), false);
+			assert.deepEqual(brief.models[1].auth, {
+				configured: true,
+				source: "stored",
+			});
+			assert.deepEqual(brief.models[1].supportedThinkingLevels, ["off"]);
+			assert.equal(Object.hasOwn(brief.models[2].cost, "cacheWrite"), false);
+			assert.equal(
+				readFileSync(configPath, "utf8"),
+				before,
+				"init must not save a draft itself",
+			);
+			for (const rule of [
+				/capability-first/,
+				/efficiency/,
+				/complexity/,
+				/notable exclusions/,
+				/primary sources/,
+				/no usable evidence/,
+				/same upstream/,
+				/different.*family/,
+				/before\/after/,
+				/launch-time/,
+				/first authenticated/,
+				/not commands/,
+				/parent model/,
+			])
+				assert.match(message, rule);
+		} finally {
+			restoreEnvVar("PI_CODING_AGENT_DIR", previous);
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps a large init catalog complete in compact JSON and reports snapshot limits", async () => {
+		const { api, registeredCommands, sentUserMessages } =
+			createMockExtensionApi();
+		subagentsModule.default(api);
+		const models = Array.from({ length: 350 }, (_, i) => ({
+			provider: "gateway",
+			id: `alias-${i}`,
+			name: `Upstream ${i}`,
+			reasoning: false,
+		}));
+		await registeredCommands
+			.find((command) => command.name === "subagents-init")!
+			.handler("", {
+				modelRegistry: { getAvailable: () => models },
+			});
+		const message = sentUserMessages[0];
+		const json = message.match(/```json\n([\s\S]*?)\n```/);
+		assert.ok(json);
+		const brief = JSON.parse(json[1]);
+		assert.deepEqual(
+			new Set(brief.models.map((model: any) => model.ref)),
+			new Set(models.map((model) => `${model.provider}/${model.id}`)),
+		);
+		assert.equal(brief.models.length, models.length);
+		assert.equal(
+			json[1],
+			JSON.stringify(brief),
+			"catalog JSON must not add indentation or formatting whitespace",
+		);
+		assert.ok(message.includes(`${models.length} models`));
+		assert.ok(message.includes(`${json[1].length} JSON characters`));
+		assert.match(message, /synchronous snapshot/);
+		assert.match(message, /initial catalog refresh/);
+	});
+
+	it("tolerates an optional auth-status method returning undefined", async () => {
+		const { api, registeredCommands, sentUserMessages } =
+			createMockExtensionApi();
+		subagentsModule.default(api);
+		await registeredCommands
+			.find((command) => command.name === "subagents-init")!
+			.handler("", {
+				modelRegistry: {
+					getAvailable: () => [
+						{ provider: "dynamic", id: "model", reasoning: false },
+					],
+					getProviderAuthStatus: () => undefined,
+				},
+			});
+		const json = sentUserMessages[0].match(/```json\n([\s\S]*?)\n```/);
+		assert.ok(json);
+		assert.deepEqual(JSON.parse(json[1]).models[0].auth, { configured: true });
+	});
+
+	it("rejects empty task maps through the writer schema but accepts partial categories", () => {
+		const { api, registeredTools } = createMockExtensionApi();
+		subagentsModule.default(api);
+		const writer = registeredTools.find(
+			(tool) => tool.name === "subagents_write_task_models",
+		)!;
+		const tasksMeta = {
+			generatedAt: "2026-09-18T00:00:00Z",
+			method: "registry-only",
+		};
+		assert.equal(
+			Value.Check(writer.parameters, { tasks: {}, tasksMeta }),
+			false,
+		);
+		assert.equal(
+			Value.Check(writer.parameters, {
+				tasks: { coding: ["fake/worker"] },
+				tasksMeta,
+			}),
+			true,
+		);
+	});
+
+	it("supplies an honest empty init brief without inventing models or writing configuration", async () => {
+		const { api, registeredCommands, sentUserMessages } =
+			createMockExtensionApi();
+		subagentsModule.default(api);
+		await registeredCommands
+			.find((command) => command.name === "subagents-init")!
+			.handler("   ", {
+				modelRegistry: {
+					find: () => undefined,
+					getAvailable: () => [],
+					getAll: () => {
+						throw new Error("no fallback catalog");
+					},
+				},
+			});
+		const json = sentUserMessages[0].match(/```json\n([\s\S]*?)\n```/);
+		assert.ok(json);
+		const brief = JSON.parse(json[1]);
+		assert.equal(brief.operatorPreferences, "");
+		assert.deepEqual(brief.models, []);
+		assert.deepEqual(brief.current, { agents: {} });
+		assert.match(sentUserMessages[0], /no available models.*do not write/i);
+		assert.match(sentUserMessages[0], /not proof of.*successful.*request/i);
+	});
+
+	it("returns saved tool details and text from normalized config while preserving unrelated preferences", async () => {
+		const dir = createTestDir();
+		const previous = process.env.PI_CODING_AGENT_DIR;
+		process.env.PI_CODING_AGENT_DIR = dir;
+		try {
+			const { api, registeredTools } = createMockExtensionApi();
+			subagentsModule.default(api);
+			const configPath = getSubagentsConfigPath();
+			mkdirSync(dirname(configPath), { recursive: true });
+			writeFileSync(
+				configPath,
+				JSON.stringify({
+					status: { enabled: false },
+					models: {
+						default: "fake/default",
+						agents: { scout: "fake/scout" },
+						tasks: { review: ["fake/old"] },
+					},
+				}),
+			);
+			const writer = registeredTools.find(
+				(tool) => tool.name === "subagents_write_task_models",
+			)!;
+			assert.deepEqual(
+				Object.keys(writer.parameters.properties.tasks.properties),
+				["coding", "review", "recon", "qa", "architecture", "docs"],
+			);
+			assert.equal(
+				writer.parameters.properties.tasks.additionalProperties,
+				false,
+			);
+			assert.equal(writer.parameters.properties.tasks.required?.length ?? 0, 0);
+			const tasksMeta = {
+				generatedAt: "2026-09-18T00:00:00Z",
+				method: "registry-only",
+			};
+			const model = { provider: "fake", id: "worker", reasoning: false };
+			const result = await writer.execute(
+				"init-write",
+				{ tasks: { coding: [" fake/worker "] }, tasksMeta },
+				undefined,
+				undefined,
+				{
+					modelRegistry: {
+						find: (provider: string, id: string) =>
+							provider === "fake" && id === "worker" ? model : undefined,
+						getAvailable: () => [model],
+						hasConfiguredAuth: () => true,
+					},
+				},
+			);
+			assert.deepEqual(result.details, {
+				configPath,
+				tasks: { coding: ["fake/worker"] },
+				tasksMeta,
+				missingCategories: ["review", "recon", "qa", "architecture", "docs"],
+			});
+			assert.match(result.content[0].text, /Reload required/);
+			assert.ok(
+				result.content[0].text.includes(
+					JSON.stringify(result.details, null, 2),
+				),
+			);
+			assert.deepEqual(JSON.parse(readFileSync(configPath, "utf8")), {
+				status: { enabled: false },
+				models: {
+					default: "fake/default",
+					agents: { scout: "fake/scout" },
+					tasks: { coding: ["fake/worker"] },
+					tasksMeta,
+				},
+			});
+		} finally {
+			restoreEnvVar("PI_CODING_AGENT_DIR", previous);
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("registers direct BTW commands without steering the parent", async () => {
@@ -5858,7 +6259,7 @@ describe("worktree cleanup public surface", () => {
 		const ctx = {
 			cwd: "/repo",
 			hasUI: true,
-			modelRegistry: { getAvailable: () => [] },
+			modelRegistry: { find: () => undefined, getAvailable: () => [] },
 			ui: { notify: (text: string) => notices.push(text) },
 		};
 		const list = registeredTools.find((tool) => tool.name === "worktree_list");

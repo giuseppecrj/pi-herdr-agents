@@ -12,6 +12,14 @@ export const TASK_CATEGORIES = [
 	"docs",
 ] as const;
 export type TaskCategory = (typeof TASK_CATEGORIES)[number];
+export const TASK_CATEGORY_DESCRIPTIONS = {
+	coding: "Implementation workers",
+	review: "Code reviewers",
+	recon: "Reconnaissance scouts",
+	qa: "Software and test runners",
+	architecture: "Planning and diagnosis",
+	docs: "Documentation workers",
+} satisfies Record<TaskCategory, string>;
 export type TaskPreferences = Partial<Record<TaskCategory, string[]>>;
 export interface TaskPreferencesMeta {
 	generatedAt: string;
@@ -68,6 +76,7 @@ function parseTasks(value: any, source: string): TaskPreferences | undefined {
 				`models.tasks.${category} must be a non-empty list`,
 			);
 		}
+		const seen = new Set<string>();
 		tasks[category] = candidates.map((candidate, index) => {
 			if (!isString(candidate) || candidate.trim() === "") {
 				invalidModelConfig(
@@ -75,7 +84,15 @@ function parseTasks(value: any, source: string): TaskPreferences | undefined {
 					`models.tasks.${category}[${index}] must be a non-empty string`,
 				);
 			}
-			return candidate.trim();
+			const reference = candidate.trim();
+			if (seen.has(reference)) {
+				invalidModelConfig(
+					source,
+					`models.tasks.${category} has duplicate candidate ${JSON.stringify(reference)}`,
+				);
+			}
+			seen.add(reference);
+			return reference;
 		});
 	}
 	return tasks;
@@ -209,6 +226,13 @@ export function loadModelConfig(
 	}
 }
 
+export interface SavedTaskModelConfig {
+	configPath: string;
+	tasks: TaskPreferences;
+	tasksMeta: TaskPreferencesMeta | undefined;
+	missingCategories: TaskCategory[];
+}
+
 /** Atomically replace only models.tasks and models.tasksMeta in the durable user config. */
 export function writeTaskModelConfig(
 	configPath: string,
@@ -220,7 +244,7 @@ export function writeTaskModelConfig(
 		typeof import("node:fs"),
 		"renameSync" | "writeFileSync"
 	> = { renameSync, writeFileSync },
-): void {
+): SavedTaskModelConfig {
 	const candidateConfig = parseModelConfig(
 		{ models: { tasks, tasksMeta } },
 		configPath,
@@ -260,6 +284,14 @@ export function writeTaskModelConfig(
 	);
 	fileOperations.writeFileSync(temporary, output, { flag: "wx" });
 	fileOperations.renameSync(temporary, configPath);
+	return {
+		configPath,
+		tasks: candidateConfig.tasks ?? {},
+		tasksMeta: candidateConfig.tasksMeta,
+		missingCategories: TASK_CATEGORIES.filter(
+			(category) => !candidateConfig.tasks?.[category],
+		),
+	};
 }
 
 function readFileIfExists(path: string): string | undefined {

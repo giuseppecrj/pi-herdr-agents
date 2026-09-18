@@ -146,7 +146,7 @@ Subagent tabs, panes, and worktree workspaces are created without stealing keybo
 | `/btw-close`               | Close the current BTW session        |
 | `/worktree <name> [task]`  | Continue this session in a new managed worktree (`/worktree list` lists them) |
 | `/subagent <agent> <task>` | Spawn a named agent directly (`/subagent list` lists available agents) |
-| `/subagents-init` | Draft task-category model preferences from the authenticated registry |
+| `/subagents-init [preferences]` | Draft task-category model preferences from the live authenticated registry, with optional ranking preferences |
 
 ### Taxonomy and discovery
 
@@ -347,10 +347,69 @@ valid in frontmatter or model defaults. For review when the authoring family is
 known, choose an exact shortlist ID from a different family rather than
 `task:review`; this is guidance, not extension enforcement.
 
-Run `/subagents-init` to inspect the authenticated registry, research current
-task fit when search is available, write a validated draft, and show its table
-and generation metadata. It reports `registry-only` when research is unavailable.
-Run `/reload` (or start a new session) after it writes the draft.
+Run `/subagents-init [preferences]` to draft task-model preferences. For example:
+
+```text
+/subagents-init Prefer capability over price for implementation; keep recon inexpensive
+```
+
+The command supplies a sanitized snapshot of **all available models from the
+active session registry**, including extension-registered providers, exact IDs,
+display names, reported base token costs, context/output limits, input
+modalities, reasoning, and supported thinking levels. Safe extension-registration and auth-source
+metadata is included when Pi exposes it; credentials, endpoints, and raw auth
+labels are not. Configured authentication does not prove account access or a
+successful request. Missing costs remain unknown; reported zero does not mean
+free, and OAuth does not establish subscription billing. The brief uses compact
+JSON without truncating models and reports its model count and JSON character
+count (not a token estimate); large catalogs still consume context. This is the
+current synchronous snapshot: a dynamic provider whose initial catalog refresh
+has not completed might be absent. Init does not refresh providers or probe the
+network for availability.
+
+The draft considers current saved task, default, and per-agent preferences.
+Optional command arguments set ranking preferences. Otherwise it favors
+capability for substantive work and efficiency for bounded reconnaissance and
+test execution. Categories describe work, not complexity tiers:
+
+| Category | Work |
+| --- | --- |
+| `coding` | Implementation workers |
+| `review` | Code reviewers |
+| `recon` | Reconnaissance scouts |
+| `qa` | Software and test runners |
+| `architecture` | Planning and diagnosis |
+| `docs` | Documentation workers |
+
+Init asks the agent to research major candidates across providers using primary
+sources, disclose uncertainty and notable exclusions, and avoid duplicate
+upstream models across routes unless deliberate redundancy is explained. Display
+names help identify candidates but, like aliases, do not prove upstream
+equivalence; research is still required. Price or context size alone is not
+quality evidence. It reports `registry-only` when
+search is unavailable or yields no usable evidence; no live model probes run.
+
+The writer validates and atomically replaces `models.tasks` and `tasksMeta`,
+preserving unrelated settings. Its tool schema accepts partial nonempty
+categories (omitted categories are removed), rejects empty `tasks: {}` input,
+and rejects exact duplicate refs within a category after trimming;
+IDs remain case-sensitive. Its result includes normalized saved `tasks`,
+`tasksMeta`, `configPath`, and `missingCategories`. Init requests all six categories
+and a before/after table based on that saved result, not the unsaved draft. It
+must explain missing categories or changed choices; with no available models,
+it must report the limitation without writing.
+
+`task:<category>` values select subagent models; they are not slash commands and
+do not change the parent model. Ordered authenticated candidate plans resolve
+before launch. Ordinary nonpersistent runs can retry later candidates after
+launch failure or after a running child settles with a provider/agent error,
+not after a completed negative task result. Persistent specialists do not
+advance after a running-child error. This is not per-step routing; worktrees
+use the first authenticated candidate only, without fallback retries.
+Shortlists do not enforce reviewer independence: select an exact reviewer from
+a different author family when the author is known, and a different provider
+when project policy requires it. Another route to the same family is not
+independent review. Run `/reload` (or start a new session) after writing preferences.
 
 Set `persistent.maxAgents` to the maximum concurrently retained persistent specialists. It defaults to `3`; a persistent spawn at the cap is rejected before Herdr creates a pane or workspace, and no specialist is evicted.
 

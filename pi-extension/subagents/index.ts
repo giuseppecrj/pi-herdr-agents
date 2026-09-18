@@ -59,6 +59,8 @@ import {
 	loadModelConfig,
 	resolveModelDefault,
 	writeTaskModelConfig,
+	TASK_CATEGORIES,
+	TASK_CATEGORY_DESCRIPTIONS,
 	type TaskPreferences,
 	type TaskPreferencesMeta,
 } from "./model-config.ts";
@@ -68,6 +70,10 @@ import {
 	getSubagentsConfigPath,
 } from "./config-path.ts";
 import { loadRoleConfig, type RoleConfig } from "./role-config.ts";
+import {
+	buildTaskModelBrief,
+	buildTaskModelInitPrompt,
+} from "./task-model-init.ts";
 import {
 	loadPersistentConfig,
 	type PersistentConfig,
@@ -3226,10 +3232,22 @@ export default function subagentsExtension(
 		pi.registerTool({
 			name: "subagents_write_task_models",
 			label: "Write task model preferences",
-			description:
-				"Validate and atomically write models.tasks and models.tasksMeta to the durable Pi agent config. Use only after reviewing an authenticated registry.",
+			description: `Validate and atomically replace models.tasks and models.tasksMeta in the durable Pi agent config, preserving unrelated settings. Supported categories: ${TASK_CATEGORIES.join(", ")}. Partial nonempty categories are accepted; omitted categories are removed. Rejects duplicate exact refs within a category. Review the active authenticated registry and existing preferences first. Returns normalized saved preferences and missing categories; reload required.`,
 			parameters: Type.Object({
-				tasks: Type.Record(Type.String(), Type.Array(Type.String())),
+				tasks: Type.Object(
+					Object.fromEntries(
+						TASK_CATEGORIES.map((category) => [
+							category,
+							Type.Optional(
+								Type.Array(Type.String({ minLength: 1 }), {
+									minItems: 1,
+									description: TASK_CATEGORY_DESCRIPTIONS[category],
+								}),
+							),
+						]),
+					),
+					{ additionalProperties: false, minProperties: 1 },
+				),
 				tasksMeta: Type.Object({
 					generatedAt: Type.String(),
 					method: Type.Union([
@@ -3244,7 +3262,7 @@ export default function subagentsExtension(
 				const tasks = params.tasks as TaskPreferences;
 				// SAFETY: TypeBox validates the tool payload; the write seam performs stricter schema validation.
 				const tasksMeta = params.tasksMeta as TaskPreferencesMeta;
-				writeTaskModelConfig(
+				const saved = writeTaskModelConfig(
 					getSubagentsConfigPath(),
 					getSubagentsConfigExamplePath(),
 					tasks,
@@ -3260,9 +3278,10 @@ export default function subagentsExtension(
 					content: [
 						{
 							type: "text",
-							text: `Wrote task model preferences to ${getSubagentsConfigPath()}. Reload required.`,
+							text: `Wrote task model preferences. Reload required.\n${JSON.stringify(saved, null, 2)}`,
 						},
 					],
+					details: saved,
 				};
 			},
 		});
@@ -4107,11 +4126,14 @@ export default function subagentsExtension(
 	if (!process.env.PI_SUBAGENT_ID)
 		pi.registerCommand("subagents-init", {
 			description:
-				"Draft task-category model preferences from the authenticated registry",
-			handler: async (_args, _ctx) => {
-				pi.sendUserMessage(
-					"Initialize task-model routing. Inspect the authenticated model registry object (including provider, model ID, cost, context window, and reasoning support), not the rendered catalog. Research current task fit using available web search; if unavailable, rank from the registry and set tasksMeta.method to registry-only. Draft every supported category with authenticated candidates, then call subagents_write_task_models. In your summary, show a category-to-candidates table, generatedAt and method, state whether research informed the ranking, and instruct the user to run /reload (or start a new session) before task:<category> and guidance update.",
+				"Draft task-category model preferences from the live registry; optional arguments set ranking preferences",
+			handler: async (args, ctx) => {
+				const brief = buildTaskModelBrief(
+					ctx.modelRegistry,
+					loadModelConfig(),
+					args,
 				);
+				pi.sendUserMessage(buildTaskModelInitPrompt(brief));
 			},
 		});
 
