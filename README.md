@@ -202,9 +202,16 @@ authenticated `provider/model-id` and supported thinking level. Select the
 model tier first: fast for bounded mechanical work and recon, mid for ordinary
 implementation or review, and frontier for architecture, security, hard
 diagnosis, or adversarial review. Then select thinking within that model's
-supported range. Independent reviewers must use a different provider/family
-than the model that produced the work; a stronger model in the same family is a
-quality escalation, not independent review.
+supported range. Cross-family independent review requires a reviewer from a
+different model family than the author. For ordinary review, prefer a different
+authenticated model family. When no other authenticated model family is
+available, ordinary review may use a same-family reviewer in a fresh standalone
+session. Disclose that this review is context-isolated, not cross-family
+independent. Cross-family verification, `/skill:orchestrate`, and
+`adversarial-reviewer` must not use this fallback. A stronger model in the same
+family is a quality escalation, not cross-family
+independent review. Family is the independence boundary; project policy may
+separately require a different provider.
 
 Discovery loads definitions in **package → global → project** order, so effective
 priority remains **project** (`.pi/agents/`) > **global**
@@ -343,9 +350,17 @@ exact IDs from your authenticated model catalog:
 
 `models.tasks` candidates are ordered exact authenticated IDs. Use
 `task:<category>` only in the `subagent` tool's `model` argument; it is not
-valid in frontmatter or model defaults. For review when the authoring family is
-known, choose an exact shortlist ID from a different family rather than
-`task:review`; this is guidance, not extension enforcement.
+valid in frontmatter or model defaults. Cross-family independent review requires
+a reviewer from a different model family than the author. For ordinary review,
+prefer a different authenticated model family. When no other authenticated
+model family is available, ordinary review may use a same-family reviewer in a
+fresh standalone session. Disclose that this review is context-isolated, not
+cross-family independent. Cross-family verification, `/skill:orchestrate`, and
+`adversarial-reviewer` must not use this fallback. Use an exact authenticated
+shortlist `provider/model-id` when the
+authoring family is known; `task:review` does not establish independence. Family
+is the independence boundary; project policy may separately require a different
+provider. This is guidance, not extension enforcement.
 
 Run `/subagents-init [preferences]` to draft task-model preferences. For example:
 
@@ -406,10 +421,17 @@ launch failure or after a running child settles with a provider/agent error,
 not after a completed negative task result. Persistent specialists do not
 advance after a running-child error. This is not per-step routing; worktrees
 use the first authenticated candidate only, without fallback retries.
-Shortlists do not enforce reviewer independence: select an exact reviewer from
-a different author family when the author is known, and a different provider
-when project policy requires it. Another route to the same family is not
-independent review. Run `/reload` (or start a new session) after writing preferences.
+Shortlists do not enforce reviewer independence. Cross-family independent
+review requires a reviewer from a different model family than the author. For
+ordinary review, prefer a different authenticated model family. When no other
+authenticated model family is available, ordinary review may use a same-family
+reviewer in a fresh standalone session. Disclose that this review is
+context-isolated, not cross-family independent. Cross-family verification,
+`/skill:orchestrate`, and `adversarial-reviewer` must not use this fallback.
+Another route to the same family is not
+independent review. Family is the independence boundary; project policy may
+separately require a different provider. Run `/reload` (or start a new session)
+after writing preferences.
 
 Set `persistent.maxAgents` to the maximum concurrently retained persistent specialists. It defaults to `3`; a persistent spawn at the cap is rejected before Herdr creates a pane or workspace, and no specialist is evicted.
 

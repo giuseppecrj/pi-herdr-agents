@@ -40,7 +40,7 @@ Phase 7: Review
 
 ## Runtime
 
-Set `model` and `thinking` on every spawn. For non-review roles, prefer a configured `task:<category>` or its curated shortlist: `recon` for scouts, `architecture` for planning and diagnosis, `coding` for workers, `qa` for runners, and `docs` for documentation. Reviewers must use an exact authenticated provider/model ID from a different provider/family than workers when the author family is known; do not use `task:review` for that exclusion. Do not omit `model` in this workflow.
+Set `model` and `thinking` on every spawn. For non-review roles, prefer a configured `task:<category>` or its curated shortlist: `recon` for scouts, `architecture` for planning and diagnosis, `coding` for workers, `qa` for runners, and `docs` for documentation. Phase 7 uses ordinary review. For ordinary review, prefer a different authenticated model family. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification, `/skill:orchestrate`, and `adversarial-reviewer` must not use this fallback. Use an exact authenticated provider/model-id when the author family is known; do not use `task:review` for that exclusion. Do not omit `model` in this workflow.
 
 ## Fire-and-forget completion
 

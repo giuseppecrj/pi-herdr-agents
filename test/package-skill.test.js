@@ -25,6 +25,22 @@ const planSkill = readFileSync(
 	join(root, "pi-extension", "subagents", "plan-skill.md"),
 	"utf8",
 );
+const readme = readFileSync(join(root, "README.md"), "utf8");
+const context = readFileSync(join(root, "CONTEXT.md"), "utf8");
+const normalized = (value) => value.replace(/\s+/g, " ").trim();
+const sectionBetween = (value, start, end) => {
+	const startIndex = value.indexOf(start);
+	const endIndex = value.indexOf(end, startIndex + start.length);
+	assert.notEqual(startIndex, -1, `missing section start: ${start}`);
+	assert.notEqual(endIndex, -1, `missing section end: ${end}`);
+	return normalized(value.slice(startIndex, endIndex));
+};
+const ordinaryReviewClauses = [
+	"For ordinary review, prefer a different authenticated model family.",
+	"When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session.",
+	"Disclose that this review is context-isolated, not cross-family independent.",
+	"Cross-family verification, `/skill:orchestrate`, and `adversarial-reviewer` must not use this fallback.",
+];
 const packageFiles = new Set(
 	JSON.parse(
 		execFileSync("npm", ["pack", "--dry-run", "--json"], {
@@ -229,5 +245,66 @@ describe("bundled orchestration skill", () => {
 		]) {
 			assert.ok(planSkill.includes(phrase), `missing review input: ${phrase}`);
 		}
+	});
+
+	it("states the authenticated-family ordinary-review gate in /plan", () => {
+		const compact = normalized(planSkill);
+		assert.ok(compact.includes("Phase 7 uses ordinary review."));
+		for (const clause of ordinaryReviewClauses)
+			assert.ok(compact.includes(clause), `/plan must include: ${clause}`);
+		assert.doesNotMatch(compact, /do not disclose/i);
+	});
+
+	it("defines independent and ordinary review separately in README and CONTEXT", () => {
+		const independentClause =
+			"Cross-family independent review requires a reviewer from a different model family than the author.";
+		for (const [label, content] of [
+			["README", readme],
+			["CONTEXT", context],
+		]) {
+			const compact = normalized(content);
+			assert.ok(
+				compact.includes(independentClause),
+				`${label} must define independent review as a requirement`,
+			);
+			for (const clause of ordinaryReviewClauses)
+				assert.ok(compact.includes(clause), `${label} must include: ${clause}`);
+		}
+		assert.doesNotMatch(
+			readme,
+			/Independent reviewers should use/i,
+			"README must not weaken independent review to a suggestion",
+		);
+		assert.doesNotMatch(
+			readme,
+			/For review when the authoring family is known, choose an exact shortlist ID[^.]*task:review`; this is guidance/i,
+			"README must replace the unconditional task:review paragraph",
+		);
+	});
+
+	it("keeps all three README review passages aligned with the taxonomy", () => {
+		const passages = [
+			sectionBetween(
+				readme,
+				"Bundled agents use model defaults",
+				"Discovery loads definitions",
+			),
+			sectionBetween(
+				readme,
+				"`models.tasks` candidates are ordered exact authenticated IDs.",
+				"Run `/subagents-init",
+			),
+			sectionBetween(
+				readme,
+				"Shortlists do not enforce reviewer independence.",
+				"Set `persistent.maxAgents`",
+			),
+		];
+		for (const [index, passage] of passages.entries())
+			for (const clause of ordinaryReviewClauses)
+				assert.ok(
+					passage.includes(clause),
+					`README passage ${index + 1} must include: ${clause}`,
+				);
 	});
 });

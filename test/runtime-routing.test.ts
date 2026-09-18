@@ -35,6 +35,17 @@ function model(
 	};
 }
 
+function normalized(value: string) {
+	return value.replace(/\s+/g, " ").trim();
+}
+
+const ordinaryReviewClauses = [
+	"For ordinary review, prefer a different authenticated model family.",
+	"When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session.",
+	"Disclose that this review is context-isolated, not cross-family independent.",
+	"Cross-family verification, `/skill:orchestrate`, and `adversarial-reviewer` must not use this fallback.",
+];
+
 function registry(entries = [model("fake", "parent"), model("other", "fast")]) {
 	const byRef = new Map(
 		entries.map((entry) => [`${entry.provider}/${entry.id}`, entry]),
@@ -334,11 +345,16 @@ describe("authenticated model catalog", () => {
 		assert.match(catalog, /non-reasoning/);
 		assert.match(
 			catalog,
-			/explicitly select an exact provider\/model-id by task tier first/,
+			/explicitly select an exact authenticated provider\/model-id by task tier first/,
 		);
 		assert.match(
 			catalog,
-			/Reviews must use a different provider\/family than the producing model/,
+			/For ordinary review, prefer a different authenticated model family/,
+		);
+		assert.match(
+			catalog,
+			/context-isolated/,
+			"generic catalog must describe context-isolated same-family fallback",
 		);
 		assert.match(
 			catalog,
@@ -372,9 +388,11 @@ describe("authenticated model catalog", () => {
 		assert.match(catalog, /- coding: other\/second, other\/first/);
 		assert.match(catalog, /- review: fake\/parent/);
 		assert.doesNotMatch(catalog, /other\/unauthed/);
+		assert.match(catalog, /The extension does not enforce this/);
 		assert.match(
 			catalog,
-			/use an exact provider\/model-id; the extension does not enforce this/,
+			/context-isolated/,
+			"shortlist catalog must describe context-isolated same-family fallback",
 		);
 	});
 
@@ -383,7 +401,7 @@ describe("authenticated model catalog", () => {
 			const catalog = buildAuthenticatedModelCatalog(registry(), 24, tasks);
 			assert.match(
 				catalog,
-				/explicitly select an exact provider\/model-id by task tier first/,
+				/explicitly select an exact authenticated provider\/model-id by task tier first/,
 			);
 			assert.doesNotMatch(catalog, /Task-category shortlists/);
 		}
@@ -396,5 +414,48 @@ describe("authenticated model catalog", () => {
 		const catalog = buildAuthenticatedModelCatalog(registry(available), 5);
 		assert.equal((catalog.match(/^- fake\//gm) ?? []).length, 5);
 		assert.match(catalog, /25 more authenticated models omitted/);
+	});
+
+	it("keeps ordinary fallback separate from strict orchestration guidance in both catalog branches", () => {
+		const catalogs = [
+			[
+				"shortlist",
+				buildAuthenticatedModelCatalog(registry(), 24, {
+					coding: ["other/fast"],
+				}),
+			],
+			["generic", buildAuthenticatedModelCatalog(registry())],
+		] as const;
+		for (const [label, catalog] of catalogs) {
+			const compact = normalized(catalog);
+			for (const clause of ordinaryReviewClauses)
+				assert.ok(
+					compact.includes(clause),
+					`${label} catalog must include: ${clause}`,
+				);
+			assert.match(
+				compact,
+				/exact authenticated provider\/model-id/,
+				`${label} catalog must require an exact authenticated provider/model-id`,
+			);
+		}
+
+		const genericLines = catalogs[1][1].split("\n");
+		const orchestratedLine = genericLines.find((line) =>
+			line.startsWith("For orchestrated children"),
+		);
+		assert.ok(
+			orchestratedLine,
+			"generic catalog must include an orchestrated line",
+		);
+		assert.doesNotMatch(
+			orchestratedLine,
+			/ordinary|same-family|context-isolated/i,
+			"generic catalog's orchestrated line must not embed ordinary-review fallback",
+		);
+		assert.ok(
+			genericLines.some((line) => line.startsWith("For ordinary review")),
+			"generic catalog must put ordinary-review guidance on a separate line",
+		);
 	});
 });

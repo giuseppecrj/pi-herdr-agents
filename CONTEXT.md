@@ -151,8 +151,15 @@ candidate plans resolve before launch; ordinary nonpersistent runs can retry
 after launch failure or a running child's provider/agent error, not a completed
 negative task result. Persistent specialists do not advance after a running-child
 error. Worktrees select the first authenticated candidate only, without fallback
-retries. Reviews use exact IDs from a different author family when the author
-is known.
+retries. Cross-family independent review requires a reviewer from a different
+model family than the author. For ordinary review, prefer a different
+authenticated model family. When no other authenticated model family is
+available, ordinary review may use a same-family reviewer in a fresh standalone
+session. Disclose that this review is context-isolated, not cross-family
+independent. Cross-family verification, `/skill:orchestrate`, and
+`adversarial-reviewer` must not use this fallback. Family is the independence
+boundary; project policy may separately require a
+different provider.
 _Avoid_: Generic tier, reviewer-family enforcement, per-step routing
 
 **Loop template**:

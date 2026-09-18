@@ -457,11 +457,14 @@ export function buildAuthenticatedModelCatalog(
 		for (const [category, candidates] of configured)
 			lines.push(`- ${category}: ${candidates.join(", ")}`);
 		lines.push(
-			"For review spawns where an authoring model family is known, skip candidates sharing the authoring model's provider family and use an exact provider/model-id; the extension does not enforce this.",
+			"For ordinary review, prefer a different authenticated model family. Use an exact authenticated provider/model-id from the shortlist when the authoring family is known. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification, `/skill:orchestrate`, and `adversarial-reviewer` must not use this fallback. The extension does not enforce this.",
 		);
 	} else {
 		lines.push(
-			"For orchestrated children, explicitly select an exact provider/model-id by task tier first (fast for bounded mechanical work and recon, mid for ordinary implementation or review, frontier for architecture, security, hard diagnosis, or adversarial review), then set supported thinking. Reviews must use a different provider/family than the producing model.",
+			"For orchestrated children, explicitly select an exact authenticated provider/model-id by task tier first (fast for bounded mechanical work and recon, mid for implementation and review, frontier for architecture, security, hard diagnosis, or adversarial review), then set supported thinking.",
+		);
+		lines.push(
+			"For ordinary review, prefer a different authenticated model family. Use an exact authenticated provider/model-id from the catalog when the authoring family is known. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification, `/skill:orchestrate`, and `adversarial-reviewer` must not use this fallback.",
 		);
 	}
 	lines.push(

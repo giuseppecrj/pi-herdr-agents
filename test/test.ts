@@ -145,6 +145,10 @@ import {
 	type SubagentLifecycle,
 } from "../pi-extension/subagents/lifecycle.ts";
 import { launchPiSubagent } from "../pi-extension/subagents/launch.ts";
+import {
+	buildAuthenticatedModelCatalog,
+	wrapPiModelRegistry,
+} from "../pi-extension/subagents/runtime-routing.ts";
 
 // Tool-registration behavior is environment-sensitive for child subagents.
 // Isolate the unit suite from inherited parent/child capability variables.
@@ -3328,6 +3332,11 @@ describe("subagent discovery", () => {
 		);
 		assert.match(instructions, /candidate-dependent/i);
 		assert.match(instructions, /different provider\/model family/i);
+		assert.doesNotMatch(
+			instructions,
+			/same-family.*fallback/i,
+			"adversarial reviewer must not allow same-family fallback",
+		);
 		assert.match(instructions, /fresh reviewer carrying alias\s+`S1`/i);
 		assert.match(instructions, /subagent_ping.*not a review report/is);
 		assert.match(instructions, /nonzero exit, provider error, launch error/i);
@@ -6012,6 +6021,10 @@ describe("commands", () => {
 				/no usable evidence/,
 				/same upstream/,
 				/different.*family/,
+				/context-isolated/,
+				/not cross-family independent/,
+				/[Ww]hen no other.*family is available/,
+				/[Oo]rdinary review/,
 				/before\/after/,
 				/launch-time/,
 				/first authenticated/,
@@ -6019,6 +6032,18 @@ describe("commands", () => {
 				/parent model/,
 			])
 				assert.match(message, rule);
+			const normalizedPrompt = message.replace(/\s+/g, " ").trim();
+			for (const clause of [
+				"Cross-family independent review requires a reviewer from a different model family than the author.",
+				"For ordinary review, prefer a different authenticated model family.",
+				"When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session.",
+				"Disclose that this review is context-isolated, not cross-family independent.",
+				"Cross-family verification, `/skill:orchestrate`, and `adversarial-reviewer` must not use this fallback.",
+			])
+				assert.ok(
+					normalizedPrompt.includes(clause),
+					`task-model init prompt must include: ${clause}`,
+				);
 		} finally {
 			restoreEnvVar("PI_CODING_AGENT_DIR", previous);
 			rmSync(dir, { recursive: true, force: true });
@@ -6580,13 +6605,91 @@ describe("tool registration", () => {
 		);
 		assert.match(
 			subagent.promptGuidelines.join("\n"),
-			/different provider\/family than the model that produced the work/,
+			/For ordinary review, prefer a different authenticated model family/,
+		);
+		assert.match(
+			subagent.promptGuidelines.join("\n"),
+			/context-isolated/,
+			"injected routing guidelines must describe context-isolated same-family fallback",
 		);
 		assert.match(
 			subagent.promptGuidelines.join("\n"),
 			/Omitting model and thinking still inherits the parent runtime, but this is a discouraged fallback/,
 		);
 		assert.match(subagent.promptGuidelines.join("\n"), /login-test2/);
+	});
+
+	it("distinguishes ordinary context-isolated review from strict cross-family review", () => {
+		const registry = wrapPiModelRegistry({
+			find: (p: string, id: string) => ({ provider: p, id, reasoning: true }),
+			getAvailable: () => [
+				{
+					provider: "fake",
+					id: "worker",
+					reasoning: true,
+					input: ["text"],
+					contextWindow: 128_000,
+					maxTokens: 16_000,
+				},
+			],
+			getAll: () => {
+				throw new Error("must not call getAll");
+			},
+		});
+		const clauses = [
+			"For ordinary review, prefer a different authenticated model family.",
+			"When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session.",
+			"Disclose that this review is context-isolated, not cross-family independent.",
+			"Cross-family verification, `/skill:orchestrate`, and `adversarial-reviewer` must not use this fallback.",
+		];
+		for (const [label, taskPreferences] of [
+			["shortlist", { coding: ["fake/worker"] }],
+			["generic", {}],
+		] as const) {
+			const catalog = buildAuthenticatedModelCatalog(
+				registry,
+				24,
+				taskPreferences,
+			);
+			const combined = subagentsModule.__test__
+				.buildSubagentRoutingGuidelines(catalog, taskPreferences)
+				.join("\n")
+				.replace(/\s+/g, " ")
+				.trim();
+			for (const clause of clauses)
+				assert.ok(
+					combined.includes(clause),
+					`${label} combined guidance must include: ${clause}`,
+				);
+			if (label === "generic") {
+				const orchestratedLine = catalog
+					.split("\n")
+					.find((line) => line.startsWith("For orchestrated children"));
+				assert.ok(orchestratedLine);
+				assert.doesNotMatch(
+					orchestratedLine,
+					/ordinary|same-family|context-isolated/i,
+				);
+			}
+		}
+	});
+
+	it("states the complete ordinary-review taxonomy in routing guidelines", () => {
+		const guidelines = subagentsModule.__test__
+			.buildSubagentRoutingGuidelines("catalog", { coding: ["fake/worker"] })
+			.join("\n")
+			.replace(/\s+/g, " ")
+			.trim();
+		for (const clause of [
+			"For ordinary review, prefer a different authenticated model family.",
+			"When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session.",
+			"Disclose that this review is context-isolated, not cross-family independent.",
+			"Cross-family verification, `/skill:orchestrate`, and `adversarial-reviewer` must not use this fallback.",
+		])
+			assert.ok(
+				guidelines.includes(clause),
+				`routing guidelines must include: ${clause}`,
+			);
 	});
 
 	it("renders generic routing tiers only when no authenticated shortlist is available", () => {
@@ -6684,6 +6787,107 @@ describe("tool registration", () => {
 		assert.equal(worktreeSchema.properties.branch.minLength, 1);
 		assert.equal(worktreeSchema.properties.base.type, "string");
 		assert.match(subagentTool.description, /retain.*parent review/i);
+	});
+
+	it("describes the complete ordinary-review taxonomy in the model parameter", () => {
+		const { api, registeredTools } = createMockExtensionApi();
+		subagentsModule.default(api);
+		const subagentTool = registeredTools.find(
+			(tool) => tool.name === "subagent",
+		);
+		const modelDesc = (
+			subagentTool.parameters.properties.model.description ?? ""
+		)
+			.replace(/\s+/g, " ")
+			.trim();
+		for (const clause of [
+			"For ordinary review, prefer a different authenticated model family.",
+			"When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session.",
+			"Disclose that this review is context-isolated, not cross-family independent.",
+			"Cross-family verification, `/skill:orchestrate`, and `adversarial-reviewer` must not use this fallback.",
+		])
+			assert.ok(
+				modelDesc.includes(clause),
+				`model description must include: ${clause}`,
+			);
+		assert.doesNotMatch(
+			modelDesc,
+			/when unavailable/i,
+			"model description must use the authenticated-family availability gate",
+		);
+	});
+
+	it("strict surfaces never permit same-family fallback", () => {
+		const orchestrateSkill = readFileSync(
+			join(getSubagentsPackageRoot(), "skills/orchestrate/SKILL.md"),
+			"utf8",
+		);
+		const adversarialProcedure = readFileSync(
+			join(
+				getSubagentsPackageRoot(),
+				"skills/orchestrate/adversarial-review.md",
+			),
+			"utf8",
+		);
+		const adversarialAgent = readFileSync(
+			join(getSubagentsPackageRoot(), "agents/adversarial-reviewer.md"),
+			"utf8",
+		);
+		const forbiddenOrdinaryReviewClauses = [
+			"For ordinary review, prefer a different authenticated model family.",
+			"When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session.",
+			"Disclose that this review is context-isolated, not cross-family independent.",
+			"Cross-family verification, `/skill:orchestrate`, and `adversarial-reviewer` must not use this fallback.",
+		];
+		for (const [label, content] of [
+			["skills/orchestrate/SKILL.md", orchestrateSkill],
+			["skills/orchestrate/adversarial-review.md", adversarialProcedure],
+			["agents/adversarial-reviewer.md", adversarialAgent],
+		] as const) {
+			assert.doesNotMatch(
+				content,
+				/same-family[\s\S]{0,100}fallback/i,
+				`${label} must not contain same-family fallback language`,
+			);
+			assert.doesNotMatch(
+				content,
+				/context-isolated[\s\S]{0,60}review/i,
+				`${label} must not describe context-isolated review`,
+			);
+			assert.match(
+				content,
+				/different.*family/i,
+				`${label} must require different-family review`,
+			);
+			const compact = content.replace(/\s+/g, " ").trim();
+			for (const clause of forbiddenOrdinaryReviewClauses)
+				assert.ok(
+					!compact.includes(clause),
+					`${label} must not contain ordinary-review fallback clause: ${clause}`,
+				);
+		}
+	});
+
+	it("adversarial reviewer agent rejects multiline same-family fallback bypass", () => {
+		const agent = readFileSync(
+			join(getSubagentsPackageRoot(), "agents/adversarial-reviewer.md"),
+			"utf8",
+		);
+		assert.doesNotMatch(
+			agent,
+			/ordinary[\s\S]{0,200}same-family[\s\S]{0,200}fallback/i,
+			"adversarial reviewer must not contain any ordinary same-family fallback path",
+		);
+		assert.doesNotMatch(
+			agent,
+			/[Ww]hen no other.*family[\s\S]{0,200}same-family/,
+			"adversarial reviewer must not contain same-family availability gate",
+		);
+		assert.match(
+			agent,
+			/no model or tool fallback/,
+			"adversarial reviewer must explicitly state no fallback",
+		);
 	});
 
 	it("warns only when the resolved role is bundled", async () => {
