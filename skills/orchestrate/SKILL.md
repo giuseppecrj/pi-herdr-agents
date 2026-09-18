@@ -62,9 +62,10 @@ reviewer ID, the requested output bound, and the exact task. Name panes
 name | agent kind | role | model | worktree
 ```
 
-Use `agent: "reviewer"`, `interactive: false`, ordinary-pane `cwd`, exact
-`model`, exact `thinking`, and an explicit restricted `tools` string when the
-resolved role permits it. Do not create worktrees for review-only children.
+Use `agent: "reviewer"`, `fork: false`, `interactive: false`, ordinary-pane
+`cwd`, exact `model`, exact `thinking`, and an explicit restricted `tools`
+string when the resolved role permits it. Do not create worktrees for
+review-only children.
 
 ## 3. Fan out and synthesize
 

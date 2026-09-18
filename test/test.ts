@@ -3396,8 +3396,16 @@ describe("subagent discovery", () => {
 				{ name: "A", task: "T", fork: false },
 				{ sessionMode: "fork" },
 			),
+			"standalone",
+			"fork: false must force standalone even when role declares fork",
+		);
+		assert.equal(
+			testApi.resolveEffectiveSessionMode(
+				{ name: "A", task: "T" },
+				{ sessionMode: "fork" },
+			),
 			"fork",
-			"fork: false must not override an inherited fork session mode",
+			"omitted fork must inherit role session-mode",
 		);
 	});
 
@@ -3446,6 +3454,19 @@ describe("subagent discovery", () => {
 				inheritsConversationContext: true,
 				taskDelivery: "direct",
 			},
+		);
+		assert.deepEqual(
+			testApi.resolveLaunchBehavior(
+				{ name: "A", task: "T", fork: false },
+				{ sessionMode: "fork" },
+			),
+			{
+				sessionMode: "standalone",
+				seededSessionMode: null,
+				inheritsConversationContext: false,
+				taskDelivery: "artifact",
+			},
+			"fork: false must produce standalone behavior despite role fork mode",
 		);
 	});
 

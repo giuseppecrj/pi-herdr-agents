@@ -299,7 +299,7 @@ const SubagentParams = Type.Object({
 	fork: Type.Optional(
 		Type.Boolean({
 			description:
-				"Force the full-context fork mode for this spawn. The sub-agent inherits the current session conversation, overriding any agent frontmatter session-mode.",
+				"Override the child session mode for this spawn. `true` forces full-context fork; `false` forces standalone. Omit to inherit the agent frontmatter session-mode.",
 		}),
 	),
 	persistent: Type.Optional(
@@ -912,7 +912,8 @@ function resolveEffectiveSessionMode(
 	params: Static<typeof SubagentParams>,
 	agentDefs: AgentDefaults | null,
 ): SubagentSessionMode {
-	if (params.fork) return "fork";
+	if (params.fork === true) return "fork";
+	if (params.fork === false) return "standalone";
 	return agentDefs?.sessionMode ?? "standalone";
 }
 

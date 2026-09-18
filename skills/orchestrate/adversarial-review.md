@@ -35,8 +35,8 @@ and operations/concurrency/test evidence. Launch verifiers only for potential
 P0/P1 or another predeclared material claim. If no cross-family verifier is
 available, retain the candidate as unverified and return `INCOMPLETE`.
 
-Use ordinary-pane public `subagent()` calls, exact `model` and `thinking`, and
-fresh standalone reviewer contexts. Role frontmatter `tools:` is the only
+Use ordinary-pane public `subagent()` calls, exact `model` and `thinking`,
+`fork: false`, and fresh standalone reviewer contexts. Role frontmatter `tools:` is the only
 enforced allowlist. `read,bash` is not read-only: shell access can write. Use
 Bash only for safe inspection and never claim a stronger sandbox. Print the
 reserved matrix before each wave:

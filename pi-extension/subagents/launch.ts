@@ -350,7 +350,9 @@ function resolveLaunchRequest(request: FreshPiLaunchRequest): ResolvedLaunch {
 			: join(cwdBase, rawCwd)
 		: request.parent.cwd;
 	const localAgentDir = rawCwd ? join(sourceCwd, ".pi", "agent") : null;
-	const sessionMode = request.fork ? "fork" : request.behavior.sessionMode;
+	let sessionMode: SubagentSessionMode = request.behavior.sessionMode;
+	if (request.fork === true) sessionMode = "fork";
+	else if (request.fork === false) sessionMode = "standalone";
 	return {
 		request,
 		id,

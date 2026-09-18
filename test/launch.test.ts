@@ -454,6 +454,136 @@ describe("Pi launch", () => {
 		});
 	});
 
+	it("does not seed or inherit context when fork is explicitly false", async () => {
+		await withFixture(async ({ request, project }) => {
+			writeFileSync(
+				request.parent.sessionFile,
+				[
+					{ type: "session", version: 3, id: "parent", cwd: project },
+					{
+						type: "message",
+						id: "u1",
+						parentId: null,
+						message: {
+							role: "user",
+							content: [{ type: "text", text: "secret context" }],
+							timestamp: 1,
+						},
+					},
+				]
+					.map((e) => JSON.stringify(e))
+					.join("\n") + "\n",
+			);
+			let command = "";
+			const running = await launchPiSubagent(
+				{
+					...request,
+					fork: false,
+					behavior: {
+						...request.behavior,
+						sessionMode: "fork",
+					},
+				},
+				{
+					createPane: () => "pane-no-fork",
+					createWorktree: () => {
+						throw new Error("unexpected worktree creation");
+					},
+					waitForShellReady: async () => {},
+					runScript: (_surface, value, options) => {
+						command = value;
+						return options.scriptPath;
+					},
+					closePane: () => {},
+				},
+			);
+
+			assert.equal(
+				existsSync(running.sessionFile),
+				false,
+				"fork: false must not seed parent conversation into child session",
+			);
+			const taskPath = command.match(/'@([^']+\.md)'/)?.[1];
+			assert.ok(taskPath, "expected artifact-backed task delivery, not direct");
+		});
+	});
+
+	it("seeds context and uses direct delivery when fork is omitted and sessionMode is fork", async () => {
+		await withFixture(async ({ request, project }) => {
+			const timestamp = new Date().toISOString();
+			writeFileSync(
+				request.parent.sessionFile,
+				[
+					{
+						type: "session",
+						version: 3,
+						id: "parent",
+						timestamp,
+						cwd: project,
+					},
+					{
+						type: "model_change",
+						id: "mc-1",
+						parentId: null,
+						timestamp,
+					},
+					{
+						type: "message",
+						id: "u1",
+						parentId: "mc-1",
+						timestamp,
+						message: {
+							role: "user",
+							content: [{ type: "text", text: "inherited context" }],
+							timestamp: 1,
+						},
+					},
+				]
+					.map((e) => JSON.stringify(e))
+					.join("\n") + "\n",
+			);
+			let command = "";
+			const running = await launchPiSubagent(
+				{
+					...request,
+					behavior: {
+						...request.behavior,
+						sessionMode: "fork",
+					},
+				},
+				{
+					createPane: () => "pane-inherited-fork",
+					createWorktree: () => {
+						throw new Error("unexpected worktree creation");
+					},
+					waitForShellReady: async () => {},
+					runScript: (_surface, value, options) => {
+						command = value;
+						return options.scriptPath;
+					},
+					closePane: () => {},
+				},
+			);
+
+			assert.equal(
+				existsSync(running.sessionFile),
+				true,
+				"omitted fork with sessionMode fork must seed the child session",
+			);
+			const childSession = readFileSync(running.sessionFile, "utf8");
+			assert.match(
+				childSession,
+				/parentSession/,
+				"child session must link to parent",
+			);
+			assert.doesNotMatch(
+				command,
+				/'@[^']+\.md'/,
+				"fork mode must use direct delivery, not artifact-backed",
+			);
+		});
+	});
+
 	it("keeps an autonomous multi-wave coordinator open for completion steers", async () => {
 		await withFixture(async ({ request }) => {
 			let command = "";

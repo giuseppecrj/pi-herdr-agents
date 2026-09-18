@@ -17,6 +17,10 @@ const adversarialReview = readFileSync(
 	"utf8",
 );
 const reviewer = readFileSync(join(root, "agents", "reviewer.md"), "utf8");
+const adversarialAgent = readFileSync(
+	join(root, "agents", "adversarial-reviewer.md"),
+	"utf8",
+);
 const adversarialExample = readFileSync(
 	join(root, "skills", "orchestrate", "adversarial-review-example.js"),
 	"utf8",
@@ -232,6 +236,64 @@ describe("bundled orchestration skill", () => {
 			/herdr_workflow|APPROVE <|runner-owned/,
 		);
 		assert.doesNotMatch(adversarialReview, /confidence\s*[><=]/i);
+	});
+
+	it("locks fork override semantics in README and plan-skill", () => {
+		const readmeCompact = normalized(readme);
+		assert.ok(
+			readmeCompact.includes(
+				"`true` forces fork, `false` forces standalone. Omit to inherit",
+			),
+			"README fork parameter must document true/false/omit semantics",
+		);
+		assert.ok(
+			readmeCompact.includes(
+				"`fork: true` on the tool call forces `fork` mode; `fork: false` forces `standalone` mode. Omitting `fork` inherits the agent's frontmatter `session-mode`.",
+			),
+			"README session-mode section must document explicit false override",
+		);
+		const phase7 = sectionBetween(
+			planSkill,
+			"## Phase 7: Review",
+			"## Completion Checklist",
+		);
+		assert.ok(
+			phase7.includes("fork: false,"),
+			"Phase 7 reviewer example must set fork: false",
+		);
+	});
+
+	it("requires fork:false in adversarial-reviewer launch contract", () => {
+		assert.ok(
+			adversarialAgent.includes("fork: false"),
+			"adversarial-reviewer must require fork: false on reviewer launches",
+		);
+		assert.doesNotMatch(
+			adversarialAgent,
+			/fork: false.*does not override/i,
+			"adversarial-reviewer must not claim fork:false cannot override role mode",
+		);
+	});
+
+	it("requires fork:false in orchestrate skill reviewer launches", () => {
+		const selectSection = sectionBetween(
+			skill,
+			"## 2. Select reviewers",
+			"## 3. Fan out and synthesize",
+		);
+		assert.ok(
+			selectSection.includes("`fork: false`"),
+			"orchestrate SKILL.md reviewer section must require fork: false",
+		);
+		const adversarialTopology = sectionBetween(
+			adversarialReview,
+			"## Topology and models",
+			"## Finding records",
+		);
+		assert.ok(
+			adversarialTopology.includes("`fork: false`"),
+			"adversarial-review.md topology section must require fork: false",
+		);
 	});
 
 	it("pins the Phase 7 reviewer evidence before launch", () => {
