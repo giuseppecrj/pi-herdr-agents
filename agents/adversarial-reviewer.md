@@ -36,10 +36,10 @@ identify missing evidence.
 2. Recheck the head and dirty-state fingerprint before each wave and before the
    final report. Drift makes the review `INCOMPLETE`; do not mix revisions.
 3. Resolve project review rules and inspect the resolved `reviewer` role before
-   selecting runtimes. Its effective session mode must be known and standalone.
-   Set `fork: false` on every reviewer launch to force standalone regardless of
-   role frontmatter. Stop for a non-standalone or unknown mode so no reviewer
-   inherits coordinator context.
+   selecting runtimes. Set `fork: false` on every reviewer launch; this
+   overrides non-standalone role frontmatter and forces standalone. Stop only if
+   the effective standalone mode cannot be confirmed so no reviewer inherits
+   coordinator context.
 4. Use the model-catalog source identified by the `subagent` tool guidance or
    another project-approved source. Curated task shortlists can inform selection,
    but review must name an exact ID and exclude known author families; never use

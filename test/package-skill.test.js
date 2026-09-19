@@ -264,9 +264,35 @@ describe("bundled orchestration skill", () => {
 	});
 
 	it("requires fork:false in adversarial-reviewer launch contract", () => {
+		const pinSection = sectionBetween(
+			adversarialAgent,
+			"## Pin the scope and runtimes",
+			"## Launch contract",
+		);
 		assert.ok(
-			adversarialAgent.includes("fork: false"),
-			"adversarial-reviewer must require fork: false on reviewer launches",
+			pinSection.includes("`fork: false`"),
+			"adversarial-reviewer must set fork: false on every reviewer launch",
+		);
+		assert.ok(
+			/override.*non-standalone|forces? standalone.*regardless/i.test(
+				pinSection,
+			),
+			"adversarial-reviewer must state that fork:false overrides non-standalone role frontmatter",
+		);
+		const item3 = pinSection.slice(
+			pinSection.indexOf("3."),
+			pinSection.indexOf("4."),
+		);
+		assert.doesNotMatch(
+			item3,
+			/stop.*(?:for|if).*non-standalone.*mode/i,
+			"adversarial-reviewer item 3 must not reject solely because role frontmatter declares a non-standalone mode",
+		);
+		assert.ok(
+			/stop.*(?:unknown|cannot be applied|cannot be confirmed)/i.test(
+				pinSection,
+			),
+			"adversarial-reviewer must stop only if the effective mode is unknown or the override cannot be applied",
 		);
 		assert.doesNotMatch(
 			adversarialAgent,
