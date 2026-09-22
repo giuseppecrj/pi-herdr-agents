@@ -36,6 +36,8 @@ subagent({
 });
 ```
 
+Omit `worktree` for an ordinary pane. If a generated tool client requires every declared property, pass `worktree: null`; the extension treats it exactly like omission and starts the child in `cwd` without calling `herdr worktree create`.
+
 Worktrees isolate checkouts, indexes, and `HEAD`. They are **not security sandboxes**: worktrees still share the repository's object database and most refs, and the child process has the same host permissions as Pi.
 
 ## Launch contract

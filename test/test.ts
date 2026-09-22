@@ -6827,7 +6827,7 @@ describe("tool registration", () => {
 		assert.equal(denied.has("subagents_write_task_models"), true);
 	});
 
-	it("exposes worktree branch and optional base on the subagent tool", () => {
+	it("exposes a nullable worktree with branch and optional base", () => {
 		const { api, registeredTools } = createMockExtensionApi();
 		subagentsModule.default(api);
 
@@ -6835,10 +6835,13 @@ describe("tool registration", () => {
 			(tool) => tool.name === "subagent",
 		);
 		const worktreeSchema = subagentTool.parameters.properties.worktree;
+		const [objectSchema, nullSchema] = worktreeSchema.anyOf;
 
-		assert.deepEqual(worktreeSchema.required, ["branch"]);
-		assert.equal(worktreeSchema.properties.branch.minLength, 1);
-		assert.equal(worktreeSchema.properties.base.type, "string");
+		assert.deepEqual(objectSchema.required, ["branch"]);
+		assert.equal(objectSchema.properties.branch.minLength, 1);
+		assert.equal(objectSchema.properties.base.type, "string");
+		assert.equal(nullSchema.type, "null");
+		assert.match(worktreeSchema.description, /omit or pass null/i);
 		assert.match(subagentTool.description, /retain.*parent review/i);
 	});
 
