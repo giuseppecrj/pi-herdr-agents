@@ -63,6 +63,7 @@ import {
 	readPersistentTaskEvents,
 	appendPersistentDeliveryLedger,
 	readPersistentDeliveryLedger,
+	getPersistentDeliveryLedgerFile,
 	writePersistentTaskInbox,
 	consumePersistentTaskInbox,
 	type SessionEntry,
@@ -7349,6 +7350,176 @@ describe("subagent activity snapshots", () => {
 			rmSync(dir, { recursive: true, force: true });
 		}
 	});
+});
+
+describe("persistent delivery batch ledger", () => {
+	const testApi = subagentsModule.__test__;
+	// SAFETY: the extension stores this private runtime under the documented global symbol.
+	const runtime = (globalThis as Record<symbol, { pi?: unknown } | undefined>)[
+		Symbol.for("pi-subagents/runtime")
+	];
+	const runtimePi = runtime?.pi;
+	before(() => {
+		if (runtime) runtime.pi = undefined;
+	});
+	after(() => {
+		if (runtime) runtime.pi = runtimePi;
+	});
+	const makeRunning = (sessionFile: string): any => ({
+		id: "batch",
+		name: "Batch",
+		sessionFile,
+		persistent: true,
+		generationId: "generation",
+		logicalId: "logical",
+		policyHash: "a".repeat(64),
+		taskId: "task-1",
+		tasksCompleted: 0,
+	});
+
+	it("reads once for new events and suppresses same-batch duplicates of both outcomes", () => {
+		withTempDir((dir) => {
+			const running = makeRunning(join(dir, "batch.jsonl"));
+			for (const type of ["help-request", "task-done"] as const) {
+				for (const task of ["task-1", "task-2", "task-1", "task-2"]) {
+					appendPersistentTaskEvent(running.sessionFile, {
+						type,
+						task,
+						generation: "generation",
+					});
+				}
+			}
+			let reads = 0;
+			const messages: any[] = [];
+			const readLedger = (path: string) => {
+				reads++;
+				return readPersistentDeliveryLedger(path);
+			};
+			const api = {
+				sendMessage(message: any) {
+					messages.push(message);
+				},
+			};
+			testApi.drainPersistentTaskEvents(running, api, readLedger);
+			assert.equal(reads, 1);
+			assert.deepEqual(
+				messages.map((message) => message.customType),
+				[
+					"subagent_ping",
+					"subagent_ping",
+					"subagent_result",
+					"subagent_result",
+				],
+			);
+			assert.equal(readPersistentDeliveryLedger(running.sessionFile).length, 4);
+			assert.equal(running.tasksCompleted, 2);
+			assert.equal(running.taskId, undefined);
+			assert.equal(running.observedTaskEvents, 8);
+			appendPersistentTaskEvent(running.sessionFile, {
+				type: "task-done",
+				task: "task-1",
+				generation: "generation",
+			});
+			testApi.drainPersistentTaskEvents(running, api, readLedger);
+			assert.equal(reads, 2);
+			assert.equal(messages.length, 4);
+		});
+	});
+
+	it("does not load the ledger for another generation or an empty drain", () => {
+		withTempDir((dir) => {
+			const running = makeRunning(join(dir, "generation.jsonl"));
+			const readLedger = () => {
+				assert.fail("unnecessary ledger read");
+			};
+			testApi.drainPersistentTaskEvents(
+				running,
+				{
+					sendMessage() {
+						assert.fail("unexpected delivery");
+					},
+				},
+				readLedger,
+			);
+			appendPersistentTaskEvent(running.sessionFile, {
+				type: "task-done",
+				task: "task-1",
+				generation: "other",
+			});
+			testApi.drainPersistentTaskEvents(
+				running,
+				{
+					sendMessage() {
+						assert.fail("unexpected delivery");
+					},
+				},
+				readLedger,
+			);
+			assert.equal(running.observedTaskEvents, 1);
+		});
+	});
+
+	for (const type of ["help-request", "task-done"] as const) {
+		it(`keeps the snapshot retryable after ${type} append failure`, () => {
+			withTempDir((dir) => {
+				const running = makeRunning(join(dir, "failure.jsonl"));
+				const event = appendPersistentTaskEvent(running.sessionFile, {
+					type,
+					task: "task-1",
+					generation: "generation",
+				});
+				const ledger = readPersistentDeliveryLedger(running.sessionFile);
+				const ledgerFile = getPersistentDeliveryLedgerFile(running.sessionFile);
+				mkdirSync(ledgerFile);
+				let sends = 0;
+				const api = {
+					sendMessage() {
+						sends++;
+					},
+				};
+				assert.throws(
+					() => testApi.deliverPersistentTaskEvent(running, event, api, ledger),
+					/EISDIR/,
+				);
+				assert.equal(sends, 1);
+				assert.deepEqual(ledger, []);
+				assert.equal(running.taskId, "task-1");
+				assert.equal(running.tasksCompleted, 0);
+				rmSync(ledgerFile, { recursive: true });
+				testApi.deliverPersistentTaskEvent(running, event, api, ledger);
+				assert.equal(ledger.length, 1);
+				assert.deepEqual(
+					ledger,
+					readPersistentDeliveryLedger(running.sessionFile),
+				);
+				testApi.deliverPersistentTaskEvent(running, event, api, ledger);
+				assert.equal(sends, 2);
+			});
+		});
+
+		it(`direct ${type} delivery reads current disk state`, () => {
+			withTempDir((dir) => {
+				const running = makeRunning(join(dir, "direct.jsonl"));
+				const event = appendPersistentTaskEvent(running.sessionFile, {
+					type,
+					task: "task-1",
+					generation: "generation",
+				});
+				let sends = 0;
+				const api = {
+					sendMessage() {
+						sends++;
+					},
+				};
+				testApi.deliverPersistentTaskEvent(running, event, api);
+				testApi.deliverPersistentTaskEvent(running, event, api);
+				assert.equal(sends, 1);
+				rmSync(getPersistentDeliveryLedgerFile(running.sessionFile));
+				testApi.deliverPersistentTaskEvent(running, event, api);
+				assert.equal(sends, 2);
+			});
+		});
+	}
 });
 
 describe("persistent subagent send", () => {
