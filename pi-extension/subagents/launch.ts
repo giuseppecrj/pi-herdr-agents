@@ -84,7 +84,7 @@ export interface FreshPiLaunchRequest {
 	task: string;
 	agent?: string;
 	cwd?: string;
-	worktree?: { branch: string; base?: string };
+	worktree?: { branch: string; base?: string } | null;
 	fork?: boolean;
 	handoff?: { leafId: string };
 	surface?: string;

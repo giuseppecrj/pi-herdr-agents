@@ -165,6 +165,39 @@ describe("Pi launch", () => {
 		});
 	});
 
+	it("treats an explicit null worktree as an ordinary pane", async () => {
+		await withFixture(async ({ request, project }) => {
+			let worktreeCreationAttempts = 0;
+			const operations: PiLaunchOperations = {
+				createPane(name, cwd) {
+					assert.equal(name, "Worker");
+					assert.equal(cwd, project);
+					return "pane-null-worktree";
+				},
+				createWorktree() {
+					worktreeCreationAttempts++;
+					throw new Error("unexpected worktree creation");
+				},
+				async waitForShellReady(surface) {
+					assert.equal(surface, "pane-null-worktree");
+				},
+				runScript(_surface, _command, options) {
+					return options.scriptPath;
+				},
+				closePane() {},
+			};
+
+			const running = await launchPiSubagent(
+				{ ...request, worktree: null },
+				operations,
+			);
+
+			assert.equal(worktreeCreationAttempts, 0);
+			assert.equal(running.surface, "pane-null-worktree");
+			assert.equal(running.worktree, undefined);
+		});
+	});
+
 	for (const kind of ["fresh", "resume"] as const) {
 		for (const failurePoint of ["readiness", "command delivery"] as const) {
 			it(`closes its ${kind} pane once when ${failurePoint} fails`, async () => {

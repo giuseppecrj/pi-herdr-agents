@@ -282,19 +282,28 @@ const SubagentParams = Type.Object({
 		}),
 	),
 	worktree: Type.Optional(
-		Type.Object({
-			branch: Type.String({
-				minLength: 1,
-				description:
-					"New branch name for an isolated Herdr-managed Git worktree",
-			}),
-			base: Type.Optional(
-				Type.String({
-					description:
-						"Git revision to branch from. Defaults to the source checkout's committed HEAD.",
+		Type.Union(
+			[
+				Type.Object({
+					branch: Type.String({
+						minLength: 1,
+						description:
+							"New branch name for an isolated Herdr-managed Git worktree",
+					}),
+					base: Type.Optional(
+						Type.String({
+							description:
+								"Git revision to branch from. Defaults to the source checkout's committed HEAD.",
+						}),
+					),
 				}),
-			),
-		}),
+				Type.Null(),
+			],
+			{
+				description:
+					"Optional isolated Herdr-managed Git worktree. Omit or pass null to use an ordinary pane in cwd.",
+			},
+		),
 	),
 	fork: Type.Optional(
 		Type.Boolean({
