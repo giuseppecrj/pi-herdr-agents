@@ -25,7 +25,6 @@ import {
 	__worktreeCleanupTest__,
 	listContainedWorktrees,
 	removeContainedWorktree,
-	worktreeInventoryNotice,
 	formatWorktreeInventory,
 } from "../pi-extension/subagents/worktree-cleanup.ts";
 import { cleanupFixture } from "./worktree-cleanup-fixture.ts";
@@ -494,8 +493,10 @@ describe("cleanup operating-system probes", () => {
 				cwd: source,
 				operations: ops,
 			});
-			const clean = rows.find((row) => row.path === alpha)!;
-			const detached = rows.find((row) => row.path === delta)!;
+			const clean = rows.find((row) => row.path === fs.realpathSync(alpha));
+			const detached = rows.find((row) => row.path === fs.realpathSync(delta));
+			assert.ok(clean, `Missing ${alpha}: ${JSON.stringify(rows)}`);
+			assert.ok(detached, `Missing ${delta}: ${JSON.stringify(rows)}`);
 			assert.equal(clean.classification, "eligible");
 			assert.deepEqual(clean.blockers, []);
 			assert.equal(detached.classification, "blocked");
@@ -723,8 +724,8 @@ describe("cleanup operating-system probes", () => {
 				operations: ops,
 			});
 			assert.equal(row.classification, "eligible");
-			assert.equal(row.path, path);
-			assert.equal(row.sourceRepo, join(dir, "real"));
+			assert.equal(row.path, fs.realpathSync(path));
+			assert.equal(row.sourceRepo, fs.realpathSync(join(dir, "real")));
 			symlinkSync(dir, join(root, "repo", "escape"));
 			const escaped = (
 				await listContainedWorktrees({ cwd: dir, operations: ops })
@@ -799,6 +800,20 @@ describe("explicit worktree cleanup", () => {
 		assert.equal(row.sourceRepo, "/repo");
 		assert.deepEqual(row.manifest, []);
 		assert.match(formatWorktreeInventory([row]), /manifest: absent/);
+		const inventory = formatWorktreeInventory([
+			{ ...row, path: "/managed/inside", branch: "inside" },
+			{
+				...row,
+				path: "/managed/outside",
+				branch: "outside",
+				contained: false,
+				classification: "out-of-scope",
+			},
+		]);
+		assert.ok(
+			inventory.indexOf("outside —") < inventory.indexOf("inside —"),
+			"in-scope rows stay at the end of large inventories",
+		);
 		assert.deepEqual(f.calls, []);
 	});
 	for (const [name, patch, blocker] of [
@@ -1210,17 +1225,6 @@ describe("explicit worktree cleanup", () => {
 			"already-removed",
 		);
 		assert.deepEqual(f.calls, []);
-	});
-	it("counts contained worktrees only, without mutation, and stays silent at zero", async () => {
-		const f = cleanupFixture();
-		const rows = await listContainedWorktrees(f.input);
-		assert.match(
-			worktreeInventoryNotice(rows)!,
-			/1 present · 1 eligible · 0 blocked/,
-		);
-		assert.equal(worktreeInventoryNotice([]), undefined);
-		assert.deepEqual(f.calls, []);
-		assert.deepEqual(cleanupBlockers(rows[0]), []);
 	});
 	it("removal args contain only the explicit workspace selector", () => {
 		assert.deepEqual(__herdrTest__.buildWorktreeRemoveArgs("w1"), [

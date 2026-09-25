@@ -6381,7 +6381,7 @@ describe("worktree cleanup public surface", () => {
 			}
 		}
 	});
-	it("registers parent tools, dispatches list/remove, and reports session-start inventory once", async (t) => {
+	it("keeps worktree inventory out of session startup", async (t) => {
 		const previousHerdr = process.env.HERDR_ENV;
 		process.env.HERDR_ENV = "1";
 		t.mock.method(childProcess, "execSync", () => "/fixture/herdr\n");
@@ -6410,9 +6410,10 @@ describe("worktree cleanup public surface", () => {
 		assert.ok(remove);
 		const result = await list.execute("id", {}, undefined, undefined, ctx);
 		assert.equal(result.details.entries[0].classification, "eligible");
+		const scan = t.mock.method(f.operations, "scan");
 		await eventHandlers.get("session_start")![0]({}, ctx);
-		assert.equal(notices.length, 1);
-		assert.match(notices[0], /1 present · 1 eligible · 0 blocked/);
+		assert.deepEqual(notices, []);
+		assert.equal(scan.mock.callCount(), 0);
 		assert.deepEqual(f.calls, []);
 		const command = registeredCommands.find(
 			(item) => item.name === "worktree",
@@ -6420,9 +6421,6 @@ describe("worktree cleanup public surface", () => {
 		await command.handler("remove task", ctx);
 		assert.match(notices.at(-1)!, /Removed/);
 		assert.deepEqual(f.calls, ["git:/repo:/managed/repo/task", "prune:/repo"]);
-		const count = notices.length;
-		await eventHandlers.get("session_start")![0]({}, ctx);
-		assert.equal(notices.length, count);
 	});
 	it("dispatches preserve explicitly from the tool and command", async () => {
 		for (const surface of ["tool", "command"]) {

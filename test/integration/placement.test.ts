@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, rmdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
 	launchPiSubagent,
@@ -175,7 +175,8 @@ writeFileSync(${JSON.stringify(report)}, JSON.stringify(result));
 				assert.ok(
 					panes(destination.workspaceId).some(
 						(pane) =>
-							pane.pane_id === result.child.surface && pane.cwd === env.dir,
+							pane.pane_id === result.child.surface &&
+							pane.cwd === realpathSync(env.dir),
 					),
 					"unmatched non-Git cwd must use the parent's live workspace, not inherited workspace",
 				);
@@ -842,7 +843,10 @@ writeFileSync(${JSON.stringify(report)}, JSON.stringify(result));
 					),
 				).result;
 				checkoutWorkspace = created.workspace.workspace_id;
-				assert.equal(created.workspace.worktree.checkout_path, checkout);
+				assert.equal(
+					created.workspace.worktree.checkout_path,
+					realpathSync(checkout),
+				);
 				const misleading = JSON.parse(
 					execFileSync(
 						"herdr",
@@ -861,12 +865,13 @@ writeFileSync(${JSON.stringify(report)}, JSON.stringify(result));
 				assert.equal(
 					panes(other.workspaceId).find((pane) => pane.pane_id === misleading)
 						?.cwd,
-					cwd,
+					realpathSync(cwd),
 				);
 				const child = await launchPiSubagent({ ...request(1), cwd });
 				assert.ok(
 					panes(checkoutWorkspace!).some(
-						(pane) => pane.pane_id === child.surface && pane.cwd === cwd,
+						(pane) =>
+							pane.pane_id === child.surface && pane.cwd === realpathSync(cwd),
 					),
 					"checkout ownership must outrank another workspace's shell cwd",
 				);

@@ -23,7 +23,7 @@ Delegate investigation, implementation, and review without blocking the parent s
 - [Herdr](https://herdr.dev) and its CLI
 - `HERDR_ENV=1` — start Pi from inside Herdr
 
-Other terminal multiplexers are not supported. Outside Herdr, the extension skips automatic startup worktree inventory. Explicit inventory tools still report unavailable inspection as unknown. Worktrees isolate Git checkouts, not processes or permissions; child agents and installed Pi packages run with your user account's access.
+Other terminal multiplexers are not supported. Session startup skips worktree inventory to avoid blocking Pi initialization; use `/worktree list` or `worktree_list` to inspect managed worktrees. Outside Herdr, explicit inventory tools still report unavailable inspection as unknown. Worktrees isolate Git checkouts, not processes or permissions; child agents and installed Pi packages run with your user account's access.
 
 ## Install
 

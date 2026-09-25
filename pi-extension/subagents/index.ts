@@ -129,7 +129,6 @@ import {
 	listContainedWorktrees,
 	removeContainedWorktree,
 	formatWorktreeInventory,
-	worktreeInventoryNotice,
 	type WorktreeCleanupOperations,
 } from "./worktree-cleanup.ts";
 import {
@@ -3149,19 +3148,6 @@ export default function subagentsExtension(
 			startWidgetRefresh();
 			startStatusRefresh(pi);
 			updateWidget();
-		}
-		if (parentSession && ctx.cwd && ctx.hasUI && isTerminalAvailable()) {
-			try {
-				const notice = worktreeInventoryNotice(
-					await listContainedWorktrees(cleanupInput(ctx)),
-				);
-				if (notice) ctx.ui.notify(notice, "info");
-			} catch (error) {
-				ctx.ui.notify(
-					`Worktree inventory unavailable: ${error instanceof Error ? error.message : String(error)}`,
-					"warning",
-				);
-			}
 		}
 	});
 

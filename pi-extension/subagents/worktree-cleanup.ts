@@ -214,24 +214,18 @@ export function formatWorktreeInventory(
 	rows: WorktreeInventoryEntry[],
 ): string {
 	return (
-		rows
+		[...rows]
+			.sort(
+				(a, b) =>
+					Number(a.contained) - Number(b.contained) ||
+					a.path.localeCompare(b.path),
+			)
 			.map(
 				(row) =>
 					`${row.branch ?? "unknown branch"} — ${row.path}\nSource: ${row.sourceRepo ?? "unknown"} · workspace: ${row.workspaceId ?? "none"} · manifest: ${row.manifest.length ? row.manifest.map(({ value }) => value.state ?? "unknown").join(", ") : "absent"}\n${row.classification} · Git: ${row.git ? `${row.git.dirtyFiles} dirty, ${row.git.untrackedFiles} untracked, ${row.git.ignoredFiles} ignored, ${row.git.conflicts} conflicts` : "unknown"}${row.blockers.length ? ` · ${row.blockers.join("; ")}` : " · clean"}${row.warnings.length ? `\nWarning: ${row.warnings.join("; ")}` : ""}`,
 			)
 			.join("\n\n") || "No managed worktrees found."
 	);
-}
-
-export function worktreeInventoryNotice(
-	rows: WorktreeInventoryEntry[],
-): string | undefined {
-	const present = rows.filter((row) => row.contained);
-	if (!present.length) return undefined;
-	const eligible = present.filter(
-		(row) => row.classification === "eligible",
-	).length;
-	return `Worktrees: ${present.length} present · ${eligible} eligible · ${present.length - eligible} blocked. /worktree list`;
 }
 
 export async function removeContainedWorktree(
@@ -552,6 +546,8 @@ function processHolders(
 	const blockers: string[] = [];
 	const unreadable = new Set<string>();
 	const shellNames = new Set(["bash", "zsh", "fish", "sh", "dash"]);
+	const checkout =
+		platform === "linux" || platform === "darwin" ? realpathSync(path) : path;
 	if (!process.getuid) throw new Error("Process user identity unavailable");
 	const uid = process.getuid();
 	if (platform === "linux") {
@@ -571,7 +567,7 @@ function processHolders(
 				// A shell can exec a runtime without changing PID/process group.
 				if (idleShellPids.has(Number(pid)) && shellNames.has(command)) continue;
 				const cwd = realpathSync(`${procRoot}/${pid}/cwd`);
-				if (contained(path, cwd))
+				if (contained(checkout, cwd))
 					blockers.push(`Live process ${pid} holds the checkout`);
 			} catch (error) {
 				// SAFETY: filesystem probes throw Node errors with an optional errno code.
@@ -644,7 +640,7 @@ function processHolders(
 			try {
 				if (!cwd || !isAbsolute(cwd))
 					throw new Error("Process cwd unavailable");
-				if (contained(path, realpathSync(cwd)))
+				if (contained(checkout, realpathSync(cwd)))
 					blockers.push(`Live process ${pid} holds the checkout`);
 			} catch {
 				unreadable.add(pid);
