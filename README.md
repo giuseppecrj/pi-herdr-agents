@@ -263,15 +263,17 @@ subagents_native({ action: "untrack", paneId: "w1:p7" });
 ```
 
 Supply an exact pane ID from Herdr. `name` is an optional widget label, never a
-selector. Tracking verifies the current parent pane and the target's native
-kind, terminal ID, and Herdr-reported session ID (`agent_session` with `kind:
+selector. Tracking checks the current parent pane and the target's Herdr-reported
+native kind, terminal ID, and session ID (`agent_session` with `kind:
 "id"` and native `herdr:claude`/`herdr:codex` source). Parent panes, Pi children,
-shells, other runtimes, and unverifiable identities are rejected. Older Herdr
-versions without this session evidence cannot be tracked. Nothing is adopted
+shells, other runtimes, and missing or inconsistent identity reports are rejected.
+This is Herdr-reported identity, not independent process authentication. Older
+Herdr versions without this session evidence cannot be tracked. Nothing is adopted
 by name, label, cwd, or workspace, and unrelated panes never become rows.
 
 Rows show `[native claude]` or `[native codex]` and map Herdr `working` to
-`active`, `idle` to `waiting`, and `blocked`, `done`, or `unknown` directly.
+`active`, both `idle` and `done` to `waiting` (ready for input), and `blocked`
+or `unknown` directly.
 Only `active` and `blocked` count as active; the other states count as open.
 The left timer measures time since tracking began, not native process runtime.
 Native status remains visible even when Pi status notifications are disabled.
@@ -284,9 +286,11 @@ Use the native agent's existing interaction and result channels. Tracking does
 not make it a Pi subagent, and [ADR-0008](docs/adr/0008-adopt-pi-only-subagent-execution.md)
 continues to govern all package launches. Do not poll for completion.
 
-An internal observer refreshes only selected panes every 4.8 seconds, using
-bounded read-only Herdr queries. Herdr `done` means ready for input, not process
-exit, so those rows remain until untracked or their identity disappears.
+An internal observer refreshes selected rows every 4.8 seconds from one bounded,
+complete `herdr pane list` snapshot; it never adopts other listed panes. Explicit
+track requests still check the exact pane with `herdr pane get`. Malformed or
+failed snapshots establish no absence and retain selected rows as `unknown`.
+Herdr `done` means ready for input, not process exit, so those rows remain until untracked or their identity disappears.
 Confirmed missing panes, non-native occupants, or changed terminal/session IDs
 remove the row without touching the agent. A moved pane must be explicitly
 tracked using its new ID. Failed or incomplete inspection retains the row as
@@ -294,8 +298,11 @@ tracked using its new ID. Failed or incomplete inspection retains the row as
 infers completion. Untrack is idempotent and works even when Herdr is unavailable.
 
 Rows survive `/reload`, `/new`, `/resume`, and `/fork` in the same Pi process,
-matching the existing in-memory runtime. Quitting clears observation only; a
-full restart does not adopt earlier rows. Tracking adds no Pi persistent-specialist
+matching the existing in-memory runtime. Session start restores the widget
+immediately and refreshes native status asynchronously. A repeated track retains
+a prior display name only while the terminal/session identity is unchanged.
+Native terminal and session IDs remain internal and are omitted from tool results.
+Quitting clears observation only; a full restart does not adopt earlier rows. Tracking adds no Pi persistent-specialist
 or Agents-tab capacity reservations; every live pane still counts toward its
 own tab's existing pane limit.
 

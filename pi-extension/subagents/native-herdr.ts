@@ -1,6 +1,11 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { isPlainObject, isString } from "./type-guards.ts";
+import {
+	isPlainObject,
+	isRecord,
+	isString,
+	type JsonValue,
+} from "./type-guards.ts";
 import { isHerdrAvailable } from "./herdr.ts";
 
 const execFileAsync = promisify(execFile);
@@ -29,45 +34,97 @@ export function parseNativePane(
 			parsed?.error?.code === "not_found"
 		)
 			return { kind: "missing" };
-		const pane = parsed?.result?.pane;
-		if (
-			!isPlainObject(pane) ||
-			pane.pane_id !== paneId ||
-			!isString(pane.terminal_id) ||
-			!pane.terminal_id
-		)
-			return { kind: "unavailable" };
-		if (pane.agent !== "claude" && pane.agent !== "codex")
-			return { kind: "unsupported" };
-		const session = pane.agent_session;
-		if (
-			!isPlainObject(session) ||
-			session.agent !== pane.agent ||
-			session.kind !== "id" ||
-			session.source !== `herdr:${pane.agent}` ||
-			!isString(session.value) ||
-			!session.value
-		)
-			return { kind: "unavailable" };
-		const status = pane.agent_status;
-		return {
-			kind: "present",
-			identity: {
-				paneId,
-				terminalId: pane.terminal_id,
-				agent: pane.agent,
-				sessionId: session.value,
-				status:
-					status === "idle" ||
-					status === "working" ||
-					status === "blocked" ||
-					status === "done"
-						? status
-						: "unknown",
-			},
-		};
+		if (parsed?.error) return { kind: "unavailable" };
+		return inspectReportedPane(parsed?.result?.pane, paneId);
 	} catch {
 		return { kind: "unavailable" };
+	}
+}
+
+function inspectReportedPane(
+	pane: JsonValue | undefined,
+	paneId: string,
+): NativeInspection {
+	if (
+		!isRecord(pane) ||
+		pane.pane_id !== paneId ||
+		!isString(pane.terminal_id) ||
+		!pane.terminal_id
+	)
+		return { kind: "unavailable" };
+	if (pane.agent !== "claude" && pane.agent !== "codex")
+		return { kind: "unsupported" };
+	const session = pane.agent_session;
+	if (
+		!isRecord(session) ||
+		session.agent !== pane.agent ||
+		session.kind !== "id" ||
+		session.source !== `herdr:${pane.agent}` ||
+		!isString(session.value) ||
+		!session.value
+	)
+		return { kind: "unavailable" };
+	const status = pane.agent_status;
+	return {
+		kind: "present",
+		identity: {
+			paneId,
+			terminalId: pane.terminal_id,
+			agent: pane.agent,
+			sessionId: session.value,
+			status:
+				status === "idle" ||
+				status === "working" ||
+				status === "blocked" ||
+				status === "done"
+					? status
+					: "unknown",
+		},
+	};
+}
+
+/** A complete, unfiltered list is required before absence can remove a row. */
+export function parseNativePaneSnapshot(
+	output: string,
+): Map<string, NativeInspection> | null {
+	try {
+		const parsed = JSON.parse(output);
+		const panes = parsed?.result?.panes;
+		if (
+			parsed?.error ||
+			parsed?.result?.type !== "pane_list" ||
+			!Array.isArray(panes)
+		)
+			return null;
+		const snapshot = new Map<string, NativeInspection>();
+		for (const pane of panes) {
+			if (
+				!isPlainObject(pane) ||
+				!isString(pane.pane_id) ||
+				!pane.pane_id ||
+				!isString(pane.workspace_id) ||
+				!pane.workspace_id ||
+				!isString(pane.terminal_id) ||
+				!pane.terminal_id ||
+				snapshot.has(pane.pane_id)
+			)
+				return null;
+			snapshot.set(pane.pane_id, inspectReportedPane(pane, pane.pane_id));
+		}
+		return snapshot;
+	} catch {
+		return null;
+	}
+}
+
+export async function inspectNativePanes(): Promise<Map<
+	string,
+	NativeInspection
+> | null> {
+	try {
+		return parseNativePaneSnapshot(await readHerdr(["pane", "list"]));
+	} catch {
+		return null;
 	}
 }
 

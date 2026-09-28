@@ -12,10 +12,12 @@ import subagentsExtension, {
 import { createLifecycle } from "../pi-extension/subagents/lifecycle.ts";
 import {
 	parseNativePane,
+	parseNativePaneSnapshot,
 	type NativeInspection,
 } from "../pi-extension/subagents/native-herdr.ts";
 import {
 	NativeTracker,
+	nativeWidgetStatus,
 	type TrackedNativeAgent,
 } from "../pi-extension/subagents/native-tracking.ts";
 
@@ -24,6 +26,7 @@ function pane(overrides = {}) {
 	return {
 		pane_id: paneId,
 		terminal_id: "term-7",
+		workspace_id: "w1",
 		agent: "codex",
 		agent_status: "working",
 		agent_session: {
@@ -52,6 +55,7 @@ function fixture() {
 		() => {},
 		{
 			currentPane: async () => "w1:parent",
+			snapshot: async () => new Map([[paneId, next]]),
 			inspect: async (id) => {
 				reads.push(id);
 				return next;
@@ -127,6 +131,137 @@ describe("native Herdr observation", () => {
 		);
 	});
 
+	it("requires a complete unambiguous pane-list envelope before establishing absence", () => {
+		const snapshot = (panes: unknown[]) =>
+			JSON.stringify({ result: { type: "pane_list", panes } });
+		assert.deepEqual(parseNativePaneSnapshot(snapshot([])), new Map());
+		const valid = parseNativePaneSnapshot(
+			snapshot([
+				pane(),
+				pane({ pane_id: "shell", agent: null, agent_session: null }),
+			]),
+		);
+		assert.equal(valid?.get(paneId)?.kind, "present");
+		assert.equal(valid?.get("shell")?.kind, "unsupported");
+		assert.equal(
+			parseNativePaneSnapshot(snapshot([pane({ agent_session: null })]))?.get(
+				paneId,
+			)?.kind,
+			"unavailable",
+		);
+		for (const output of [
+			"broken",
+			"null",
+			"{}",
+			JSON.stringify({ result: { panes: [] } }),
+			JSON.stringify({ result: { type: "pane_get", panes: [] } }),
+			JSON.stringify({ result: { type: "pane_list", panes: null } }),
+			JSON.stringify({
+				error: { code: "unavailable" },
+				result: { type: "pane_list", panes: [] },
+			}),
+			snapshot([pane(), pane()]),
+			snapshot([pane(), null]),
+			snapshot([{}]),
+			...[{ pane_id: "" }, { workspace_id: "" }, { terminal_id: null }].map(
+				(overrides) => snapshot([pane(overrides)]),
+			),
+		])
+			assert.equal(parseNativePaneSnapshot(output), null, output);
+	});
+
+	it("uses one snapshot for multiple selected rows without adopting unrelated panes", async () => {
+		const rows = new Map<string, TrackedNativeAgent>();
+		let calls = 0;
+		let gets = 0;
+		let fail = false;
+		let output = JSON.stringify({
+			result: {
+				type: "pane_list",
+				panes: [
+					pane({ agent_status: "done" }),
+					pane({ pane_id: "second", agent_status: "idle" }),
+					pane({ pane_id: "unselected" }),
+				],
+			},
+		});
+		const tracker = new NativeTracker(
+			rows,
+			() => false,
+			() => {},
+			{
+				currentPane: async () => "parent",
+				inspect: async (id) => {
+					gets++;
+					return parseNativePane(
+						JSON.stringify({ result: { pane: pane({ pane_id: id }) } }),
+						id,
+					);
+				},
+				snapshot: async () => {
+					calls++;
+					if (fail) throw new Error("offline");
+					return parseNativePaneSnapshot(output);
+				},
+			},
+		);
+		try {
+			await tracker.track(paneId);
+			await tracker.track("second");
+			await tracker.refresh();
+			assert.equal(calls, 1);
+			assert.equal(gets, 2, "only explicit tracks use pane get");
+			assert.deepEqual([...rows.keys()], [paneId, "second"]);
+			assert.equal(rows.get(paneId)?.status, "done");
+			assert.equal(rows.get("second")?.status, "idle");
+			output = '{"result":{"panes":[]}}';
+			await tracker.refresh();
+			assert.equal(rows.size, 2);
+			assert.ok([...rows.values()].every((row) => row.status === "unknown"));
+			fail = true;
+			await tracker.refresh();
+			assert.equal(rows.size, 2);
+			fail = false;
+			output = '{"result":{"type":"pane_list","panes":[]}}';
+			await tracker.refresh();
+			assert.equal(rows.size, 0);
+			assert.equal(gets, 2);
+		} finally {
+			tracker.stop(false);
+		}
+	});
+
+	it("never carries a display label across changed terminal or session identity", async () => {
+		const f = fixture();
+		try {
+			for (const change of [
+				{ terminal_id: "replacement" },
+				{
+					agent_session: {
+						agent: "codex",
+						kind: "id",
+						source: "herdr:codex",
+						value: "replacement",
+					},
+				},
+			]) {
+				f.set(inspection());
+				const old = await f.tracker.track(paneId, "Previous occupant");
+				old.trackedAt = 1;
+				f.set(inspection(change));
+				const replacement = await f.tracker.track(paneId);
+				assert.equal(replacement.name, paneId);
+				assert.notEqual(replacement.trackedAt, old.trackedAt);
+				assert.equal(
+					(await f.tracker.track(paneId, "New occupant")).name,
+					"New occupant",
+				);
+			}
+		} finally {
+			f.tracker.stop(false);
+		}
+	});
+
 	it("uses only bounded read commands and distinguishes CLI absence from failure", () => {
 		const dir = mkdtempSync(join(tmpdir(), "native-observer-"));
 		try {
@@ -143,6 +278,8 @@ if (args.join(" ") === "pane current --current") {
  if (args[2] === "gone") { console.error(JSON.stringify({error:{code:"pane_not_found"}})); process.exitCode=1; }
  else if (args[2] === "offline") { console.error("server offline"); process.exitCode=1; }
  else console.log(JSON.stringify({result:{pane:${JSON.stringify(pane())}}}));
+} else if (args.join(" ") === "pane list") {
+ console.log(JSON.stringify({result:{type:"pane_list",panes:[${JSON.stringify(pane())}]}}));
 } else { throw new Error("Unexpected command"); }
 `,
 				{ mode: 0o755 },
@@ -159,7 +296,8 @@ if (args.join(" ") === "pane current --current") {
 					"-e",
 					`
 import assert from "node:assert/strict";
-import {currentNativeObserverPane, inspectNativePane} from ${JSON.stringify(moduleUrl)};
+import {currentNativeObserverPane, inspectNativePane, inspectNativePanes} from ${JSON.stringify(moduleUrl)};
+assert.equal((await inspectNativePanes()).get(${JSON.stringify(paneId)}).kind, "present");
 assert.equal(await currentNativeObserverPane(), "parent");
 assert.equal((await inspectNativePane(${JSON.stringify(paneId)})).kind, "present");
 assert.equal((await inspectNativePane("gone")).kind, "missing");
@@ -178,6 +316,7 @@ assert.equal((await inspectNativePane("offline")).kind, "unavailable");
 					.split("\n")
 					.map((line) => JSON.parse(line)),
 				[
+					["pane", "list"],
 					["pane", "current", "--current"],
 					["pane", "get", paneId],
 					["pane", "get", "gone"],
@@ -256,16 +395,18 @@ assert.equal((await inspectNativePane("offline")).kind, "unavailable");
 
 	it("does not resurrect rows or overwrite new tracks after delayed inspection or reload", async () => {
 		const rows = new Map<string, TrackedNativeAgent>();
-		let resolveRead: (value: NativeInspection) => void = () => {};
+		let resolveRead: (value: Map<string, NativeInspection> | null) => void =
+			() => {};
 		let delayed = false;
 		const ops = {
 			currentPane: async () => "parent",
-			inspect: async () =>
+			inspect: async () => inspection(),
+			snapshot: async () =>
 				delayed
-					? new Promise<NativeInspection>((resolve) => {
+					? new Promise<Map<string, NativeInspection> | null>((resolve) => {
 							resolveRead = resolve;
 						})
-					: inspection(),
+					: new Map([[paneId, inspection()]]),
 		};
 		const tracker = new NativeTracker(
 			rows,
@@ -278,7 +419,7 @@ assert.equal((await inspectNativePane("offline")).kind, "unavailable");
 			delayed = true;
 			const refresh = tracker.refresh();
 			tracker.untrack(paneId);
-			resolveRead(inspection());
+			resolveRead(new Map([[paneId, inspection()]]));
 			await refresh;
 			assert.equal(rows.size, 0);
 			delayed = false;
@@ -294,7 +435,7 @@ assert.equal((await inspectNativePane("offline")).kind, "unavailable");
 				ops,
 			);
 			await replacement.track(paneId, "New label");
-			resolveRead({ kind: "missing" });
+			resolveRead(new Map());
 			await oldRefresh;
 			assert.equal(rows.get(paneId)?.name, "New label");
 			replacement.stop(false);
@@ -312,6 +453,7 @@ assert.equal((await inspectNativePane("offline")).kind, "unavailable");
 			() => {},
 			{
 				currentPane: async () => "parent",
+				snapshot: async () => null,
 				inspect: () =>
 					new Promise((resolve) => {
 						resolveRead = resolve;
@@ -345,7 +487,21 @@ assert.equal((await inspectNativePane("offline")).kind, "unavailable");
 			assert.match(lines[0], /2 active/);
 			assert.match(lines.join("\n"), /Scout/);
 			assert.match(lines.join("\n"), /\[native codex\] active/);
+			for (const [status, label] of [
+				["working", "active"],
+				["idle", "waiting"],
+				["done", "waiting"],
+				["blocked", "blocked"],
+				["unknown", "unknown"],
+			] as const) {
+				native.status = status;
+				assert.equal(nativeWidgetStatus(native), label);
+			}
 			native.status = "done";
+			assert.match(
+				__test__.renderSubagentWidgetLines([], 100, [native]).join("\n"),
+				/\[native codex\] waiting/,
+			);
 			assert.match(
 				__test__.renderSubagentWidgetLines([child], 100, [native])[0],
 				/1 active · 1 open/,
@@ -363,6 +519,9 @@ assert.equal((await inspectNativePane("offline")).kind, "unavailable");
 	it("registers only for parents, survives reload, and never delivers or controls native sessions", async () => {
 		const inherited = process.env.PI_SUBAGENT_ID;
 		const rows: string[] = [];
+		let resolveSnapshot: (value: Map<string, NativeInspection> | null) => void =
+			() => {};
+		let delaySnapshot = false;
 		function extension(factory = subagentsExtension) {
 			const tools: any[] = [];
 			const handlers = new Map<string, Function>();
@@ -380,6 +539,12 @@ assert.equal((await inspectNativePane("offline")).kind, "unavailable");
 			factory(api as any, {
 				nativeOperations: {
 					currentPane: async () => "parent",
+					snapshot: async () =>
+						delaySnapshot
+							? new Promise<Map<string, NativeInspection> | null>((resolve) => {
+									resolveSnapshot = resolve;
+								})
+							: new Map([[paneId, inspection()]]),
 					inspect: async (id) => {
 						rows.push(id);
 						return inspection();
@@ -411,7 +576,19 @@ assert.equal((await inspectNativePane("offline")).kind, "unavailable");
 			assert.ok(current.native);
 			assert.equal(current.tools.length, 10);
 			await current.handlers.get("session_start")?.({}, ctx);
-			await current.native.execute("t1", { action: "track", paneId });
+			const tracked = await current.native.execute("t1", {
+				action: "track",
+				paneId,
+			});
+			assert.deepEqual(Object.keys(tracked.details).sort(), [
+				"agent",
+				"name",
+				"paneId",
+				"status",
+				"trackedAt",
+			]);
+			assert.ok(!JSON.stringify(tracked).includes("session-7"));
+			assert.ok(!JSON.stringify(tracked).includes("term-7"));
 			assert.equal(__test__.runningSubagents.size, 0);
 			assert.match(widget().render(100).join("\n"), /\[native codex\] active/);
 			for (const name of [
@@ -434,6 +611,26 @@ assert.equal((await inspectNativePane("offline")).kind, "unavailable");
 				).href
 			);
 			current = extension(reloaded.default);
+			delaySnapshot = true;
+			widget = undefined;
+			const started = current.handlers.get("session_start")?.({}, ctx);
+			assert.match(widget().render(100).join("\n"), /\[native codex\] active/);
+			let settled = false;
+			void started.then(() => {
+				settled = true;
+			});
+			await Promise.resolve();
+			assert.equal(
+				settled,
+				true,
+				"session_start must not wait for the native snapshot",
+			);
+			resolveSnapshot(
+				new Map([[paneId, inspection({ agent_status: "done" })]]),
+			);
+			await new Promise((resolve) => setImmediate(resolve));
+			assert.match(widget().render(100).join("\n"), /\[native codex\] waiting/);
+			delaySnapshot = false;
 			await current.handlers.get("session_start")?.({}, ctx);
 			assert.match(widget().render(100).join("\n"), /\[native codex\] active/);
 			for (const reason of ["new", "resume", "fork"]) {

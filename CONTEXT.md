@@ -11,10 +11,11 @@ _Avoid_: Runtime dispatch, adapter registry, split launch ownership
 **Tracked native agent**:
 An explicitly selected existing Claude Code/Codex Herdr session observed in the
 Subagents widget through `subagents_native`. Its pane, terminal, and native
-session identity are verified by Herdr; it is never a package-owned Pi child.
+session identity are Herdr-reported, not independently authenticated; it is never
+a package-owned Pi child.
 Tracking grants no launch, input, interrupt, stop, resume, cleanup, or result
-delivery authority. Herdr `done` is an open ready-for-input state. Confirmed
-absence/replacement removes the row; unavailable inspection retains `unknown`.
+delivery authority. Herdr `done` maps to `waiting`, an open ready-for-input state.
+Confirmed absence/replacement removes the row; unavailable inspection retains `unknown`.
 _Avoid_: Adopted child, external CLI adapter, label-based ownership
 
 **Child wake-up signal**:

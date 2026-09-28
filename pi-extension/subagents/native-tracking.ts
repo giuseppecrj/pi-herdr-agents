@@ -7,6 +7,7 @@ import { normalizeStatusName } from "./status.ts";
 import {
 	currentNativeObserverPane,
 	inspectNativePane,
+	inspectNativePanes,
 	type NativeIdentity,
 	type NativeInspection,
 } from "./native-herdr.ts";
@@ -18,11 +19,12 @@ export interface TrackedNativeAgent extends NativeIdentity {
 export interface NativeTrackingOperations {
 	currentPane(): Promise<string>;
 	inspect(paneId: string): Promise<NativeInspection>;
+	snapshot(): Promise<Map<string, NativeInspection> | null>;
 }
 
 export function nativeWidgetStatus(row: TrackedNativeAgent): string {
 	if (row.status === "working") return "active";
-	if (row.status === "idle") return "waiting";
+	if (row.status === "idle" || row.status === "done") return "waiting";
 	return row.status;
 }
 
@@ -52,6 +54,7 @@ export class NativeTracker {
 		operations: NativeTrackingOperations = {
 			currentPane: currentNativeObserverPane,
 			inspect: inspectNativePane,
+			snapshot: inspectNativePanes,
 		},
 	) {
 		this.rows = rows;
@@ -83,13 +86,13 @@ export class NativeTracker {
 			if (this.ownedPane(paneId))
 				throw new Error("Cannot track a Pi child pane.");
 			const previous = this.rows.get(paneId);
+			const unchanged = previous && sameIdentity(previous, inspection.identity);
 			const row: TrackedNativeAgent = {
 				...inspection.identity,
-				name: normalizeStatusName(name?.trim() || previous?.name || paneId),
-				trackedAt:
-					previous && sameIdentity(previous, inspection.identity)
-						? previous.trackedAt
-						: Date.now(),
+				name: normalizeStatusName(
+					name?.trim() || (unchanged ? previous.name : paneId),
+				),
+				trackedAt: unchanged ? previous.trackedAt : Date.now(),
 			};
 			this.rows.set(paneId, row);
 			this.start();
@@ -121,33 +124,34 @@ export class NativeTracker {
 		this.refreshing = true;
 		const epoch = this.epoch;
 		try {
-			await Promise.all(
-				[...this.rows.values()].map(async (row) => {
-					let inspection: NativeInspection;
-					try {
-						inspection = await this.operations.inspect(row.paneId);
-					} catch {
-						inspection = { kind: "unavailable" };
-					}
-					// A late response cannot resurrect an untracked row or overwrite a
-					// newer explicit track, including across session transitions.
-					if (epoch !== this.epoch || this.rows.get(row.paneId) !== row) return;
-					if (
-						this.ownedPane(row.paneId) ||
-						inspection.kind === "missing" ||
-						inspection.kind === "unsupported" ||
-						(inspection.kind === "present" &&
-							!sameIdentity(row, inspection.identity))
-					) {
-						this.rows.delete(row.paneId);
-					} else {
-						row.status =
-							inspection.kind === "present"
-								? inspection.identity.status
-								: "unknown";
-					}
-				}),
-			);
+			const rows = [...this.rows.values()];
+			let snapshot: Map<string, NativeInspection> | null;
+			try {
+				snapshot = await this.operations.snapshot();
+			} catch {
+				snapshot = null;
+			}
+			for (const row of rows) {
+				// A late snapshot cannot resurrect a row or overwrite a newer track.
+				if (epoch !== this.epoch || this.rows.get(row.paneId) !== row) continue;
+				const inspection: NativeInspection = snapshot
+					? (snapshot.get(row.paneId) ?? { kind: "missing" })
+					: { kind: "unavailable" };
+				if (
+					this.ownedPane(row.paneId) ||
+					inspection.kind === "missing" ||
+					inspection.kind === "unsupported" ||
+					(inspection.kind === "present" &&
+						!sameIdentity(row, inspection.identity))
+				) {
+					this.rows.delete(row.paneId);
+				} else {
+					row.status =
+						inspection.kind === "present"
+							? inspection.identity.status
+							: "unknown";
+				}
+			}
 			if (epoch === this.epoch) {
 				if (!this.rows.size) this.clearTimer();
 				this.changed();
@@ -178,7 +182,7 @@ export function registerNativeTrackingTool(
 		name: "subagents_native",
 		label: "Track native Herdr agent",
 		description:
-			"Parent-only, observation-only widget tracking of an existing native Claude Code or Codex session by exact Herdr paneId. Verifies identity from Herdr; never launches, prompts, interrupts, stops, resumes, closes, or claims ownership. No Pi result delivery or parent wake-ups. Untrack removes only the widget row.",
+			"Parent-only, observation-only widget tracking of an existing native Claude Code or Codex session by exact Herdr paneId. Checks Herdr-reported identity; never launches, prompts, interrupts, stops, resumes, closes, or claims ownership. No Pi result delivery or parent wake-ups. Untrack removes only the widget row.",
 		promptGuidelines: [
 			"Use subagents_native only for explicitly selected existing native Herdr agents. No adoption by name, cwd, workspace, or label. Manage native agents and obtain their results outside the Pi subagent lifecycle; do not poll for completion.",
 		],
@@ -197,7 +201,13 @@ export function registerNativeTrackingTool(
 			_id,
 			params,
 		): Promise<
-			AgentToolResult<TrackedNativeAgent | { paneId: string; removed: boolean }>
+			AgentToolResult<
+				| Pick<
+						TrackedNativeAgent,
+						"paneId" | "agent" | "name" | "status" | "trackedAt"
+				  >
+				| { paneId: string; removed: boolean }
+			>
 		> {
 			if (params.action === "untrack") {
 				const removed = tracker.untrack(params.paneId);
@@ -221,7 +231,13 @@ export function registerNativeTrackingTool(
 						text: `Observing ${row.name} [native ${row.agent}] in ${row.paneId}. Widget only; no Pi result delivery.`,
 					},
 				],
-				details: { ...row },
+				details: {
+					paneId: row.paneId,
+					agent: row.agent,
+					name: row.name,
+					status: row.status,
+					trackedAt: row.trackedAt,
+				},
 			};
 		},
 	});

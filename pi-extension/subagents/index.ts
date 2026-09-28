@@ -3191,14 +3191,14 @@ export default function subagentsExtension(
 			subagentRoutingGuidelines.length,
 			...refreshedGuidelines,
 		);
-		if (parentSession && nativeAgents.size > 0) {
-			nativeTracker.start();
-			await nativeTracker.refresh();
-		}
 		if (runningSubagents.size > 0 || (parentSession && nativeAgents.size > 0)) {
 			startWidgetRefresh();
 			startStatusRefresh(pi);
 			updateWidget();
+		}
+		if (parentSession && nativeAgents.size > 0) {
+			nativeTracker.start();
+			void nativeTracker.refresh();
 		}
 		if (parentSession && ctx.cwd && ctx.hasUI && isTerminalAvailable()) {
 			try {

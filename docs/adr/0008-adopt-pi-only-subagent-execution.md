@@ -13,6 +13,12 @@ A single deep launch module will own the complete launch transaction behind one 
 
 Completion delivery will use one custom message whose content contains the bounded result and triggers the parent turn. Completion detection will keep the Pi sidecar as primary evidence and the terminal exit marker as its best-effort fallback.
 
+Explicit observation of existing native Claude Code/Codex panes through
+`subagents_native` does not restore external execution. Herdr-reported identity
+and status support widget visibility only: tracking grants no launch, input,
+interrupt, stop, resume, cleanup, or Pi completion-delivery authority. All
+package-owned subagent execution remains Pi-backed.
+
 ## Why
 
 The Claude terminal path duplicates launch, completion, transcript, cleanup, status, resume, and interruption behavior. It also requires `--dangerously-skip-permissions`, has no bundled role, and reduces locality and test leverage. Pi already provides Claude models through normal provider/model routing.
