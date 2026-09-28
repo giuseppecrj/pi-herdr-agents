@@ -170,6 +170,9 @@ export class NativeTracker {
 		this.epoch++;
 		this.requests.clear();
 		this.clearTimer();
+		// Let the next session start request a fresh snapshot immediately. Any
+		// older in-flight refresh is fenced by the incremented epoch above.
+		this.refreshing = false;
 		if (!preserve) this.rows.clear();
 	}
 }

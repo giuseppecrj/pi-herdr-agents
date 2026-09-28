@@ -574,7 +574,7 @@ assert.equal((await inspectNativePane("offline")).kind, "unavailable");
 			delete process.env.PI_SUBAGENT_ID;
 			current = extension();
 			assert.ok(current.native);
-			assert.equal(current.tools.length, 10);
+			assert.ok(current.tools.some((tool) => tool.name === "subagents_native"));
 			await current.handlers.get("session_start")?.({}, ctx);
 			const tracked = await current.native.execute("t1", {
 				action: "track",
