@@ -37,6 +37,13 @@ import {
 	waitForShellReady,
 } from "./terminal.ts";
 import { listHerdrWorktrees } from "./herdr.ts";
+import {
+	NativeTracker,
+	registerNativeTrackingTool,
+	nativeWidgetStatus,
+	type TrackedNativeAgent,
+	type NativeTrackingOperations,
+} from "./native-tracking.ts";
 import { waitForCompletion } from "./completion.ts";
 import {
 	SupervisionCoordinator,
@@ -1428,6 +1435,8 @@ interface RunningSubagent {
 }
 
 interface SubagentRuntime {
+	nativeAgents?: Map<string, TrackedNativeAgent>;
+	nativeTracker?: NativeTracker;
 	runningSubagents: Map<string, RunningSubagent>;
 	supervision?: SupervisionCoordinator;
 	pi?: ExtensionAPI;
@@ -1446,6 +1455,10 @@ const runtime: SubagentRuntime =
 	readGlobalSlot<SubagentRuntime>(RUNTIME_KEY) ?? createSubagentRuntime();
 writeGlobalSlot(RUNTIME_KEY, runtime);
 const runningSubagents = runtime.runningSubagents;
+const nativeAgents = (runtime.nativeAgents ??= new Map<
+	string,
+	TrackedNativeAgent
+>());
 
 export function shouldPreserveSubagentsOnShutdown(
 	reason: SessionShutdownEvent["reason"] | undefined,
@@ -1606,20 +1619,25 @@ function formatLifecycleWidgetLabel(
 function renderSubagentWidgetLines(
 	agents: RunningSubagent[],
 	width: number,
+	nativeRows: TrackedNativeAgent[] = [],
 ): string[] {
 	const now = Date.now();
 	const rendered = agents.map((agent) => ({
 		agent,
 		projection: projectLifecycle(ensureLifecycle(agent), now),
 	}));
-	const activeCount = rendered.filter(
-		({ projection }) =>
-			projection.kind === "active" ||
-			projection.kind === "starting" ||
-			projection.kind === "running" ||
-			projection.kind === "blocked",
-	).length;
-	const openCount = agents.length - activeCount;
+	const activeCount =
+		nativeRows.filter(
+			(row) => row.status === "working" || row.status === "blocked",
+		).length +
+		rendered.filter(
+			({ projection }) =>
+				projection.kind === "active" ||
+				projection.kind === "starting" ||
+				projection.kind === "running" ||
+				projection.kind === "blocked",
+		).length;
+	const openCount = agents.length + nativeRows.length - activeCount;
 	const info =
 		activeCount > 0
 			? openCount > 0
@@ -1647,6 +1665,18 @@ function renderSubagentWidgetLines(
 		lines.push(borderLine(left, right, width, accent));
 	}
 
+	for (const row of nativeRows) {
+		const elapsed = formatElapsedMMSS(row.trackedAt, now);
+		lines.push(
+			borderLine(
+				` ${elapsed}  ${row.name} (${row.paneId}) `,
+				` [native ${row.agent}] ${nativeWidgetStatus(row)} `,
+				width,
+				accent,
+			),
+		);
+	}
+
 	lines.push(borderBottom(width, accent));
 	return lines;
 }
@@ -1655,7 +1685,7 @@ function updateWidget() {
 	const latestCtx = runtime.latestCtx;
 	if (!latestCtx?.hasUI) return;
 
-	if (runningSubagents.size === 0) {
+	if (runningSubagents.size === 0 && nativeAgents.size === 0) {
 		latestCtx.ui.setWidget("subagent-status", undefined);
 		if (widgetInterval) {
 			clearInterval(widgetInterval);
@@ -1677,6 +1707,7 @@ function updateWidget() {
 					return renderSubagentWidgetLines(
 						Array.from(runningSubagents.values()),
 						width,
+						Array.from(nativeAgents.values()),
 					);
 				},
 			};
@@ -3066,10 +3097,25 @@ export default function subagentsExtension(
 	pi: ExtensionAPI,
 	options: {
 		cleanupOperations?: (ctx: ExtensionContext) => WorktreeCleanupOperations;
+		nativeOperations?: NativeTrackingOperations;
 	} = {},
 ) {
 	runtime.pi = pi;
 	const parentSession = !process.env.PI_SUBAGENT_ID;
+	// Replace the observer on reload, retaining only data in the global runtime.
+	runtime.nativeTracker?.stop(true);
+	const nativeTracker = new NativeTracker(
+		nativeAgents,
+		(paneId) =>
+			[...runningSubagents.values()].some((child) => child.surface === paneId),
+		() => {
+			if (nativeAgents.size) startWidgetRefresh();
+			updateWidget();
+		},
+		options.nativeOperations,
+	);
+	runtime.nativeTracker = nativeTracker;
+	if (parentSession) registerNativeTrackingTool(pi, nativeTracker);
 	const cleanupInput = (ctx: ExtensionContext) => ({
 		cwd: ctx.cwd,
 		operations:
@@ -3145,7 +3191,11 @@ export default function subagentsExtension(
 			subagentRoutingGuidelines.length,
 			...refreshedGuidelines,
 		);
-		if (runningSubagents.size > 0) {
+		if (parentSession && nativeAgents.size > 0) {
+			nativeTracker.start();
+			await nativeTracker.refresh();
+		}
+		if (runningSubagents.size > 0 || (parentSession && nativeAgents.size > 0)) {
 			startWidgetRefresh();
 			startStatusRefresh(pi);
 			updateWidget();
@@ -3184,6 +3234,7 @@ export default function subagentsExtension(
 			);
 		}
 
+		nativeTracker.stop(shouldPreserveSubagentsOnShutdown(event.reason));
 		cleanupSubagentsForShutdown(event.reason, runningSubagents);
 		if (!shouldPreserveSubagentsOnShutdown(event.reason)) {
 			runtime.supervision?.close();

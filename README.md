@@ -10,6 +10,7 @@ Delegate investigation, implementation, and review without blocking the parent s
 
 - **Non-blocking delegation** — `subagent` acknowledges launch immediately while the parent keeps working.
 - **Parallel execution** — run independent scouts, workers, and reviewers at the same time.
+- **Native agent visibility** — explicitly track existing Claude Code/Codex Herdr sessions in the same widget, without managing their runtime.
 - **Live supervision** — track process and turn state in Pi's subagent widget; interrupt one child turn without destroying its session.
 - **Managed worktrees** — isolate writing agents in retained Herdr workspaces with explicit Git ownership and recovery details.
 - **Conversation handoff** — continue the active Pi conversation in a new worktree with `/worktree` while preserving the parent session.
@@ -119,7 +120,7 @@ Subagent tabs, panes, and worktree workspaces are created without stealing keybo
 
 ### Extensions
 
-**Subagents** — 9 parent-session tools + 7 commands, plus 2 child-only tools:
+**Subagents** — 10 parent-session tools + 7 commands, plus 2 child-only tools:
 
 | Tool                 | Description                                                                                 |
 | -------------------- | ------------------------------------------------------------------------------------------- |
@@ -127,6 +128,7 @@ Subagent tabs, panes, and worktree workspaces are created without stealing keybo
 | `subagent_interrupt` | Interrupt a running Pi-backed subagent's current turn                                       |
 | `subagent_send`      | Deliver a follow-up task to an idle persistent specialist                                   |
 | `subagent_stop`      | Gracefully stop a persistent specialist after its active task settles                      |
+| `subagents_native` | Parent-only explicit track/untrack of an existing native Claude Code/Codex Herdr pane in the widget; observation only |
 | `subagents_list`     | List available agent definitions                                                            |
 | `worktree_list` | Parent-only inspect-only inventory of managed worktrees and cleanup blockers |
 | `worktree_remove` | Parent-only explicit removal by `target` path, branch, or workspace ID; optional `preserve: true` commits dirty state first |
@@ -250,6 +252,53 @@ Multiple subagents run concurrently — each steers its result back independentl
 
 Completion messages render with a colored background and are expandable with `Ctrl+O`. Results larger than 16,000 characters are abbreviated in the parent context while preserving their beginning, conclusion, and session path; the complete result remains in the child session. The extension includes that bounded result and a continuation instruction directly in the single custom `subagent_result` message that triggers or steers Pi, avoiding empty turns caused by a separate context-free wake-up. The renderer uses the unadorned bounded result from structured details. Completed rows are removed from the widget as soon as their result is delivered or suppressed.
 
+### Tracking existing native Herdr agents
+
+Parent Pi sessions can explicitly add an existing Claude Code or Codex session
+to the same Subagents widget:
+
+```typescript
+subagents_native({ action: "track", paneId: "w1:p7", name: "API review" });
+subagents_native({ action: "untrack", paneId: "w1:p7" });
+```
+
+Supply an exact pane ID from Herdr. `name` is an optional widget label, never a
+selector. Tracking verifies the current parent pane and the target's native
+kind, terminal ID, and Herdr-reported session ID (`agent_session` with `kind:
+"id"` and native `herdr:claude`/`herdr:codex` source). Parent panes, Pi children,
+shells, other runtimes, and unverifiable identities are rejected. Older Herdr
+versions without this session evidence cannot be tracked. Nothing is adopted
+by name, label, cwd, or workspace, and unrelated panes never become rows.
+
+Rows show `[native claude]` or `[native codex]` and map Herdr `working` to
+`active`, `idle` to `waiting`, and `blocked`, `done`, or `unknown` directly.
+Only `active` and `blocked` count as active; the other states count as open.
+The left timer measures time since tracking began, not native process runtime.
+Native status remains visible even when Pi status notifications are disabled.
+
+Tracking is **observation-only**. This package never launches or manages native
+runtimes, sends them prompts, interrupts/stops/resumes them, closes their panes,
+or claims ownership of their tabs/worktrees. Native rows never enter Pi result
+delivery, session resume, or child supervision; they send no parent wake-ups.
+Use the native agent's existing interaction and result channels. Tracking does
+not make it a Pi subagent, and [ADR-0008](docs/adr/0008-adopt-pi-only-subagent-execution.md)
+continues to govern all package launches. Do not poll for completion.
+
+An internal observer refreshes only selected panes every 4.8 seconds, using
+bounded read-only Herdr queries. Herdr `done` means ready for input, not process
+exit, so those rows remain until untracked or their identity disappears.
+Confirmed missing panes, non-native occupants, or changed terminal/session IDs
+remove the row without touching the agent. A moved pane must be explicitly
+tracked using its new ID. Failed or incomplete inspection retains the row as
+`unknown` until fresh evidence recovers it or the parent untracks it. No timeout
+infers completion. Untrack is idempotent and works even when Herdr is unavailable.
+
+Rows survive `/reload`, `/new`, `/resume`, and `/fork` in the same Pi process,
+matching the existing in-memory runtime. Quitting clears observation only; a
+full restart does not adopt earlier rows. Tracking adds no Pi persistent-specialist
+or Agents-tab capacity reservations; every live pane still counts toward its
+own tab's existing pane limit.
+
 ### In-progress status updates
 
 The widget projects each sub-agent from a **process + turn lifecycle**:
@@ -266,7 +315,7 @@ Projected labels include:
 - `waiting` — turn finished; the process is intentionally open for more input or another stage
 - `interrupted` — the current turn was cancelled (Escape / `subagent_interrupt`); the process stays open and is **not** treated as active processing
 - `stalled` — pane inspection is unhealthy long enough that the parent can no longer trust the run
-- `running` — fallback when only coarse process presence is known (e.g. non-Pi backends)
+- `running` — fallback when only coarse Pi process presence is known
 - `finalizing` — completion was observed and delivery is in progress; the process elapsed timer freezes here
 
 The widget header counts **active** vs **open**:

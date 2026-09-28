@@ -23,6 +23,7 @@ Bundled role prompts live in [`agents/`](agents/). The native `/skill:orchestrat
 
 - `pi-extension/subagents/index.ts` — public tools/commands, agent discovery, launch/watch lifecycle, completion delivery, worktree manifests and handoffs
 - `pi-extension/subagents/herdr.ts` — Herdr CLI calls, response parsing, and ID-based Agents tab placement and capacity
+- `pi-extension/subagents/native-herdr.ts`, `native-tracking.ts` — explicit observation-only native Herdr identity checks, registry, and tracking tool; never Pi lifecycle ownership
 - `pi-extension/subagents/terminal.ts` — terminal adapter used by the lifecycle
 - `pi-extension/subagents/lifecycle.ts`, `status.ts`, `activity.ts` — process/turn state and widget projection
 - `pi-extension/subagents/wake.ts`, `supervision.ts`, `supervision-config.ts` — file wake-ups, shared pane reconciliation, polling fallback, and supervision configuration

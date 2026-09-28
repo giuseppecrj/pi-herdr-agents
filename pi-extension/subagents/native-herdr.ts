@@ -1,0 +1,112 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { isPlainObject, isString } from "./type-guards.ts";
+import { isHerdrAvailable } from "./herdr.ts";
+
+const execFileAsync = promisify(execFile);
+export type NativeKind = "claude" | "codex";
+export type NativeStatus = "idle" | "working" | "blocked" | "done" | "unknown";
+export interface NativeIdentity {
+	paneId: string;
+	terminalId: string;
+	agent: NativeKind;
+	sessionId: string;
+	status: NativeStatus;
+}
+export type NativeInspection =
+	| { kind: "present"; identity: NativeIdentity }
+	| { kind: "missing" | "unsupported" | "unavailable" };
+
+/** Require native session evidence, not a pane label, cwd, or title. */
+export function parseNativePane(
+	output: string,
+	paneId: string,
+): NativeInspection {
+	try {
+		const parsed = JSON.parse(output);
+		if (
+			parsed?.error?.code === "pane_not_found" ||
+			parsed?.error?.code === "not_found"
+		)
+			return { kind: "missing" };
+		const pane = parsed?.result?.pane;
+		if (
+			!isPlainObject(pane) ||
+			pane.pane_id !== paneId ||
+			!isString(pane.terminal_id) ||
+			!pane.terminal_id
+		)
+			return { kind: "unavailable" };
+		if (pane.agent !== "claude" && pane.agent !== "codex")
+			return { kind: "unsupported" };
+		const session = pane.agent_session;
+		if (
+			!isPlainObject(session) ||
+			session.agent !== pane.agent ||
+			session.kind !== "id" ||
+			session.source !== `herdr:${pane.agent}` ||
+			!isString(session.value) ||
+			!session.value
+		)
+			return { kind: "unavailable" };
+		const status = pane.agent_status;
+		return {
+			kind: "present",
+			identity: {
+				paneId,
+				terminalId: pane.terminal_id,
+				agent: pane.agent,
+				sessionId: session.value,
+				status:
+					status === "idle" ||
+					status === "working" ||
+					status === "blocked" ||
+					status === "done"
+						? status
+						: "unknown",
+			},
+		};
+	} catch {
+		return { kind: "unavailable" };
+	}
+}
+
+async function readHerdr(args: string[]): Promise<string> {
+	if (!isHerdrAvailable())
+		throw new Error("Native tracking requires Pi inside Herdr.");
+	const { stdout } = await execFileAsync("herdr", args, {
+		encoding: "utf8",
+		timeout: 3000,
+		killSignal: "SIGKILL",
+	});
+	return stdout;
+}
+
+export async function inspectNativePane(
+	paneId: string,
+): Promise<NativeInspection> {
+	try {
+		return parseNativePane(await readHerdr(["pane", "get", paneId]), paneId);
+	} catch (error: any) {
+		// Only a structured not-found response establishes absence. Transport
+		// failures and malformed output retain the row as unknown.
+		if (error) {
+			for (const output of [error.stderr, error.stdout]) {
+				if (
+					isString(output) &&
+					parseNativePane(output, paneId).kind === "missing"
+				)
+					return { kind: "missing" };
+			}
+		}
+		return { kind: "unavailable" };
+	}
+}
+
+export async function currentNativeObserverPane(): Promise<string> {
+	const parsed = JSON.parse(await readHerdr(["pane", "current", "--current"]));
+	const paneId = parsed?.result?.pane?.pane_id;
+	if (!isString(paneId) || !paneId)
+		throw new Error("Cannot verify the parent Herdr pane.");
+	return paneId;
+}

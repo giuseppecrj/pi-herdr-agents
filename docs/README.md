@@ -17,7 +17,9 @@ are evidence, not shipped contracts, when a later ADR supersedes them.
   review, recovery, and cleanup.
 
 The package launches asynchronous Pi children in Herdr and supports managed
-worktrees for writing tasks. Orchestrated review materializes pinned evidence,
+worktrees for writing tasks. Explicit native Herdr tracking adds observation-only
+Claude Code/Codex widget rows without changing Pi-only execution. Orchestrated
+review materializes pinned evidence,
 launches fresh public reviewers, receives automatic completion delivery, and
 has the parent synthesize outcomes. Role frontmatter tool allowlists are the
 available enforcement boundary; `read,bash` is not read-only. Automated package
