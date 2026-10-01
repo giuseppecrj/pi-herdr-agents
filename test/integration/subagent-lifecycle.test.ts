@@ -26,7 +26,11 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { getProviderRequests, resetProviderRequests } from "./fake-provider.ts";
+import {
+	getProviderRequests,
+	pauseProviderFailures,
+	resetProviderRequests,
+} from "./fake-provider.ts";
 import {
 	getAvailableBackends,
 	setBackend,
@@ -1196,13 +1200,14 @@ for (const backend of backends) {
 			);
 		});
 
-		it("falls back after a provider failure and delivers the selected model", async () => {
+		it("falls back through the live context after a parent reload", async () => {
 			const id = uniqueId();
 			const markerFile = `/tmp/pi-integ-fallback-${id}.txt`;
 			const parentSession = join(env.dir, `fallback-parent-${id}.jsonl`);
 			trackTempFile(env, markerFile);
 			const surface = createTrackedSurface(env, `fallback-${id}`);
 			await waitForPaneReady(surface);
+			const releaseFailures = pauseProviderFailures();
 			startPi(
 				surface,
 				env.dir,
@@ -1214,6 +1219,30 @@ for (const backend of backends) {
 				].join("\n"),
 				{ extraArgs: `--session ${shellQuote(parentSession)}` },
 			);
+			try {
+				// The initial tool has returned and the parent is idle, but the child
+				// cannot fail until we release the deterministic provider below.
+				await waitForFile(parentSession, PI_TIMEOUT, /"status":"started"/);
+				runInPane(surface, "/reload");
+				await waitForScreen(surface, /Reloaded keybindings/, PI_TIMEOUT);
+			} finally {
+				releaseFailures();
+			}
+			await waitForFile(
+				parentSession,
+				PI_TIMEOUT,
+				/"customType":"subagent_result"/,
+			);
+			const result = readFileSync(parentSession, "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line))
+				.find(
+					(entry) =>
+						entry.type === "custom_message" &&
+						entry.customType === "subagent_result",
+				);
+			assert.equal(result.details.errorMessage, undefined);
 			assert.match(
 				await waitForFile(markerFile, PI_TIMEOUT),
 				new RegExp(`FALLBACK_${id}`),
@@ -1230,20 +1259,6 @@ for (const backend of backends) {
 						request.model === "fallback-secondary" && request.status === 200,
 				),
 			);
-			await waitForFile(
-				parentSession,
-				PI_TIMEOUT,
-				/"customType":"subagent_result"/,
-			);
-			const result = readFileSync(parentSession, "utf8")
-				.trim()
-				.split("\n")
-				.map((line) => JSON.parse(line))
-				.find(
-					(entry) =>
-						entry.type === "custom_message" &&
-						entry.customType === "subagent_result",
-				);
 			assert.deepEqual(result.details.fallbackAttempts, [
 				"pi-integration/fallback-primary",
 				"pi-integration/fallback-secondary",

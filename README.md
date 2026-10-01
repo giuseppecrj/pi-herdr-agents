@@ -512,9 +512,13 @@ example `provider/preferred, provider/fallback`. The tool argument also accepts
 candidate before launch, then launches later candidates only after the selected
 child settles with a provider/agent error. Pi owns any automatic transient
 retrying inside that child; the extension does not infer retry counts or
-permanence from the error text. A completed child result, including a negative
-task result, never switches models. Completion metadata reports the requested
-candidate, every attempted candidate, the model actually used, and each raw
+permanence from the error text. Escape and `subagent_interrupt` leave the child
+open and idle; cancellation never advances the model shortlist.
+Fallback launches after a parent reload or session replacement use the live
+parent context, just as completion delivery does.
+A completed child result, including a negative task result, never switches models.
+Completion metadata reports the requested candidate, every attempted candidate,
+the model actually used, and each raw
 model failure in attempt order when fallbacks are tried.
 
 A catalog-listed model and configured authentication do not prove that the

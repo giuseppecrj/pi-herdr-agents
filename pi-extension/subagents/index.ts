@@ -2992,7 +2992,6 @@ async function watchSubagentWithFallbacks(
 	initial: RunningSubagent,
 	initialPlanIndex: number,
 	params: typeof SubagentParams.static,
-	ctx: Parameters<typeof launchSubagent>[1],
 	parentThinking: ThinkingLevel,
 	plans: ResolvedRuntimePlan[],
 	signal: AbortSignal,
@@ -3039,6 +3038,9 @@ async function watchSubagentWithFallbacks(
 			const plan = plans[nextPlan++];
 			attempts.push(plan.model);
 			try {
+				// Watchers survive parent replacement; their original ctx does not.
+				const ctx = runtime.latestCtx;
+				if (!ctx) throw new Error("No live parent context for fallback launch");
 				running = await launchSubagent(params, ctx, parentThinking, {
 					runtimePlan: plan,
 					id: initial.id,
@@ -3452,7 +3454,6 @@ export default function subagentsExtension(
 					running,
 					initialPlanIndex,
 					params,
-					ctx,
 					parentThinking,
 					runtimePlans,
 					watcherAbort.signal,
