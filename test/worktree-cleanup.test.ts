@@ -1860,7 +1860,7 @@ describe("closing an opened primary workspace", () => {
 			herdr.restore();
 		}
 	});
-	it("releases only the claim whose terminal is gone when two share an id", () => {
+	it("closes through the claim whose terminal matches when two share an id, leaving the stale one for a later sweep", () => {
 		const herdr = fakeHerdr({
 			"worktree-list": [worktreeList("w1")],
 			"workspace-get": [workspace()],
