@@ -78,6 +78,19 @@ export function getProviderRequests(): readonly ProviderRequest[] {
 	return providerRequests;
 }
 
+let providerFailureGate: Promise<void> | undefined;
+
+export function pauseProviderFailures(): () => void {
+	let release = () => {};
+	providerFailureGate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	return () => {
+		providerFailureGate = undefined;
+		release();
+	};
+}
+
 export function resetProviderRequests(): void {
 	providerRequests.length = 0;
 	resumeRestrictionStates.clear();
@@ -656,6 +669,7 @@ const server = createServer(async (request, response) => {
 			chatRequest.model === "fallback-fail"
 		) {
 			providerRequests.push({ model: chatRequest.model, status: 503 });
+			await providerFailureGate;
 			response.writeHead(503, { "content-type": "application/json" });
 			response.end(
 				JSON.stringify({
