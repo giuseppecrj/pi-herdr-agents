@@ -8,7 +8,7 @@ import {
 	unlinkSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
 	getHerdrPaneProcessInfo,
 	listHerdrPanes,
@@ -425,7 +425,20 @@ function resolveSource(path: string): string {
 			"--git-common-dir",
 		]).trim(),
 	);
-	const root = realpathSync(dirname(common));
+	// A submodule's Git directory lives under the superproject's .git/modules,
+	// so its checkout is only discoverable through core.worktree. Let Git read
+	// it so worktree-specific and included configuration files are honored.
+	const configured = git(common, [
+		`--git-dir=${common}`,
+		"config",
+		"--default",
+		"",
+		"--get",
+		"core.worktree",
+	]).trim();
+	const root = realpathSync(
+		configured ? resolve(common, configured) : dirname(common),
+	);
 	if (realpathSync(git(root, ["rev-parse", "--show-toplevel"]).trim()) !== root)
 		throw new Error("Cannot prove source repository root");
 	if (
