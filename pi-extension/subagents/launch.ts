@@ -445,6 +445,11 @@ function prepareLaunchSurface(
 		state: "provisioned",
 		...ownership,
 		...worktree,
+		// Lets worktree removal close the primary workspace this create opened.
+		openedPrimaryWorkspaceId: created.openedPrimaryWorkspaceId,
+		openedPrimaryRepoKey: created.openedPrimaryRepoKey,
+		openedPrimaryTerminalId: created.openedPrimaryTerminalId,
+		openedPrimaryCheckoutPath: created.openedPrimaryCheckoutPath,
 	});
 	const isolatedAgentDir = join(created.path, ".pi", "agent");
 	const hasIsolatedAgentDir = existsSync(isolatedAgentDir);

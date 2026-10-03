@@ -47,7 +47,22 @@ only the cleanup tools and removal subcommand are parent-only.
 
 Open workspaces are removed through Herdr. Git-only orphans use Git removal,
 verify checkout absence, and then prune stale registrations. Branches and their
-commits are retained. Session startup does not scan worktree inventory, avoiding blocking Pi initialization; use `/worktree list` or `worktree_list` for an explicit inventory.
+commits are retained.
+
+Removing the last linked worktree workspace also closes one workspace that is
+not a removal target: the source repository's primary workspace, which Herdr
+opened as a side effect of worktree creation. This is limited to a workspace
+the creating launch recorded as newly opened (a manifest claim pinning the
+workspace id, the source `repo_key`, the root pane's `terminal_id`, and the
+checkout path it started in); a workspace the user already had open is not
+claimed. At close time every safety condition must hold and any check
+that cannot run keeps the workspace: no other linked workspace open, default
+label, not focused, one tab and one pane, the recorded terminal, the pane still
+at the recorded checkout, an idle shell with no child processes. Claims that can
+no longer match are cleared. These conditions are a heuristic: command history
+alone, without a cwd change or background job, is undetectable, so a workspace
+the user only typed in can still be closed. The close never passes `--group`
+and its failure is a warning, not a failed removal. Session startup does not scan worktree inventory, avoiding blocking Pi initialization; use `/worktree list` or `worktree_list` for an explicit inventory.
 
 ## Rejected alternatives
 
