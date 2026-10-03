@@ -39,6 +39,7 @@ export function cleanupFixture() {
 			calls.push(`herdr:${id}`);
 			present = false;
 		},
+		closeOpenedPrimaryWorkspace: () => undefined,
 		removeCheckout: (source, path) => {
 			calls.push(`git:${source}:${path}`);
 			present = false;

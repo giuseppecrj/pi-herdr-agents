@@ -10,11 +10,14 @@ import {
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
+	closeOpenedPrimaryWorkspace,
 	getHerdrPaneProcessInfo,
 	listHerdrPanes,
 	listHerdrWorktrees,
 	removeHerdrWorktree,
 	type HerdrWorktreeInfo,
+	type PrimaryWorkspaceCleanup,
+	type PrimaryWorkspaceClaim,
 } from "./herdr.ts";
 import { readWorktreeManifest, writeWorktreeManifest } from "./launch.ts";
 import { isString, type JsonObject } from "./type-guards.ts";
@@ -68,6 +71,11 @@ export interface WorktreeCleanupOperations {
 	exists(path: string): boolean;
 	preserve(entry: WorktreeInventoryEntry): string;
 	removeWorkspace(id: string): void;
+	/** Close the primary workspace a create call opened, once nothing uses it. */
+	closeOpenedPrimaryWorkspace(
+		sourceRepo: string,
+		claims: readonly PrimaryWorkspaceClaim[],
+	): PrimaryWorkspaceCleanup | undefined;
 	removeCheckout(sourceRepo: string, path: string): void;
 	prune(sourceRepo: string): void;
 	writeManifest(file: string, value: JsonObject): void;
@@ -360,6 +368,63 @@ export async function removeContainedWorktree(
 		checkoutRemoved = true;
 		if (!entry.workspaceId) ops.prune(entry.sourceRepo);
 		const warnings: string[] = [];
+		let primaryNote = "";
+		if (entry.workspaceId) {
+			try {
+				// A claim is only meaningful for the source repository it was made for,
+				// and only when it pins the terminal and directory it was opened with.
+				const claims = ops
+					.readManifests()
+					.filter(
+						({ value }) =>
+							isString(value.openedPrimaryWorkspaceId) &&
+							isString(value.openedPrimaryRepoKey) &&
+							isString(value.openedPrimaryTerminalId) &&
+							isString(value.openedPrimaryCheckoutPath),
+					);
+				const result = claims.length
+					? ops.closeOpenedPrimaryWorkspace(
+							entry.sourceRepo,
+							claims.map(({ value }) => ({
+								workspaceId: String(value.openedPrimaryWorkspaceId),
+								repoKey: String(value.openedPrimaryRepoKey),
+								terminalId: String(value.openedPrimaryTerminalId),
+								checkoutPath: String(value.openedPrimaryCheckoutPath),
+							})),
+						)
+					: undefined;
+				if (result?.note) primaryNote = ` ${result.note}`;
+				// A consumed or stale claim must not match a later, unrelated
+				// workspace that reuses the id.
+				if (result)
+					for (const { file, value } of claims) {
+						if (value.openedPrimaryRepoKey !== result.repoKey) continue;
+						const id = value.openedPrimaryWorkspaceId;
+						const terminal = value.openedPrimaryTerminalId;
+						const closed =
+							result.closedWorkspaceId === id &&
+							result.closedTerminalId === terminal;
+						if (
+							closed ||
+							result.releasedClaims.some(
+								(claim) =>
+									claim.workspaceId === id && claim.terminalId === terminal,
+							)
+						) {
+							const cleared: JsonObject = {
+								openedPrimaryWorkspaceId: undefined,
+								openedPrimaryRepoKey: undefined,
+								openedPrimaryTerminalId: undefined,
+								openedPrimaryCheckoutPath: undefined,
+							};
+							if (closed) cleared.primaryWorkspaceClosedAt = Date.now();
+							ops.writeManifest(file, cleared);
+						}
+					}
+			} catch (error) {
+				warnings.push(`Primary workspace cleanup failed: ${message(error)}`);
+			}
+		}
 		for (const manifest of entry.manifest) {
 			try {
 				ops.writeManifest(manifest.file, {
@@ -376,7 +441,7 @@ export async function removeContainedWorktree(
 			status: "removed",
 			entry,
 			preservationSha,
-			message: `Removed ${entry.path}. Branch ${entry.branch} and its commits retained.${preservationSha ? ` Preservation commit: ${preservationSha}.` : ""}${ignoredNotice()}${warnings.length ? ` Warning: ${warnings.join("; ")}` : entry.manifest.length ? " Manifest marked removed." : " No reachable manifest (orphan)."}`,
+			message: `Removed ${entry.path}. Branch ${entry.branch} and its commits retained.${preservationSha ? ` Preservation commit: ${preservationSha}.` : ""}${ignoredNotice()}${primaryNote}${warnings.length ? ` Warning: ${warnings.join("; ")}` : entry.manifest.length ? " Manifest marked removed." : " No reachable manifest (orphan)."}`,
 		});
 	} catch (error) {
 		return finish({
@@ -781,6 +846,8 @@ export function createWorktreeCleanupOperations(input: {
 			return git(entry.path, ["rev-parse", "HEAD"]).trim();
 		},
 		removeWorkspace: (id) => removeHerdrWorktree(id, CLEANUP_TIMEOUT_MS),
+		closeOpenedPrimaryWorkspace: (source, claims) =>
+			closeOpenedPrimaryWorkspace(source, claims, CLEANUP_TIMEOUT_MS),
 		removeCheckout: (source, path) => {
 			git(source, ["worktree", "remove", "--", path]);
 		},

@@ -18,8 +18,14 @@ import {
 	readWorktreeManifest,
 	writeWorktreeManifest,
 } from "../pi-extension/subagents/launch.ts";
-import { __herdrTest__ } from "../pi-extension/subagents/herdr.ts";
 import {
+	__herdrTest__,
+	closeOpenedPrimaryWorkspace,
+	createHerdrWorktree,
+	shellHasChildProcesses,
+} from "../pi-extension/subagents/herdr.ts";
+import {
+	type CleanupManifest,
 	cleanupBlockers,
 	createWorktreeCleanupOperations,
 	__worktreeCleanupTest__,
@@ -27,6 +33,7 @@ import {
 	removeContainedWorktree,
 	formatWorktreeInventory,
 } from "../pi-extension/subagents/worktree-cleanup.ts";
+import type { JsonObject } from "../pi-extension/subagents/type-guards.ts";
 import { cleanupFixture } from "./worktree-cleanup-fixture.ts";
 
 describe("cleanup process visibility policy", () => {
@@ -1376,4 +1383,732 @@ describe("submodule worktrees", () => {
 			}
 		});
 	}
+});
+
+/** A `herdr` stand-in that replays numbered canned replies per `<group>-<verb>`. */
+function fakeHerdr(
+	replies: Record<string, JsonObject[]>,
+	delaysSeconds: Record<string, number> = {},
+) {
+	const dir = mkdtempSync(join(tmpdir(), "fake-herdr-"));
+	writeFileSync(
+		join(dir, "herdr"),
+		`#!/bin/sh
+D="$(dirname "$0")"
+echo "$*" >> "$D/calls.log"
+key="$1-$2"
+n=$(cat "$D/$key.n" 2>/dev/null || echo 0)
+n=$((n + 1))
+echo "$n" > "$D/$key.n"
+f="$D/$key.$n"
+[ -f "$f" ] || f="$D/$key.last"
+[ -f "$D/$key.$n.sleep" ] && exec sleep "$(cat "$D/$key.$n.sleep")"
+if [ -f "$f" ]; then cat "$f"; else echo '{"error":{"code":"unexpected"}}' >&2; exit 1; fi
+`,
+		{ mode: 0o755 },
+	);
+	for (const [key, list] of Object.entries(replies))
+		list.forEach((reply, index) => {
+			const body = JSON.stringify(reply);
+			writeFileSync(join(dir, `${key}.${index + 1}`), body);
+			if (index === list.length - 1)
+				writeFileSync(join(dir, `${key}.last`), body);
+		});
+	for (const [key, seconds] of Object.entries(delaysSeconds))
+		writeFileSync(join(dir, `${key}.sleep`), String(seconds));
+	const previous = process.env.PATH;
+	process.env.PATH = `${dir}:/usr/bin:/bin`;
+	return {
+		dir,
+		calls: () => {
+			try {
+				return readFileSync(join(dir, "calls.log"), "utf8")
+					.split("\n")
+					.filter(Boolean);
+			} catch {
+				return [];
+			}
+		},
+		restore: () => {
+			process.env.PATH = previous;
+			rmSync(dir, { recursive: true, force: true });
+		},
+	};
+}
+
+const ok = { id: "x", result: { type: "ok" } };
+function worktreeList(
+	primary: string | undefined,
+	rows: JsonObject[] = [],
+	repoKey: string | null = "/repo/.git",
+) {
+	const source: JsonObject = {
+		repo_name: "repo",
+		source_checkout_path: "/repo",
+	};
+	if (repoKey) source.repo_key = repoKey;
+	const principal: JsonObject = {
+		branch: "main",
+		path: "/repo",
+		is_linked_worktree: false,
+	};
+	if (primary) {
+		source.source_workspace_id = primary;
+		principal.open_workspace_id = primary;
+	}
+	return {
+		result: {
+			type: "worktree_list",
+			source,
+			worktrees: [principal, ...rows],
+		},
+	};
+}
+const created = {
+	result: {
+		type: "worktree_created",
+		workspace: { workspace_id: "w2" },
+		root_pane: { pane_id: "w2:p1" },
+		tab: { tab_id: "w2:t1" },
+		worktree: { path: "/managed/repo/task", branch: "task" },
+	},
+};
+
+const rootPane = (terminal?: string): JsonObject => {
+	const pane: JsonObject = {
+		pane_id: "w1:p1",
+		workspace_id: "w1",
+		cwd: "/repo",
+		foreground_cwd: "/repo",
+	};
+	if (terminal) pane.terminal_id = terminal;
+	return pane;
+};
+const paneList = (...panes: JsonObject[]) => ({
+	result: { type: "pane_list", panes },
+});
+
+describe("primary workspace opened by worktree create", () => {
+	it("claims the primary workspace only when create opened it", () => {
+		for (const [label, replies, panesReply, claimed, listCalls] of [
+			[
+				"none open before, one after",
+				[worktreeList(undefined), worktreeList("w1")],
+				[paneList(rootPane("term-1"))],
+				"w1",
+				2,
+			],
+			[
+				"already open before",
+				[worktreeList("w1"), worktreeList("w1")],
+				[paneList(rootPane("term-1"))],
+				undefined,
+				1,
+			],
+			["unreadable snapshot", [], [paneList(rootPane("term-1"))], undefined, 1],
+			[
+				"opened workspace cannot be bound to a source repository",
+				[worktreeList(undefined), worktreeList("w1", [], null)],
+				[paneList(rootPane("term-1"))],
+				undefined,
+				2,
+			],
+			[
+				"opened workspace's terminal cannot be identified",
+				[worktreeList(undefined), worktreeList("w1")],
+				[paneList(rootPane())],
+				undefined,
+				2,
+			],
+			[
+				"opened workspace holds more than one pane",
+				[worktreeList(undefined), worktreeList("w1")],
+				[paneList(rootPane("term-1"), rootPane("term-2"))],
+				undefined,
+				2,
+			],
+			[
+				"opened workspace's panes cannot be listed",
+				[worktreeList(undefined), worktreeList("w1")],
+				[],
+				undefined,
+				2,
+			],
+		] as const) {
+			const herdr = fakeHerdr({
+				"worktree-list": [...replies],
+				"worktree-create": [created],
+				"pane-list": [...panesReply],
+				"tab-rename": [ok],
+			});
+			try {
+				const surface = createHerdrWorktree("task", "/repo", "task", "HEAD");
+				assert.equal(surface.workspaceId, "w2", label);
+				assert.equal(surface.openedPrimaryWorkspaceId, claimed, label);
+				// The claim is bound to the source repository, the terminal that was
+				// in the workspace when it opened, and the checkout it started in.
+				assert.equal(
+					surface.openedPrimaryRepoKey,
+					claimed ? "/repo/.git" : undefined,
+					label,
+				);
+				assert.equal(
+					surface.openedPrimaryTerminalId,
+					claimed ? "term-1" : undefined,
+					label,
+				);
+				assert.equal(
+					surface.openedPrimaryCheckoutPath,
+					claimed ? "/repo" : undefined,
+					label,
+				);
+				assert.equal(
+					herdr.calls().filter((call) => call.startsWith("worktree list"))
+						.length,
+					listCalls,
+					label,
+				);
+			} finally {
+				herdr.restore();
+			}
+		}
+	});
+});
+
+describe("primary workspace snapshots", () => {
+	for (const [label, delays, listCalls] of [
+		["before", { "worktree-list.1": 3 }, 1],
+		["after", { "worktree-list.2": 3 }, 2],
+	] as const)
+		it(`claims nothing when the ${label} snapshot times out`, () => {
+			const herdr = fakeHerdr(
+				{
+					"worktree-list": [worktreeList(undefined), worktreeList("w1")],
+					"worktree-create": [created],
+					"pane-list": [paneList(rootPane("term-1"))],
+					"tab-rename": [ok],
+				},
+				delays,
+			);
+			try {
+				const started = Date.now();
+				const surface = createHerdrWorktree(
+					"task",
+					"/repo",
+					"task",
+					"HEAD",
+					200,
+				);
+				assert.ok(Date.now() - started < 2500, "snapshot must be bounded");
+				assert.equal(surface.workspaceId, "w2");
+				assert.equal(surface.openedPrimaryWorkspaceId, undefined);
+				assert.equal(surface.openedPrimaryRepoKey, undefined);
+				assert.equal(
+					herdr.calls().filter((call) => call.startsWith("worktree list"))
+						.length,
+					listCalls,
+				);
+			} finally {
+				herdr.restore();
+			}
+		});
+});
+
+describe("closing an opened primary workspace", () => {
+	const workspace = (overrides: JsonObject = {}) => ({
+		result: {
+			type: "workspace_info",
+			workspace: {
+				workspace_id: "w1",
+				label: "repo",
+				tab_count: 1,
+				pane_count: 1,
+				worktree: {
+					is_linked_worktree: false,
+					repo_key: "/repo/.git",
+					repo_name: "repo",
+				},
+				...overrides,
+			},
+		},
+	});
+	const panes = (count: number, extra: JsonObject = {}) => ({
+		result: {
+			type: "pane_list",
+			panes: Array.from({ length: count }, (_, index) => ({
+				pane_id: `w1:p${index + 1}`,
+				workspace_id: "w1",
+				terminal_id: `term-${index + 1}`,
+				cwd: "/repo",
+				foreground_cwd: "/repo",
+				...extra,
+			})),
+		},
+	});
+	const processInfo = (foreground: number) => ({
+		result: {
+			type: "pane_process_info",
+			process_info: {
+				pane_id: "w1:p1",
+				shell_pid: 100,
+				foreground_process_group_id: foreground,
+			},
+		},
+	});
+	const claim = (
+		workspaceId: string,
+		repoKey = "/repo/.git",
+		terminalId = "term-1",
+	) => ({
+		workspaceId,
+		repoKey,
+		terminalId,
+		checkoutPath: "/repo",
+	});
+	const claimed = [claim("w1")];
+	const cases: Array<{
+		name: string;
+		list?: JsonObject;
+		get?: JsonObject;
+		panes?: JsonObject;
+		info?: JsonObject;
+		claims?: Array<ReturnType<typeof claim>>;
+		children?: boolean | undefined;
+		closes: boolean;
+		reason?: RegExp;
+		released?: Array<{ workspaceId: string; terminalId: string }>;
+	}> = [
+		{ name: "idle, unmodified, unshared", closes: true },
+		{
+			name: "a different workspace than the claimed one",
+			claims: [claim("w9")],
+			closes: false,
+			released: [{ workspaceId: "w9", terminalId: "term-1" }],
+		},
+		{
+			name: "the workspace id was reused by another terminal",
+			panes: panes(1, { terminal_id: "term-other" }),
+			closes: false,
+			reason: /terminal is not the one this extension recorded/,
+			released: [{ workspaceId: "w1", terminalId: "term-1" }],
+		},
+		{
+			name: "the pane has no terminal id",
+			panes: {
+				result: {
+					type: "pane_list",
+					panes: [{ pane_id: "w1:p1", workspace_id: "w1", cwd: "/repo" }],
+				},
+			},
+			closes: false,
+			reason: /terminal is not the one this extension recorded/,
+			released: [{ workspaceId: "w1", terminalId: "term-1" }],
+		},
+		{
+			name: "the user changed directory",
+			panes: panes(1, { cwd: "/repo/packages/app" }),
+			closes: false,
+			reason: /no longer at the source checkout/,
+		},
+		{
+			name: "the foreground directory differs from the checkout",
+			panes: panes(1, { foreground_cwd: "/elsewhere" }),
+			closes: false,
+			reason: /no longer at the source checkout/,
+		},
+		{
+			name: "the pane reports no directory",
+			panes: panes(1, { cwd: undefined }),
+			closes: false,
+			reason: /no longer at the source checkout/,
+		},
+		{
+			name: "the shell has a background job",
+			children: true,
+			closes: false,
+			reason: /shell has child processes/,
+		},
+		{
+			name: "the child process check cannot run",
+			children: undefined,
+			closes: false,
+			reason: /child processes could not be checked/,
+		},
+		{
+			name: "claim was recorded for another source repository",
+			claims: [claim("w1", "/other/.git")],
+			closes: false,
+		},
+		{
+			name: "the user is looking at it",
+			get: workspace({ focused: true }),
+			closes: false,
+			reason: /it is focused/,
+		},
+		{
+			name: "another linked worktree is open",
+			list: worktreeList("w1", [
+				{
+					branch: "other",
+					path: "/managed/repo/other",
+					is_linked_worktree: true,
+					open_workspace_id: "w7",
+				},
+			]),
+			closes: false,
+			reason: /linked worktree workspace w7 still open/,
+		},
+		{
+			name: "label was changed by the user",
+			get: workspace({ label: "my notes" }),
+			closes: false,
+			reason: /label was changed/,
+		},
+		{
+			name: "user added a tab",
+			get: workspace({ tab_count: 2 }),
+			closes: false,
+			reason: /exactly one tab/,
+		},
+		{
+			name: "user added a pane",
+			panes: panes(2),
+			closes: false,
+			reason: /exactly one pane/,
+		},
+		{
+			name: "a foreground process is running",
+			info: processInfo(4242),
+			closes: false,
+			reason: /not an idle shell/,
+		},
+		{
+			name: "workspace belongs to another repository",
+			get: workspace({
+				worktree: {
+					is_linked_worktree: false,
+					repo_key: "/other/.git",
+					repo_name: "repo",
+				},
+			}),
+			closes: false,
+			reason: /not the source repository's primary/,
+		},
+	];
+	for (const item of cases)
+		it(`${item.closes ? "closes" : "keeps"} the workspace: ${item.name}`, () => {
+			const herdr = fakeHerdr({
+				"worktree-list": [item.list ?? worktreeList("w1")],
+				"workspace-get": [item.get ?? workspace()],
+				"pane-list": [item.panes ?? panes(1)],
+				"pane-process-info": [item.info ?? processInfo(100)],
+				"workspace-close": [ok],
+			});
+			try {
+				const result = closeOpenedPrimaryWorkspace(
+					"/repo",
+					item.claims ?? claimed,
+					undefined,
+					() => ("children" in item ? item.children : false),
+				);
+				const closeCalls = herdr
+					.calls()
+					.filter((call) => call.startsWith("workspace close"));
+				if (item.closes) {
+					assert.equal(result?.closedWorkspaceId, "w1");
+					assert.equal(result?.closedTerminalId, "term-1");
+					// Closing a group is never requested; Herdr guards it anyway.
+					assert.deepEqual(closeCalls, ["workspace close w1"]);
+				} else {
+					assert.equal(result?.closedWorkspaceId, undefined);
+					assert.deepEqual(closeCalls, []);
+					if (item.reason) assert.match(result?.note ?? "", item.reason);
+					else if (item.released) assert.equal(result?.note, undefined);
+					else assert.equal(result, undefined);
+					if (item.released)
+						assert.deepEqual(result?.releasedClaims, item.released);
+				}
+			} finally {
+				herdr.restore();
+			}
+		});
+	it("releases a claim whose workspace no longer exists", () => {
+		const herdr = fakeHerdr({ "worktree-list": [worktreeList(undefined)] });
+		try {
+			assert.deepEqual(closeOpenedPrimaryWorkspace("/repo", claimed), {
+				repoKey: "/repo/.git",
+				releasedClaims: [{ workspaceId: "w1", terminalId: "term-1" }],
+			});
+			assert.deepEqual(herdr.calls(), ["worktree list --cwd /repo"]);
+		} finally {
+			herdr.restore();
+		}
+	});
+	it("releases a claim when the current primary workspace is a different one", () => {
+		const herdr = fakeHerdr({ "worktree-list": [worktreeList("w5")] });
+		try {
+			const result = closeOpenedPrimaryWorkspace("/repo", [
+				claim("w1"),
+				claim("w5", "/other/.git"),
+			]);
+			assert.deepEqual(result, {
+				repoKey: "/repo/.git",
+				releasedClaims: [{ workspaceId: "w1", terminalId: "term-1" }],
+			});
+			assert.deepEqual(herdr.calls(), ["worktree list --cwd /repo"]);
+		} finally {
+			herdr.restore();
+		}
+	});
+	it("releases only the claim whose terminal is gone when two share an id", () => {
+		const herdr = fakeHerdr({
+			"worktree-list": [worktreeList("w1")],
+			"workspace-get": [workspace()],
+			"pane-list": [panes(1)],
+			"pane-process-info": [processInfo(100)],
+			"workspace-close": [ok],
+		});
+		try {
+			const result = closeOpenedPrimaryWorkspace(
+				"/repo",
+				[claim("w1", "/repo/.git", "term-old"), claim("w1")],
+				undefined,
+				() => false,
+			);
+			assert.equal(result?.closedTerminalId, "term-1");
+			assert.deepEqual(result?.releasedClaims, []);
+		} finally {
+			herdr.restore();
+		}
+	});
+	it("detects child processes of a real shell with pgrep", async () => {
+		const child = spawn("sleep", ["30"], { stdio: "ignore" });
+		try {
+			assert.ok(child.pid);
+			assert.equal(shellHasChildProcesses(process.pid), true);
+			assert.equal(shellHasChildProcesses(child.pid), false);
+		} finally {
+			child.kill();
+		}
+	});
+	it("ignores claims of other source repositories entirely", () => {
+		const herdr = fakeHerdr({ "worktree-list": [worktreeList(undefined)] });
+		try {
+			assert.equal(
+				closeOpenedPrimaryWorkspace("/repo", [claim("w1", "/other/.git")]),
+				undefined,
+			);
+		} finally {
+			herdr.restore();
+		}
+	});
+});
+
+describe("worktree removal and the opened primary workspace", () => {
+	/** What a complete claim pins besides the workspace id and source. */
+	const pin = {
+		openedPrimaryTerminalId: "term-1",
+		openedPrimaryCheckoutPath: "/repo",
+	};
+	const manifest = (extra: JsonObject = {}): CleanupManifest => ({
+		file: "/manifest.json",
+		value: {
+			branch: "task",
+			path: "/managed/repo/task",
+			state: "ready_for_review",
+			...extra,
+		},
+	});
+	function withWorkspace(manifests: CleanupManifest[]) {
+		const f = cleanupFixture();
+		const writes: Array<[string, JsonObject]> = [];
+		f.operations.listHerdr = () => [
+			{
+				path: "/managed/repo/task",
+				branch: "task",
+				isLinkedWorktree: true,
+				workspaceId: "w2",
+			},
+		];
+		f.operations.readManifests = () => manifests;
+		f.operations.writeManifest = (file, value) => {
+			writes.push([file, value]);
+		};
+		return { f, writes };
+	}
+	it("closes the primary workspace after removal and consumes the claim", async () => {
+		const { f, writes } = withWorkspace([
+			manifest({
+				openedPrimaryWorkspaceId: "w1",
+				openedPrimaryRepoKey: "/r",
+				...pin,
+			}),
+		]);
+		const seen: unknown[] = [];
+		f.operations.closeOpenedPrimaryWorkspace = (source, claims) => {
+			seen.push([source, claims]);
+			return {
+				note: "Closed primary workspace w1.",
+				closedWorkspaceId: "w1",
+				closedTerminalId: "term-1",
+				repoKey: "/r",
+				releasedClaims: [],
+			};
+		};
+		const result = await removeContainedWorktree(f.input);
+		assert.equal(result.status, "removed");
+		assert.deepEqual(seen, [
+			[
+				"/repo",
+				[
+					{
+						workspaceId: "w1",
+						repoKey: "/r",
+						terminalId: "term-1",
+						checkoutPath: "/repo",
+					},
+				],
+			],
+		]);
+		assert.match(result.message, /Closed primary workspace w1\./);
+		assert.equal(writes.length, 2);
+		assert.equal(writes[0][1].openedPrimaryWorkspaceId, undefined);
+		assert.equal("openedPrimaryWorkspaceId" in writes[0][1], true);
+		assert.equal("openedPrimaryRepoKey" in writes[0][1], true);
+		assert.equal("openedPrimaryTerminalId" in writes[0][1], true);
+		assert.equal("openedPrimaryCheckoutPath" in writes[0][1], true);
+		assert.equal(writes[1][1].state, "removed");
+	});
+	it("clears only the stale claims of the source it inspected", async () => {
+		const stale = {
+			openedPrimaryWorkspaceId: "w1",
+			openedPrimaryRepoKey: "/r",
+			...pin,
+		};
+		const { f, writes } = withWorkspace([
+			manifest(stale),
+			{ file: "/other.json", value: { ...stale, openedPrimaryRepoKey: "/q" } },
+		]);
+		f.operations.closeOpenedPrimaryWorkspace = () => ({
+			repoKey: "/r",
+			releasedClaims: [{ workspaceId: "w1", terminalId: "term-1" }],
+		});
+		const result = await removeContainedWorktree(f.input);
+		assert.equal(result.status, "removed");
+		assert.doesNotMatch(result.message, /primary workspace/i);
+		const cleared = writes.filter(
+			([, value]) => "openedPrimaryWorkspaceId" in value,
+		);
+		assert.deepEqual(
+			cleared.map(([file]) => file),
+			["/manifest.json"],
+		);
+		assert.equal(cleared[0][1].openedPrimaryWorkspaceId, undefined);
+		assert.equal(cleared[0][1].primaryWorkspaceClosedAt, undefined);
+	});
+	for (const [label, incomplete] of [
+		["a recorded source repository", { openedPrimaryWorkspaceId: "w1" }],
+		[
+			"a recorded terminal",
+			{
+				openedPrimaryWorkspaceId: "w1",
+				openedPrimaryRepoKey: "/r",
+				openedPrimaryCheckoutPath: "/repo",
+			},
+		],
+		[
+			"a recorded checkout path",
+			{
+				openedPrimaryWorkspaceId: "w1",
+				openedPrimaryRepoKey: "/r",
+				openedPrimaryTerminalId: "term-1",
+			},
+		],
+	] as const)
+		it(`ignores a claim that has no ${label}`, async () => {
+			const { f } = withWorkspace([manifest(incomplete)]);
+			f.operations.closeOpenedPrimaryWorkspace = () => {
+				throw new Error("must not be called");
+			};
+			assert.equal((await removeContainedWorktree(f.input)).status, "removed");
+		});
+	it("clears only the claim whose terminal was released", async () => {
+		const base = {
+			openedPrimaryWorkspaceId: "w1",
+			openedPrimaryRepoKey: "/r",
+			openedPrimaryCheckoutPath: "/repo",
+		};
+		const { f, writes } = withWorkspace([
+			manifest({ ...base, openedPrimaryTerminalId: "term-old" }),
+			{
+				file: "/later.json",
+				value: { state: "removed", ...base, openedPrimaryTerminalId: "term-1" },
+			},
+		]);
+		f.operations.closeOpenedPrimaryWorkspace = () => ({
+			repoKey: "/r",
+			releasedClaims: [{ workspaceId: "w1", terminalId: "term-old" }],
+		});
+		await removeContainedWorktree(f.input);
+		assert.deepEqual(
+			writes
+				.filter(([, value]) => "openedPrimaryWorkspaceId" in value)
+				.map(([file]) => file),
+			["/manifest.json"],
+		);
+	});
+	it("honors a claim recorded by an earlier worktree of the same source", async () => {
+		const { f } = withWorkspace([
+			manifest(),
+			{
+				file: "/earlier.json",
+				value: {
+					state: "removed",
+					openedPrimaryWorkspaceId: "w1",
+					openedPrimaryRepoKey: "/r",
+					...pin,
+				},
+			},
+		]);
+		let claims: unknown[] = [];
+		f.operations.closeOpenedPrimaryWorkspace = (_source, claimed) => {
+			claims = [...claimed];
+			return undefined;
+		};
+		assert.equal((await removeContainedWorktree(f.input)).status, "removed");
+		assert.deepEqual(claims, [
+			{
+				workspaceId: "w1",
+				repoKey: "/r",
+				terminalId: "term-1",
+				checkoutPath: "/repo",
+			},
+		]);
+	});
+	it("never asks Herdr to close a workspace without a recorded claim", async () => {
+		const { f } = withWorkspace([manifest()]);
+		f.operations.closeOpenedPrimaryWorkspace = () => {
+			throw new Error("must not be called");
+		};
+		assert.equal((await removeContainedWorktree(f.input)).status, "removed");
+	});
+	it("reports a failed primary cleanup as a warning after the checkout is removed", async () => {
+		const { f, writes } = withWorkspace([
+			manifest({
+				openedPrimaryWorkspaceId: "w1",
+				openedPrimaryRepoKey: "/r",
+				...pin,
+			}),
+		]);
+		f.operations.closeOpenedPrimaryWorkspace = () => {
+			throw new Error("herdr unavailable");
+		};
+		const result = await removeContainedWorktree(f.input);
+		assert.equal(result.status, "removed");
+		assert.match(
+			result.message,
+			/Primary workspace cleanup failed: herdr unavailable/,
+		);
+		assert.equal(writes.at(-1)?.[1].state, "removed");
+	});
 });
