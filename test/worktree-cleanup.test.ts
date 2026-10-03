@@ -1262,3 +1262,118 @@ describe("explicit worktree cleanup", () => {
 		}
 	});
 });
+
+function gitIn(cwd: string, args: string[]): string {
+	return execFileSync("git", args, {
+		cwd,
+		encoding: "utf8",
+		stdio: "pipe",
+	});
+}
+
+function initRepository(cwd: string): void {
+	mkdirSync(cwd, { recursive: true });
+	gitIn(cwd, ["init", "-q", "-b", "main"]);
+	gitIn(cwd, ["config", "user.name", "Cleanup test"]);
+	gitIn(cwd, ["config", "user.email", "cleanup@example.invalid"]);
+	gitIn(cwd, ["config", "commit.gpgsign", "false"]);
+}
+
+describe("submodule worktrees", () => {
+	for (const included of [false, true]) {
+		it(`resolves, inventories, and removes a linked worktree of a submodule${included ? " whose core.worktree comes from an included file" : ""}`, async () => {
+			const dir = mkdtempSync(join(tmpdir(), "cleanup-submodule-"));
+			try {
+				const origin = join(dir, "origin");
+				initRepository(origin);
+				gitIn(origin, ["commit", "--allow-empty", "-qm", "base"]);
+				const parent = join(dir, "parent");
+				initRepository(parent);
+				gitIn(parent, [
+					"-c",
+					"protocol.file.allow=always",
+					"submodule",
+					"add",
+					"-q",
+					origin,
+					"apps/sub",
+				]);
+				gitIn(parent, ["commit", "-qm", "add submodule"]);
+				const source = join(parent, "apps", "sub");
+				const managed = join(dir, "managed");
+				const worktree = join(managed, "sub", "task");
+				mkdirSync(join(managed, "sub"), { recursive: true });
+				gitIn(source, ["worktree", "add", "-q", "-b", "task", worktree]);
+				if (included) {
+					// Only `git config` sees values that live outside <common>/config.
+					const common = gitIn(source, [
+						"rev-parse",
+						"--path-format=absolute",
+						"--git-common-dir",
+					]).trim();
+					const configured = gitIn(source, [
+						"config",
+						"--get",
+						"core.worktree",
+					]).trim();
+					const extra = join(dir, "extra.config");
+					const shared = join(common, "config");
+					gitIn(source, [
+						"config",
+						"--file",
+						extra,
+						"core.worktree",
+						configured,
+					]);
+					gitIn(source, [
+						"config",
+						"--file",
+						shared,
+						"--unset",
+						"core.worktree",
+					]);
+					gitIn(source, ["config", "--file", shared, "include.path", extra]);
+				}
+				// Herdr's repo_key for a submodule is this Git directory, not a checkout.
+				assert.match(
+					gitIn(worktree, [
+						"rev-parse",
+						"--path-format=absolute",
+						"--git-common-dir",
+					]).trim(),
+					/\.git\/modules\/apps\/sub$/,
+				);
+				const ops = createWorktreeCleanupOperations({
+					managedRoot: managed,
+					manifestDir: join(dir, "manifests"),
+					liveHolders: () => [],
+				});
+				ops.listHerdr = () => [];
+				ops.holders = async () => ({ blockers: [], warnings: [] });
+
+				assert.equal(
+					ops.resolveSource(fs.realpathSync(worktree)),
+					fs.realpathSync(source),
+				);
+				const input = { cwd: parent, operations: ops };
+				const [row] = await listContainedWorktrees(input);
+				assert.equal(row.sourceRepo, fs.realpathSync(source));
+				assert.equal(row.classification, "eligible", row.blockers.join("; "));
+				assert.equal(row.branch, "task");
+
+				const result = await removeContainedWorktree({
+					...input,
+					target: worktree,
+				});
+				assert.equal(result.status, "removed", result.message);
+				assert.equal(fs.existsSync(worktree), false);
+				assert.equal(
+					gitIn(source, ["branch", "--list", "task"]).trim(),
+					"task",
+				);
+			} finally {
+				rmSync(dir, { recursive: true, force: true });
+			}
+		});
+	}
+});
