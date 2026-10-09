@@ -1,55 +1,61 @@
 # Pi Herdr Agents Sidebar
 
-This optional Herdr plugin keeps your main agents easy to find while
-[Pi Herdr Agents](../../README.md) runs delegated children. It adds two
-actions to Herdr's Agents view:
+![Pi Herdr Agents: a parent Pi session delegating to parallel child agents in dedicated Herdr panes, an isolated worktree and a retained session, with a live status widget.](https://raw.githubusercontent.com/giuseppecrj/pi-herdr-agents/main/docs/assets/pi-herdr-agents-gallery.png)
 
-- **Focus** hides delegated Pi children, except blocked children and children
-  whose status is unknown.
-- **All** removes Focus if this plugin set it, and then shows every agent
-  again. If another tool replaced the view, All leaves that view in place and
-  reports which tool owns it.
+> **Compatibility.** The npm release `pi-herdr-agents@3.1.0` predates sidebar support. Use a local checkout that contains this plugin and the `sidebar.enabled` setting, or a later release that includes both.
 
-Neither action closes, moves, or signals anything. Hidden children keep
-running, keep their panes, and still raise notifications. `herdr agent list`
-still lists them.
+An optional [Herdr](https://herdr.dev) plugin for [Pi Herdr Agents](../../README.md). It keeps your main agents easy to find in Herdr's Agents view while [Pi](https://github.com/earendil-works/pi) runs delegated children.
+
+The plugin adds two actions. The extension in the main package marks each delegated child's pane, and Focus hides the marked rows.
+
+## Features
+
+- **Focus.** Hides delegated Pi children from the Agents view, except blocked children and children whose status is unknown.
+- **All.** Removes Focus if this plugin set it, then shows every agent again. If another tool replaced the view, All leaves that view in place and reports which tool owns it.
+- **Display only.** Neither action closes, moves, or signals anything. Hidden children keep running, keep their panes, and still raise notifications. `herdr agent list` still lists them.
+- **No automatic Focus.** Installing, linking, or enabling the plugin never turns Focus on. You invoke it.
+- **Opt-in markers.** The extension writes pane markers only when you set `sidebar.enabled` to `true`.
 
 ## Requirements
 
-- Herdr `0.9.2-preview.2026-09-29-8e78f929d8f0`, the only build the plugin was
-  tested on. Herdr accepts only a plain version in `min_herdr_version` and
-  reports this preview as `0.9.2`, so the manifest declares `0.9.2`. Herdr
-  then also accepts other 0.9.2 builds and newer ones, all untested. A build
-  without the agent view API makes Focus and All fail with Herdr's error.
-- Linux. The extension identifies child processes through `/proc`, so it marks
-  nothing on other systems, and the manifest declares only `linux`.
-- `node` on the `PATH` of the Herdr server. Herdr runs the actions as
-  `node sidebar.mjs focus` and `node sidebar.mjs all`.
-- The `pi-herdr-agents` extension with sidebar markers turned on. Without
-  markers, Focus hides nothing.
+- Herdr `0.9.2-preview.2026-09-29-8e78f929d8f0`, the only build the plugin was tested on. Herdr accepts only a plain version in `min_herdr_version` and reports this preview as `0.9.2`, so the manifest declares `0.9.2`. Herdr then also accepts other 0.9.2 builds and newer ones, all untested. A build without the agent view API makes Focus and All fail with Herdr's error.
+- Linux. The extension identifies child processes through `/proc`, so it marks nothing on other systems, and the manifest declares only `linux`.
+- `node` on the `PATH` of the Herdr server. Herdr runs the actions as `node sidebar.mjs focus` and `node sidebar.mjs all`.
+- The `pi-herdr-agents` extension, installed in Pi from a revision that supports `sidebar.enabled`, with that setting turned on. Without markers, Focus hides nothing.
 
-## Install the plugin
+## Install
 
-1. Install it from GitHub. Herdr shows the manifest and commands before it
-   installs anything:
+Setup has two parts. Install the Herdr plugin, then enable markers in a compatible Pi extension. The plugin alone hides nothing, and the setting alone adds no actions.
 
-   ```bash
-   herdr plugin install giuseppecrj/pi-herdr-agents/plugins/sidebar
-   ```
+### 1. Install the Herdr plugin
 
-   To run a local checkout or the copy inside the installed npm package
-   instead, link its directory:
+Review the plugin source, then link its directory from your local checkout:
 
-   ```bash
-   herdr plugin link /path/to/pi-herdr-agents/plugins/sidebar
-   ```
+```bash
+herdr plugin link /path/to/pi-herdr-agents/plugins/sidebar
+```
 
-2. Turn on markers. Add a `sidebar` section to
-   `$PI_CODING_AGENT_DIR/herdr-agents/config.json`
-   (default `~/.pi/agent/herdr-agents/config.json`) and keep its other
-   sections. If the file does not exist, copy the extension's
-   `config.json.example` there first, because the extension rejects a
-   `config.json` without its `status` section.
+Once the GitHub default branch contains `plugins/sidebar`, you can install the subdirectory instead. Herdr shows the manifest and commands for review:
+
+```bash
+herdr plugin install giuseppecrj/pi-herdr-agents/plugins/sidebar
+```
+
+For another published branch, tag, or commit, add `--ref` followed by that revision. The revision must contain the plugin directory.
+
+### 2. Turn on markers in the Pi extension
+
+The Pi extension must also contain sidebar support. If you do not already load a compatible copy, install the same local checkout in Pi:
+
+```bash
+pi install /path/to/pi-herdr-agents
+```
+
+Use `pi list` to check your existing package sources. If another copy of Pi Herdr Agents is enabled, disable that copy with `pi config` before loading the checkout. Do not load both copies. Start Pi inside Herdr.
+
+1. Open `$PI_CODING_AGENT_DIR/herdr-agents/config.json`. The default is `~/.pi/agent/herdr-agents/config.json`.
+2. If the file does not exist, copy `config.json.example` from the extension there first. The extension rejects a `config.json` without its `status` section.
+3. Merge the `sidebar` section into the file. Keep the existing `status`, `models`, and other sections. Do not replace the file.
 
    ```json
    {
@@ -59,10 +65,24 @@ still lists them.
    }
    ```
 
-3. Run `/reload` in each parent Pi session, or start a new one. Children that
-   were already running stay unmarked.
+4. Run `/reload` in each parent Pi session, or start a new one.
+5. Launch new children. Children that were already running stay unmarked.
+6. Invoke Focus yourself. See [Use Focus and All](#use-focus-and-all).
 
-Installing, linking, or enabling the plugin does not turn Focus on.
+### Check the result
+
+After you launch a new child and run Focus, a marked child with status `idle`, `working`, or `done` disappears from the Agents view while your main session stays. Blocked children remain visible. Run All to show the hidden row again. If nothing changes, read the action log:
+
+```bash
+herdr plugin log list --plugin pi-herdr-agents.sidebar
+```
+
+## Contents
+
+- [Requirements](#requirements), [Install](#install), [Use Focus and All](#use-focus-and-all)
+- [Troubleshooting](#troubleshooting), [Safety](#safety), [Uninstall](#uninstall)
+- [Which rows Focus hides](#which-rows-focus-hides), [What a marker proves](#what-a-marker-proves), [Reusing a delegated pane](#reusing-a-delegated-pane), [Limits](#limits)
+- Main package: [Pi Herdr Agents](../../README.md) and its [sidebar markers](../../README.md#sidebar-markers) setting
 
 ## Use Focus and All
 
@@ -73,8 +93,7 @@ herdr plugin action invoke pi-herdr-agents.sidebar.focus
 herdr plugin action invoke pi-herdr-agents.sidebar.all
 ```
 
-To bind a key, add an entry like this to your Herdr config and pick a key you
-do not already use:
+To bind a key, add an entry like this to your Herdr config and pick a key you do not already use:
 
 ```toml
 [[keys.command]]
@@ -84,15 +103,9 @@ command = "pi-herdr-agents.sidebar.focus"
 description = "hide delegated Pi children"
 ```
 
-Herdr keeps one agent view for the whole server. Focus replaces the view that
-was active, including a view that another tool set. All sends its clear with
-this plugin as the source, so Herdr clears the view only if this plugin owns
-it. If another tool replaced Focus, All leaves that view in place and reports
-which tool owns it.
+Herdr keeps one agent view for the whole server. Focus replaces the view that was active, including a view that another tool set. All sends its clear with this plugin as the source, so Herdr clears the view only if this plugin owns it. If another tool replaced Focus, All leaves that view in place and reports which tool owns it.
 
-Each action writes one message to its log. Read it with
-`herdr plugin log list --plugin pi-herdr-agents.sidebar`. The exit status
-tells you what happened:
+Each action writes one message to its log. Read it with `herdr plugin log list --plugin pi-herdr-agents.sidebar`. The exit status tells you what happened:
 
 | Exit status | Meaning |
 | --- | --- |
@@ -101,25 +114,33 @@ tells you what happened:
 | `2` | The action name was not `focus` or `all`. |
 | `3` | All left another tool's view in place. |
 
-A Herdr server restart drops the view and every marker. The plugin has no
-startup hook, so run Focus again after a restart if you want it.
+A Herdr server restart drops the view and every marker. The plugin has no startup hook, so run Focus again after a restart if you want it.
 
-## Remove the plugin
+## Troubleshooting
 
-1. Run All, or skip this step. Herdr also drops this plugin's view when you
-   disable, unlink, or uninstall the plugin.
-2. Remove the plugin. Use `uninstall` for a GitHub install and `unlink` for a
-   linked directory:
+- **A child you expect to be hidden is still visible.** Check that `sidebar.enabled` is `true`, that you ran `/reload` in the parent, and that the child was launched after the reload. Then run Focus again. A blocked child or a child with unknown status is always shown.
+- **A row you expect is missing.** Run All. Markers change only what the Agents view shows.
+- **Focus or All exits with status `1`.** Read the log with the command above. The message names the cause, such as a Herdr build without the agent view API.
+- **All exits with status `3`.** Another tool owns the view. All leaves it in place.
+- **A new agent in a delegated pane is hidden.** See [Reusing a delegated pane](#reusing-a-delegated-pane).
+
+## Safety
+
+- Markers are display only. They are not a security boundary.
+- The plugin sends requests to your local Herdr server. It does not close, move, or signal panes.
+- With `sidebar.enabled` on, the parent records each child's process identity and reports one pane token, `piha_delegated_v1`, through the Herdr socket. With it off, the extension writes no pane metadata. See [Safety and uninstall](../../README.md#safety-and-uninstall) in the main README.
+
+## Uninstall
+
+1. Run All, or skip this step. Herdr also drops this plugin's view when you disable, unlink, or uninstall the plugin.
+2. Remove the plugin. Use `uninstall` for a GitHub install and `unlink` for a linked directory:
 
    ```bash
    herdr plugin uninstall pi-herdr-agents.sidebar
    herdr plugin unlink pi-herdr-agents.sidebar
    ```
 
-3. Set `sidebar.enabled` to `false`, or delete the `sidebar` key, and run
-   `/reload` in each parent session. The reload clears the markers of
-   children that are still running and stops renewing them. A marker whose
-   clear does not reach Herdr expires within 15 seconds.
+3. Set `sidebar.enabled` to `false`, or delete the `sidebar` key, and run `/reload` in each parent session. The reload clears the markers of children that are still running and stops renewing them. A marker whose clear does not reach Herdr expires within 15 seconds.
 
 ## Which rows Focus hides
 
