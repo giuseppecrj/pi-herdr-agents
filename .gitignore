@@ -4,3 +4,4 @@ config.json
 .pi/*
 !.pi/skills/
 !.pi/settings.json
+.pi-lens-probe-home/

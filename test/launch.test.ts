@@ -690,6 +690,130 @@ describe("Pi launch", () => {
 		});
 	});
 
+	it("records an ordinary child's process identity when the launch asks for it", async () => {
+		await withFixture(async ({ request }) => {
+			const identity = {
+				pid: 4321,
+				startTime: "987",
+				bootId: "boot",
+				pidNamespace: "pid:[1]",
+			};
+			const captures: unknown[] = [];
+			let command = "";
+			const operations: PiLaunchOperations = {
+				createPane: () => "pane-ordinary",
+				createWorktree() {
+					throw new Error("unexpected worktree creation");
+				},
+				async waitForShellReady() {},
+				runScript(_surface, value, options) {
+					command = value;
+					return options.scriptPath;
+				},
+				closePane() {},
+				async captureProcessIdentity(surface, expected) {
+					captures.push({ surface, ...expected });
+					return identity;
+				},
+			};
+
+			const running = await launchPiSubagent(
+				{ ...request, recordProcessIdentity: true },
+				operations,
+			);
+
+			const processFile = `${running.sessionFile}.process.json`;
+			assert.equal(running.worktree, undefined);
+			assert.equal(running.processIdentityFile, processFile);
+			assert.ok(
+				command.includes(
+					`PI_SUBAGENT_PROCESS_FILE=${expectedShellQuote(processFile)}`,
+				),
+			);
+			assert.deepEqual(await running.processIdentityCapture, identity);
+			assert.deepEqual(captures, [
+				{
+					surface: "pane-ordinary",
+					file: processFile,
+					id: "child-1",
+					sessionFile: running.sessionFile,
+				},
+			]);
+		});
+	});
+
+	it("records each resumed run's identity under its own ID, never the reused session's sidecar", async () => {
+		await withFixture(async ({ root, project, sessionDir }) => {
+			const sessionFile = join(root, "child.jsonl");
+			writeFileSync(
+				sessionFile,
+				JSON.stringify({ type: "session", id: "child", cwd: project }) + "\n",
+			);
+			writePublicResumePolicy(sessionFile);
+			const captures: unknown[] = [];
+			const commands: string[] = [];
+			const operations: PiLaunchOperations = {
+				createPane: () => "pane-resume",
+				createWorktree() {
+					throw new Error("a resume must not create a worktree");
+				},
+				async waitForShellReady() {},
+				runScript(_surface, value, options) {
+					commands.push(value);
+					return options.scriptPath;
+				},
+				closePane() {},
+				async captureProcessIdentity(surface, expected) {
+					captures.push({ surface, ...expected });
+					return {
+						pid: 1,
+						startTime: "1",
+						bootId: "boot",
+						pidNamespace: "pid:[1]",
+					};
+				},
+			};
+			const request: ResumePiLaunchRequest = {
+				kind: "resume",
+				id: "resume-1",
+				name: "Resume worker",
+				sessionFile,
+				parent: { sessionId: "parent", sessionDir },
+			};
+
+			const plain = await launchPiSubagent(request, operations);
+			const marked = await launchPiSubagent(
+				{ ...request, id: "resume-2", recordProcessIdentity: true },
+				operations,
+			);
+
+			assert.equal(plain.processIdentityFile, undefined);
+			assert.doesNotMatch(commands[0], /PI_SUBAGENT_PROCESS_FILE/);
+			const processFile = join(
+				sessionDir,
+				"artifacts",
+				"parent",
+				"process-identity",
+				"resume-2.json",
+			);
+			assert.equal(marked.processIdentityFile, processFile);
+			assert.ok(
+				commands[1].includes(
+					`PI_SUBAGENT_PROCESS_FILE=${expectedShellQuote(processFile)}`,
+				),
+			);
+			await marked.processIdentityCapture;
+			assert.deepEqual(captures, [
+				{
+					surface: "pane-resume",
+					file: processFile,
+					id: "resume-2",
+					sessionFile,
+				},
+			]);
+		});
+	});
+
 	for (const kind of ["fresh", "resume"] as const) {
 		for (const failurePoint of ["readiness", "command delivery"] as const) {
 			it(`closes its ${kind} pane once when ${failurePoint} fails`, async () => {
@@ -1759,12 +1883,15 @@ describe("Pi launch", () => {
 					name: "Handoff",
 					worktree: { branch: "handoff/feature" },
 					handoff: { leafId: "assistant-1" },
+					recordProcessIdentity: true,
 				},
 				operations,
 			);
 
 			assert.deepEqual(events, ["create", "ready", "run", "pi-ready", "focus"]);
 			assert.equal(result.focusError, undefined);
+			assert.equal(result.running.processIdentityFile, undefined);
+			assert.equal(result.running.processIdentityCapture, undefined);
 			assert.equal(
 				readFileSync(request.parent.sessionFile, "utf8"),
 				parentBefore,

@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import {
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
@@ -123,6 +132,61 @@ describe("pack-neutral package contents", () => {
 			"oxlint.config.ts",
 		])
 			assert.equal(packageFiles.has(path), false, `unexpected ${path}`);
+	});
+
+	it("ships the self-contained sidebar plugin but not its active plan", () => {
+		assert.deepEqual(
+			[...packageFiles].filter((path) => path.startsWith("plugins/")).sort(),
+			[
+				"plugins/sidebar/README.md",
+				"plugins/sidebar/herdr-plugin.toml",
+				"plugins/sidebar/sidebar.mjs",
+			],
+		);
+		assert.equal(packageFiles.has("docs/sidebar-plan.md"), false);
+		// A Herdr subdirectory install receives only plugins/sidebar/, and
+		// linking runs no build, so every command must work from those files.
+		const pluginManifest = readFileSync(
+			join(root, "plugins/sidebar/herdr-plugin.toml"),
+			"utf8",
+		);
+		for (const [, argv] of pluginManifest.matchAll(/^command = (.+)$/gm)) {
+			const [program, file, ...rest] = JSON.parse(argv);
+			assert.equal(program, "node");
+			assert.ok(existsSync(join(root, "plugins/sidebar", file)), file);
+			for (const arg of rest) assert.match(arg, /^[a-z]+$/);
+		}
+		assert.doesNotMatch(pluginManifest, /\[\[(build|startup)\]\]/);
+	});
+
+	it("does not ship the logs pi-lens writes under .pi-lens-probe-home", () => {
+		// A copy of the package manifest and ignore rules, so the repository
+		// tree is never touched.
+		const dir = mkdtempSync(join(tmpdir(), "piha-pack-ignore-"));
+		try {
+			for (const file of ["package.json", ".npmignore"])
+				copyFileSync(join(root, file), join(dir, file));
+			mkdirSync(join(dir, ".pi-lens-probe-home"));
+			writeFileSync(join(dir, ".pi-lens-probe-home", "probe.log"), "log\n");
+			writeFileSync(join(dir, "kept.txt"), "kept\n");
+			const files = JSON.parse(
+				execFileSync(
+					"npm",
+					["pack", "--dry-run", "--json", "--ignore-scripts"],
+					{
+						cwd: dir,
+						encoding: "utf8",
+					},
+				),
+			)[0].files.map(({ path }) => path);
+			assert.ok(files.includes("kept.txt"), `fixture not packed: ${files}`);
+			assert.deepEqual(
+				files.filter((path) => path.startsWith(".pi-lens-probe-home/")),
+				[],
+			);
+		} finally {
+			rmSync(dir, { recursive: true });
+		}
 	});
 
 	it("leaves no empty bundled-resource directories in the source tree", () => {

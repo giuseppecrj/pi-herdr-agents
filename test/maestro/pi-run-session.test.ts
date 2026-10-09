@@ -26,6 +26,7 @@ import type {
 } from "../../maestro/runtime/pi-run-session.ts";
 import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
 import { launchOperationsFromSurface } from "../../maestro/adapters/pi/launch.ts";
+import type { PiProcessIdentity } from "../../maestro/adapters/pi/process-identity.ts";
 import { discoverAgentCatalog } from "../../maestro/core/roles/discovery.ts";
 import {
 	appendPersistentTaskEvent,
@@ -424,6 +425,7 @@ for (const mode of ["success", "focus-warning", "readiness-failure"] as const) {
 				focused = true;
 				if (mode === "focus-warning") throw new Error("focus unavailable");
 			};
+			const { writes } = markedSession(f);
 			const handoff = f.session.handoffWorktree({
 				name: "handoff",
 				task: "continue",
@@ -455,6 +457,8 @@ for (const mode of ["success", "focus-warning", "readiness-failure"] as const) {
 				release();
 			}
 			const result = await observed;
+			await turn();
+			assert.deepEqual(writes, []);
 			assert.equal(readFileSync(source, "utf8"), bytes);
 			assert.equal(f.registrations(), 0);
 			assert.equal(f.settled.length, 0);
@@ -1589,4 +1593,324 @@ test("public, control, logical specialist, generation and inbox namespaces remai
 		assert.equal(f.session.getControlTaskId(next.id), "control");
 		f.complete(next);
 		await wait;
+	}));
+
+interface RecordedMarkerWrite {
+	paneId: string;
+	seq: number;
+	live: boolean;
+}
+
+/** Turns markers on for the fixture's shared composition. */
+function markedSession(
+	f: Awaited<ReturnType<typeof makeFixture>>,
+	enabled = true,
+) {
+	const writes: RecordedMarkerWrite[] = [];
+	let held: Array<() => void> | undefined;
+	const infrastructure = f.options.infrastructure;
+	assert.ok(infrastructure);
+	const session = runtime.createDefaultRunSession(
+		{
+			...f.options,
+			sidebarMarkers: enabled,
+			infrastructure: {
+				...infrastructure,
+				markerWriter: (write) => {
+					writes.push(write);
+					const pending = held;
+					return pending
+						? new Promise((settle) => pending.push(() => settle("answered")))
+						: Promise.resolve("answered");
+				},
+			},
+		},
+		f.session,
+	);
+	return {
+		session,
+		writes,
+		/** Leaves later writes in flight until `release`. */
+		hold() {
+			held = [];
+		},
+		release() {
+			const pending = held ?? [];
+			held = undefined;
+			for (const settle of pending) settle();
+		},
+	};
+}
+
+/** Reloads the composition, as `/reload` does, with the setting changed. */
+function reloadSession(
+	f: Awaited<ReturnType<typeof makeFixture>>,
+	previous: ReturnType<typeof runtime.createDefaultRunSession>,
+	enabled: boolean,
+) {
+	return runtime.createDefaultRunSession(
+		{ ...f.options, sidebarMarkers: enabled },
+		previous,
+	);
+}
+
+/**
+ * A fake /proc behind the injected probe, so marker tests run on any host.
+ * Install it before `markedSession`: markers take the probe when created.
+ */
+function fakeProcesses(f: Awaited<ReturnType<typeof makeFixture>>) {
+	const host = { bootId: "boot", pidNamespace: "pid:[1]" };
+	const alive = new Set<number>();
+	let nextPid = 4_000;
+	const infrastructure = f.options.infrastructure;
+	assert.ok(infrastructure);
+	// The session shares this infrastructure object, so its markers see the probe.
+	infrastructure.processProbe = {
+		host: () => host,
+		stat: (pid) =>
+			alive.has(pid) ? { state: "S", ppid: 1, startTime: "100" } : undefined,
+		terminate() {
+			throw new Error("markers never signal");
+		},
+	};
+	return {
+		start(): PiProcessIdentity {
+			const pid = nextPid++;
+			alive.add(pid);
+			return { pid, startTime: "100", ...host };
+		},
+		exit(identity: PiProcessIdentity) {
+			alive.delete(identity.pid);
+		},
+	};
+}
+
+/** Bounded by iterations, not `Date.now`, which some tests freeze. */
+async function until(predicate: () => boolean, label: string) {
+	for (let attempt = 0; !predicate(); attempt++) {
+		if (attempt > 400) throw new Error(`timed out waiting for ${label}`);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+}
+
+test("sidebar markers are off by default: no identity recording and no Herdr writes", () =>
+	fixture(async (f) => {
+		const { session, writes } = markedSession(f, false);
+		const input = f.input("unmarked");
+		const handle = await session.spawnPi(input);
+		assert.doesNotMatch(f.commands.at(-1) ?? "", /PI_SUBAGENT_PROCESS_FILE/);
+		const record = f.latest();
+		assert.ok(record);
+		f.complete(record);
+		await session.supervise(handle, input.task);
+		await turn();
+		assert.deepEqual(writes, []);
+	}));
+
+test("a delegated child is marked after identity verification and cleared before delivery", () =>
+	fixture(async (f) => {
+		const child = fakeProcesses(f).start();
+		f.operations.captureProcessIdentity = async () => child;
+		const { session, writes } = markedSession(f);
+		const input = f.input("marked");
+		const handle = await session.spawnPi(input);
+		const record = f.latest();
+		assert.ok(record);
+		assert.match(f.commands.at(-1) ?? "", /PI_SUBAGENT_PROCESS_FILE=/);
+		await until(() => writes.length === 1, "the first marker write");
+		assert.deepEqual(
+			writes.map(({ paneId, live }) => ({ paneId, live })),
+			[{ paneId: record.surface, live: true }],
+		);
+		// Observations inside the renewal interval do not write again.
+		session.observe(input.task.id);
+		await turn();
+		assert.equal(writes.length, 1);
+		f.complete(record);
+		await session.supervise(handle, input.task);
+		await until(() => writes.length === 2, "the clearing write");
+		assert.equal(writes[1].live, false);
+		assert.ok(writes[1].seq > writes[0].seq);
+	}));
+
+test("a child whose identity was never verified is never marked", () =>
+	fixture(async (f) => {
+		f.operations.captureProcessIdentity = async () => {
+			throw new Error("no identity recorded");
+		};
+		const { session, writes } = markedSession(f);
+		const input = f.input("unverified");
+		const handle = await session.spawnPi(input);
+		const record = f.latest();
+		assert.ok(record);
+		await turn();
+		f.complete(record);
+		await session.supervise(handle, input.task);
+		await turn();
+		assert.deepEqual(writes, []);
+	}));
+
+test("suppressing a marked run clears its marker without waiting for renewal", () =>
+	fixture(async (f) => {
+		const child = fakeProcesses(f).start();
+		f.operations.captureProcessIdentity = async () => child;
+		const { session, writes } = markedSession(f);
+		const input = f.input("suppressed");
+		await session.spawnPi(input);
+		await until(() => writes.length === 1, "the first marker write");
+		session.suppress(input.task.id);
+		await until(() => writes.length === 2, "the clearing write");
+		assert.deepEqual(
+			writes.map(({ live }) => live),
+			[true, false],
+		);
+	}));
+
+test("turning sidebar markers off on reload clears a live marker after its in-flight renewal", (t) =>
+	fixture(async (f) => {
+		t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+		const child = fakeProcesses(f).start();
+		f.operations.captureProcessIdentity = async () => child;
+		const marked = markedSession(f);
+		const input = f.input("live-before-reload");
+		await marked.session.spawnPi(input);
+		const record = f.latest();
+		assert.ok(record);
+		await until(() => marked.writes.length === 1, "the first marker write");
+		marked.hold();
+		t.mock.timers.tick(5_000);
+		marked.session.observe(input.task.id);
+		await until(() => marked.writes.length === 2, "the in-flight renewal");
+
+		const reloaded = reloadSession(f, marked.session, false);
+		await turn();
+		assert.equal(marked.writes.length, 2);
+		marked.release();
+		await until(() => marked.writes.length === 3, "the clearing write");
+		assert.deepEqual(
+			marked.writes.map(({ paneId, live }) => ({ paneId, live })),
+			[
+				{ paneId: record.surface, live: true },
+				{ paneId: record.surface, live: true },
+				{ paneId: record.surface, live: false },
+			],
+		);
+		assert.ok(marked.writes[2].seq > marked.writes[1].seq);
+		t.mock.timers.tick(5_000);
+		reloaded.observe(input.task.id);
+		await turn();
+		assert.equal(marked.writes.length, 3);
+	}));
+
+test("turning sidebar markers off on reload retires a pending marker; re-enabling marks only new children", (t) =>
+	fixture(async (f) => {
+		t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+		const processes = fakeProcesses(f);
+		const late = processes.start();
+		let verifyLate!: (identity: PiProcessIdentity) => void;
+		f.operations.captureProcessIdentity = () =>
+			new Promise<PiProcessIdentity>((resolve) => {
+				verifyLate = resolve;
+			});
+		const marked = markedSession(f);
+		const input = f.input("pending-before-reload");
+		await marked.session.spawnPi(input);
+		await turn();
+		assert.ok(verifyLate, "identity capture started");
+
+		const reloaded = reloadSession(f, marked.session, false);
+		verifyLate(late);
+		await turn();
+		t.mock.timers.tick(5_000);
+		reloaded.observe(input.task.id);
+		await turn();
+		assert.deepEqual(marked.writes, []);
+
+		const reenabled = reloadSession(f, reloaded, true);
+		t.mock.timers.tick(5_000);
+		reenabled.observe(input.task.id);
+		await turn();
+		assert.deepEqual(marked.writes, []);
+
+		const fresh = processes.start();
+		f.operations.captureProcessIdentity = async () => fresh;
+		await reenabled.spawnPi(f.input("after-reenable"));
+		const record = f.latest();
+		assert.ok(record);
+		await until(() => marked.writes.length === 1, "the new child's marker");
+		assert.deepEqual(
+			marked.writes.map(({ paneId, live }) => ({ paneId, live })),
+			[{ paneId: record.surface, live: true }],
+		);
+	}));
+
+test("reloading with sidebar markers still on keeps renewing existing markers", (t) =>
+	fixture(async (f) => {
+		t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+		const child = fakeProcesses(f).start();
+		f.operations.captureProcessIdentity = async () => child;
+		const { session, writes } = markedSession(f);
+		const input = f.input("kept-on-reload");
+		await session.spawnPi(input);
+		await until(() => writes.length === 1, "the first marker write");
+		const reloaded = reloadSession(f, session, true);
+		await turn();
+		assert.equal(writes.length, 1);
+		t.mock.timers.tick(5_000);
+		reloaded.observe(input.task.id);
+		await until(() => writes.length === 2, "the renewal after reload");
+		assert.deepEqual(
+			writes.map(({ live }) => live),
+			[true, true],
+		);
+		assert.ok(writes[1].seq > writes[0].seq);
+	}));
+
+test("persistent and resumed children are marked like fresh ones", () =>
+	fixture(async (f) => {
+		const child = fakeProcesses(f).start();
+		f.operations.captureProcessIdentity = async () => child;
+		const { session, writes } = markedSession(f);
+		const persistent = f.input("persistent", true);
+		await session.spawnPi(persistent);
+		await until(() => writes.length === 1, "the persistent marker");
+		const specialist = f.latest();
+		assert.ok(specialist?.persistent);
+		assert.equal(writes[0].paneId, specialist.surface);
+		appendPersistentTaskEvent(specialist.sessionFile, {
+			type: "task-done",
+			task: "inbox-persistent",
+			generation: "generation-persistent",
+		});
+		session.observe(persistent.task.id);
+		await turn();
+		assert.deepEqual(
+			writes.map(({ live }) => live),
+			[true],
+		);
+
+		const input = f.input("before-resume");
+		const handle = await session.spawnPi(input);
+		const first = f.latest();
+		assert.ok(first);
+		writeFileSync(
+			first.sessionFile,
+			`${JSON.stringify({ type: "session", version: 3, id: "saved", cwd: f.dir })}\n`,
+		);
+		f.complete(first);
+		await session.supervise(handle, input.task);
+		rmSync(`${first.sessionFile}.exit`, { force: true });
+		const resumed = await session.resumePi({
+			taskId: "resume-marked",
+			name: "resumed",
+			sessionPath: first.sessionFile,
+		});
+		const command = f.commands.at(-1) ?? "";
+		assert.match(command, /PI_SUBAGENT_PROCESS_FILE=.*process-identity/);
+		const record = f.latest();
+		assert.ok(record && record.id === resumed.id);
+		await until(
+			() => writes.some((w) => w.paneId === record.surface && w.live),
+			"the resumed marker",
+		);
 	}));

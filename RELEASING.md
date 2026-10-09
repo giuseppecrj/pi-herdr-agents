@@ -37,7 +37,7 @@ Manual deterministic Herdr integration (required before you push a release commi
 npm run test:integration
 ```
 
-Run that suite from inside Herdr. It uses real Pi and Herdr processes with the local deterministic provider, so it needs no provider credentials or network access.
+Run that suite from inside Herdr. It uses real Pi and Herdr processes with the local deterministic provider, so it needs no provider credentials or network access. `test/integration/sidebar.test.ts` also starts two disposable Herdr servers with their own HOME, configuration, sockets, and plugin registry under the system temporary directory, and removes them afterwards. It needs Linux and skips elsewhere.
 
 The optional live-provider smoke test is not a release gate:
 
@@ -45,7 +45,7 @@ The optional live-provider smoke test is not a release gate:
 PI_TEST_MODEL="openai-codex/gpt-5.6-luna" PI_TEST_TIMEOUT=180000 npm run test:integration:live
 ```
 
-Do not release from skipped Herdr tests. Confirm the package preview includes `README.md`, `CHANGELOG.md`, `AGENTS.md`, `docs/`, `config.json.example`, and `examples/role-pack/`, contains no `agents/` resources, no `skills/` resources other than the host-owned `skills/pi-herdr-agents/SKILL.md`, and no `pi-extension/subagents/plan-skill.md`, and excludes `pi-extension/subagents/workflow-worker.js`. Confirm it excludes plans, journals, sessions, prototypes, generated evidence, local `config.json` and `openspec/`, and that the worktree integration tests leave no test workspace behind. Durable user configuration is `$PI_CODING_AGENT_DIR/herdr-agents/config.json`; package-root configuration is ignored, so users must move an older file manually or re-run `/subagents-init`.
+Do not release from skipped Herdr tests. Confirm the package preview includes `README.md`, `CHANGELOG.md`, `AGENTS.md`, `docs/`, `config.json.example`, `examples/role-pack/`, and exactly `README.md`, `herdr-plugin.toml`, and `sidebar.mjs` under `plugins/sidebar/`, excludes the active `docs/sidebar-plan.md`, contains no `agents/` resources, no `skills/` resources other than the host-owned `skills/pi-herdr-agents/SKILL.md`, and no `pi-extension/subagents/plan-skill.md`, and excludes `pi-extension/subagents/workflow-worker.js`. Confirm it excludes plans, journals, sessions, prototypes, generated evidence, local `config.json` and `openspec/`, and that the worktree integration tests leave no test workspace behind. Durable user configuration is `$PI_CODING_AGENT_DIR/herdr-agents/config.json`; package-root configuration is ignored, so users must move an older file manually or re-run `/subagents-init`.
 
 ## npm authentication
 

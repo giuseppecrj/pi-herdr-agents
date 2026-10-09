@@ -30,10 +30,10 @@
   "type": "module",
   "scripts": {
     "changelog": "auto-changelog",
-    "format": "biome format --write pi-extension test maestro",
-    "format:check": "biome format pi-extension test maestro",
-    "lint": "oxlint pi-extension test maestro",
-    "test": "node --experimental-strip-types --test test/test.ts test/worktree-cleanup.test.ts test/launch.test.ts test/runtime-routing.test.ts test/release-workflow.test.ts test/package-manifest.test.js test/maestro/*.test.ts",
+    "format": "biome format --write pi-extension test maestro plugins",
+    "format:check": "biome format pi-extension test maestro plugins",
+    "lint": "oxlint pi-extension test maestro plugins",
+    "test": "node --experimental-strip-types --test test/test.ts test/worktree-cleanup.test.ts test/launch.test.ts test/runtime-routing.test.ts test/release-workflow.test.ts test/package-manifest.test.js test/sidebar-plugin.test.js test/maestro/*.test.ts",
     "test:integration": "node --experimental-strip-types --test --test-concurrency=1 test/integration/*.test.ts",
     "test:integration:live": "PI_TEST_LIVE=1 node --experimental-strip-types --test --test-concurrency=1 test/integration/*.test.ts",
     "version": "auto-changelog --package && git add CHANGELOG.md"

@@ -97,6 +97,8 @@ export interface PiHarnessAdapterOptions {
 	worktreeOperations?: WorktreeOperations;
 	/** Kernel process facts for a retained worktree child's identity; tests inject it. */
 	processProbe?: ProcessIdentityProbe;
+	/** Ordinary and resumed children also record their identity (sidebar markers). */
+	recordProcessIdentity?: boolean;
 	/** Bound for confirming a retained worktree child's exit. Default: 5000ms. */
 	killTimeoutMs?: number;
 	/** Explicit local evidence/lifecycle bridge. The host still owns delivery and deduplication. */
@@ -209,6 +211,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 							: undefined
 					: undefined,
 				surface: opts.surface?.id,
+				recordProcessIdentity: this.options.recordProcessIdentity,
 				parent: this.options.parent,
 				runtimePlan:
 					resolved?.runtimePlan ??
@@ -294,6 +297,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 				name: opts.name,
 				sessionFile: opts.sessionId,
 				message: opts.message,
+				recordProcessIdentity: this.options.recordProcessIdentity,
 				parent: this.options.parent,
 				behavior: { autoExit: opts.autoExit },
 			},

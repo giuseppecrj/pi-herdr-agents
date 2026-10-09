@@ -17,6 +17,7 @@ Delegate investigation, implementation, and review without blocking the parent s
 - **Conversation handoff** — continue the active Pi conversation in a new worktree with `/worktree` while preserving the parent session.
 - **Pack-neutral roles** — use project or global definitions and installable role packs; this package ships no default roles or workflows.
 - **Persistent specialists** — retain one policy-bound Pi session for sequential, turn-based tasks.
+- **Optional sidebar focus** — the companion [Pi Herdr Agents Sidebar](plugins/sidebar/README.md) Herdr plugin hides marked delegated children from Herdr's Agents view while you run Focus. Markers are display-only and follow the pane, so see its [limits](plugins/sidebar/README.md#reusing-a-delegated-pane).
 
 ## Requirements
 
@@ -57,7 +58,7 @@ Restart or `/reload` Pi after installation. Review package source before install
 - [Requirements](#requirements), [Install](#install), [Safety and uninstall](#safety-and-uninstall)
 - [Quick start](#quick-start), [Release notes](#release-notes), [How it works](#how-it-works)
 - [What's Included](#whats-included): tools, commands, the operating skill, role packs
-- [Async Subagent Flow](#async-subagent-flow): status, configuration, model routing
+- [Async Subagent Flow](#async-subagent-flow): status, configuration, model routing, [sidebar markers](#sidebar-markers)
 - [Spawning Subagents](#spawning-subagents), [Persistent specialists](#persistent-specialists), [Interrupting](#interrupting-a-running-subagent), [Cancelling](#cancelling-a-running-subagent)
 - [The `/worktree` Workflow](#the-worktree-workflow), [Custom Agents](#custom-agents), [Tool Access Control](#tool-access-control)
 - [Development](#development), [License](#license)
@@ -67,7 +68,8 @@ Restart or `/reload` Pi after installation. Review package source before install
 - Child agents are real Pi processes running with your user account's permissions, inside Herdr panes. Worktrees isolate Git checkouts, not processes or permissions.
 - The extension creates Herdr panes, tabs and managed worktrees only when a launch asks for them. It never pushes, merges, opens pull requests, deletes branches or removes worktrees on its own; cleanup is an explicit parent action ([worktree cleanup](#explicit-worktree-cleanup)).
 - What it writes: `$PI_CODING_AGENT_DIR/herdr-agents/config.json` (only through `/subagents-init` or the writer tool, never on startup); per-launch artifacts under the parent session's `artifacts/<session-id>/` directory beside Pi's session store, which hold the child's full task text and any `systemPrompt` as Markdown files, activity snapshots and worktree manifests; and the child's own Pi session file. A managed worktree that carries its own `.pi/agent` directory receives that child's session inside the checkout. Treat task text as potentially sensitive when you share or inspect those files.
-- To uninstall: first list and remove any retained worktrees while the extension is still loaded (`/worktree list`, then `/worktree remove <target>`), because those commands leave with the package. Then run `pi remove npm:pi-herdr-agents`, and delete `$PI_CODING_AGENT_DIR/herdr-agents/` and the `artifacts/` directories above if you no longer want the configuration and launch records.
+- Managed worktree children record their PID, process start time, boot ID, and PID namespace in `<session>.process.json` beside their session. With [`sidebar.enabled`](#sidebar-markers), every other child records the same facts, and a resumed child records them under `artifacts/<session-id>/process-identity/`. The parent then reports one display-only pane token, `piha_delegated_v1`, on each child's pane through the Herdr socket. With the setting off, the extension writes no pane metadata.
+- To uninstall: first list and remove any retained worktrees while the extension is still loaded (`/worktree list`, then `/worktree remove <target>`), because those commands leave with the package. If you installed the optional sidebar plugin, remove it with `herdr plugin uninstall pi-herdr-agents.sidebar` (or `herdr plugin unlink` for a linked copy). Then run `pi remove npm:pi-herdr-agents`, and delete `$PI_CODING_AGENT_DIR/herdr-agents/` and the `artifacts/` directories above if you no longer want the configuration and launch records.
 
 ## Quick start
 
@@ -648,6 +650,52 @@ runs init with the request's context and returns synchronously; the emitter
 shows a `not-started` reason. The host does not listen in subagent sessions
 and unsubscribes at `session_shutdown`. Unsubscribe an approval listener there
 too, as the role-pack bridge does.
+
+### Sidebar markers
+
+Set `sidebar.enabled` to `true` to mark delegated children for the optional
+[Pi Herdr Agents Sidebar](plugins/sidebar/README.md) Herdr plugin, whose Focus
+action hides marked children from Herdr's Agents view. The setting defaults to
+`false`.
+
+```json
+{
+  "sidebar": {
+    "enabled": true
+  }
+}
+```
+
+Add the key to your existing `config.json`. The extension rejects a
+`config.json` without its `status` section, so copy `config.json.example`
+first if the file does not exist. Run `/reload` after changing the setting.
+Children launched before the change stay unmarked.
+
+Setting `sidebar.enabled` to `false` and running `/reload` retires every
+existing marker and clears the markers of running children. A clear can fail to
+reach Herdr, so a token still expires at most 15 seconds after the last write
+Herdr accepted. Setting it back to `true` marks only later launches; a child
+that was already running when you turned it off is never marked again.
+
+With markers on, every fresh, resumed, and persistent child records its own
+process identity, as managed worktree children always do. After the parent
+verifies that identity, it reports the pane token `piha_delegated_v1` with the
+value `live`, a 15-second time-to-live, and an increasing sequence number
+through `HERDR_SOCKET_PATH`. It renews the token on supervision checks while
+that exact process is alive. It clears the token when the run finalizes or is
+suppressed, or when the process exits or can no longer be verified. A
+`/worktree` handoff session is never marked.
+
+Marker writes never fail a launch or keep Pi running. Each write has a 2-second
+timeout on an unreferenced socket, failed writes are not retried, and three
+failures in a row stop that child's marker. Process identity reads Linux
+`/proc`, so on other systems, and outside Herdr, nothing is marked. After a
+parent crash, a marker can remain for up to 15 seconds after the last write
+Herdr applied. A marker belongs to the pane, so a different process started by
+hand in a delegated pane stays hidden by Focus while the original process is
+alive and supervised, even if it is suspended. Run All first or use a fresh
+pane. See [what a marker proves](plugins/sidebar/README.md#what-a-marker-proves)
+and [reusing a delegated pane](plugins/sidebar/README.md#reusing-a-delegated-pane).
 
 ### Supervision transport
 
@@ -1347,11 +1395,15 @@ provider; fakes are for conformance tests only.
 - `maestro/adapters/pi/` — Pi launch, completion, session I/O, activity files,
   model SDK glue, and registry projection behind `PiHarnessAdapter`;
   `child/subagent-done.ts` implements the child protocol.
-- `maestro/surfaces/herdr/` — `HerdrSurfaceProvider`, Herdr CLI driver, and
-  terminal scripts/placement.
+- `maestro/surfaces/herdr/` — `HerdrSurfaceProvider`, Herdr CLI driver,
+  terminal scripts/placement, and `herdr-socket.ts`, the bounded socket
+  client for pane metadata.
 - `maestro/runtime/` — run ownership, controls/retries, observation,
-  delivery-gated cleanup, Pi composition, worktree operations/handoff, and
-  task-model init composition.
+  delivery-gated cleanup, Pi composition, worktree operations/handoff,
+  task-model init composition, and sidebar markers (`delegated-marker.ts`).
+- `plugins/sidebar/` — the optional Herdr plugin. Its `sidebar.mjs` uses Node
+  built-ins only and imports nothing from the extension, so Herdr can install
+  the directory by itself.
 - `maestro/adapters/fake/`, `maestro/surfaces/fake/`, `test/maestro/` —
   conformance fakes, seam tests, and the import dependency-rule test.
 

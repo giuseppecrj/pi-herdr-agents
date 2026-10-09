@@ -38,6 +38,7 @@ import {
 	type CancelReport,
 } from "../../maestro/runtime/index.ts";
 import { loadSupervisionConfig } from "../../maestro/core/config/supervision-config.ts";
+import { loadSidebarConfig } from "../../maestro/core/config/sidebar-config.ts";
 import {
 	discoverAgentCatalog as discoverCoreAgentCatalog,
 	ROLE_PACK_DISCOVERY_EVENT,
@@ -570,6 +571,10 @@ const persistentConfig = loadPersistentConfig(
 	getSubagentsConfigExamplePath(),
 );
 const supervisionConfig = loadSupervisionConfig(
+	getSubagentsConfigDir(),
+	getSubagentsConfigExamplePath(),
+);
+const sidebarConfig = loadSidebarConfig(
 	getSubagentsConfigDir(),
 	getSubagentsConfigExamplePath(),
 );
@@ -2447,6 +2452,7 @@ export default function subagentsExtension(
 			configExamplePath: getSubagentsConfigExamplePath(),
 			roles: [],
 			forcePolling: supervisionConfig.forcePolling,
+			sidebarMarkers: sidebarConfig.enabled,
 			infrastructure: options.infrastructure,
 			getLaunchSnapshot() {
 				const ctx = runtime.latestCtx;

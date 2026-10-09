@@ -4,6 +4,7 @@
       "pi-extension/**",
       "test/**",
       "maestro/**",
+      "plugins/**",
       "!**/*.md"
     ]
   },

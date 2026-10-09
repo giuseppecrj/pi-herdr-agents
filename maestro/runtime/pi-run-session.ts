@@ -67,6 +67,12 @@ import {
 } from "../core/routing.ts";
 import { loadPaneConfig, type PaneConfig } from "../core/config/pane-config.ts";
 import {
+	DelegatedMarkers,
+	herdrMarkerWriter,
+	type DelegatedMarker,
+	type MarkerWriter,
+} from "./delegated-marker.ts";
+import {
 	createRunSession,
 	type RunSession,
 	type RunObservation,
@@ -327,6 +333,8 @@ export interface PiRunSessionInfrastructure {
 	supervision: SupervisionCoordinator;
 	/** Kernel process-identity probe for worktree cancel; tests inject it. */
 	processProbe?: ProcessIdentityProbe;
+	/** Sidebar marker transport; defaults to this pane's Herdr socket. */
+	markerWriter?: MarkerWriter;
 }
 // pi-herdr-agents extension
 export interface DefaultRunSessionOptions {
@@ -340,6 +348,8 @@ export interface DefaultRunSessionOptions {
 	hooks: PiRunSessionHooks;
 	persistent: PiPersistentHostOperations;
 	forcePolling: boolean;
+	/** Mark delegated children's panes for the Herdr sidebar plugin. */
+	sidebarMarkers?: boolean;
 }
 // pi-herdr-agents extension
 export interface PiWorktreeHandoffInput {
@@ -395,6 +405,7 @@ interface PiEntry {
 	started: PiStartedMetadata;
 	completed?: PiCompletedMetadata;
 	readResumeResult?: PiSettlementIO["readResumeResult"];
+	marker?: DelegatedMarker;
 }
 // The previous facade carries its live composition explicitly across module replacement.
 // No module-local lookup can accidentally rediscover an owner.
@@ -413,6 +424,8 @@ interface PiSessionOwner {
 		"surfaceProvider" | "supervision" | "processProbe"
 	>;
 	worktreeOperations: WorktreeOperations;
+	/** Absent outside Herdr: without a socket nothing can be marked. */
+	markers?: DelegatedMarkers;
 }
 
 // A detached close can outlive settlement without capturing a child, metadata,
@@ -424,6 +437,21 @@ function temporarySurfaceRelease(
 	return async () => {
 		await provider.closeSurface(surface);
 	};
+}
+
+function createDelegatedMarkers(
+	infrastructure: PiRunSessionInfrastructure | undefined,
+	probe: ProcessIdentityProbe | undefined,
+): DelegatedMarkers | undefined {
+	// Injected infrastructure never falls back to the ambient Herdr socket.
+	if (infrastructure) {
+		const write = infrastructure.markerWriter;
+		return write ? new DelegatedMarkers({ write, probe }) : undefined;
+	}
+	const socketPath = process.env.HERDR_SOCKET_PATH;
+	return socketPath
+		? new DelegatedMarkers({ write: herdrMarkerWriter(socketPath), probe })
+		: undefined;
 }
 
 // Capture only resume presentation scalars, not the child or its owning registry.
@@ -682,6 +710,20 @@ export function createDefaultRunSession(
 	// Replacements must invoke the original kernel's invocation closure, which
 	// reads this shared current binding, not the old facade's options.
 	if (adopted) resumePi = state.resumePi;
+	// Live markers and their sequence survive a reload with their runs.
+	state.markers ??= createDelegatedMarkers(
+		options.infrastructure,
+		state.infrastructure.processProbe,
+	);
+	// Turning the setting off retires every marker now, pending ones included;
+	// a retired marker never writes live again, even if the setting returns.
+	if (!options.sidebarMarkers)
+		for (const entry of state.entries.values()) entry.marker?.retire();
+
+	/** Markers for new launches, only while the sidebar setting is on. */
+	function enabledMarkers(): DelegatedMarkers | undefined {
+		return state.options.sidebarMarkers ? state.markers : undefined;
+	}
 
 	function prune(id: string) {
 		if (!state.kernel.getTask(id)) state.entries.delete(id);
@@ -712,11 +754,11 @@ export function createDefaultRunSession(
 		};
 	}
 	function observed(child: PiRunRecord, observation: RunObservation) {
-		if (
-			child.lifecycle.delivery === "suppressed" ||
-			![...state.entries.values()].some((entry) => entry.record === child)
-		)
-			return;
+		const entry = [...state.entries.values()].find(
+			(candidate) => candidate.record === child,
+		);
+		if (child.lifecycle.delivery === "suppressed" || !entry) return;
+		entry.marker?.renew();
 		if (observation.kind === "local-evidence" && child.persistent) {
 			try {
 				state.options.persistent.drain(child, io);
@@ -745,6 +787,7 @@ export function createDefaultRunSession(
 			parentRuntime: snapshot.parentRuntime,
 			supervision: state.infrastructure.supervision,
 			processProbe: state.infrastructure.processProbe,
+			recordProcessIdentity: enabledMarkers() !== undefined,
 			operations: launchOperations(snapshot),
 			onObservation(child, kind) {
 				const at = Date.now();
@@ -794,7 +837,10 @@ export function createDefaultRunSession(
 		};
 		if (suppressed)
 			child.lifecycle = markDelivery(child.lifecycle, "suppressed");
-		else state.entries.set(task.id, entry);
+		else {
+			entry.marker = enabledMarkers()?.attach(child);
+			state.entries.set(task.id, entry);
+		}
 		return {
 			handle,
 			adapter: owner,
@@ -805,6 +851,8 @@ export function createDefaultRunSession(
 			),
 			observe: (at) => hydrate(child, at, "refresh"),
 			finalize: async (result) => {
+				// Clear before delivery; a retained worktree root keeps its pane.
+				entry.marker?.retire();
 				const at = Date.now();
 				let evidence = result.evidence;
 				if (evidence)
@@ -1153,8 +1201,11 @@ export function createDefaultRunSession(
 		suppress(id) {
 			for (const acquisition of state.pending)
 				if (acquisition.taskId === id) acquisition.suppressed = true;
-			const r = live(id)?.record;
+			const suppressed = live(id);
+			const r = suppressed?.record;
 			if (r) r.lifecycle = markDelivery(r.lifecycle, "suppressed");
+			// Nothing renews an unsupervised run's marker; clear it now.
+			suppressed?.marker?.retire();
 			state.kernel.suppress(id);
 			state.entries.delete(id);
 		},

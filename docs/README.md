@@ -11,6 +11,9 @@ are evidence, not shipped contracts, when a later ADR supersedes them.
 - [`../CONTEXT.md`](../CONTEXT.md) — orchestration glossary.
 - [`worktree-subagents.md`](worktree-subagents.md) — worktree operation,
   review, recovery, and cleanup.
+- [`../plugins/sidebar/README.md`](../plugins/sidebar/README.md) — the
+  optional Herdr sidebar plugin: installation, Focus and All, the delegated
+  marker contract, and its staleness limits.
 
 The package is a pack-neutral execution host: it launches asynchronous Pi
 children in Herdr and supports managed worktrees for writing tasks, but ships no
@@ -65,6 +68,12 @@ real implementations; in-memory fakes are conformance fixtures only.
 | [`0013`](adr/0013-pack-neutral-execution-host.md) | Accepted | Ship a pack-neutral execution host; roles and workflows move to optional packs, and `/iterate` and `/btw` are removed. |
 | [`0014`](adr/0014-operator-cancel-terminal-intent.md) | Accepted | Operator cancel records terminal intent before owned termination: no fallback, one confirmed cancelled result, unconfirmed runs stay live. |
 | [`0015`](adr/0015-report-opened-primary-workspace.md) | Accepted | Report, and never automatically close, a primary workspace that worktree creation opened. |
+
+## Active design
+
+- `sidebar-plan.md` — local plan and audit record for the sidebar plugin and
+  its marker bridge. It is excluded from the npm package, so it has no link
+  here. It is not a shipped contract; the plugin README is.
 
 ## Historical material
 

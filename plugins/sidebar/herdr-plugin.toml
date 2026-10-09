@@ -1,0 +1,21 @@
+id = "pi-herdr-agents.sidebar"
+name = "Pi Herdr Agents Sidebar"
+version = "0.1.0"
+# Tested only on 0.9.2-preview.2026-09-29-8e78f929d8f0. Herdr accepts only a
+# plain version here and reports that preview as 0.9.2, so any 0.9.2 build,
+# including a stable one, passes this check untested. See README.md.
+min_herdr_version = "0.9.2"
+description = "Hide delegated Pi children from the Agents view (Focus) or show every agent (All)"
+platforms = ["linux"]
+
+[[actions]]
+id = "focus"
+title = "Pi agents: Focus (hide delegated children)"
+contexts = ["global"]
+command = ["node", "sidebar.mjs", "focus"]
+
+[[actions]]
+id = "all"
+title = "Pi agents: All (show every agent)"
+contexts = ["global"]
+command = ["node", "sidebar.mjs", "all"]
