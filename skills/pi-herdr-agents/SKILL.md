@@ -1,6 +1,6 @@
 ---
 name: pi-herdr-agents
-description: Operate the pi-herdr-agents host. Use when asked to launch, delegate to, supervise, interrupt, cancel, stop, resume, or clean up Pi subagents; to use worktrees, persistent specialists, or model routing; to edit the host's config.json or task-model preferences; or when a child looks hung, stalled, or unwanted.
+description: Operate the pi-herdr-agents host. Use when asked to launch, delegate to, supervise, interrupt, cancel, stop, resume, or clean up Pi subagents; to use worktrees, persistent specialists, or model routing; to edit the host's config.json or task-model preferences; to install, configure, troubleshoot, or uninstall the optional Herdr sidebar plugin; or when a child looks hung, stalled, or unwanted.
 ---
 
 # pi-herdr-agents operating guide
@@ -236,6 +236,7 @@ changes. Without a real file, only non-model settings fall back to the example.
 | Key | Purpose |
 | --- | --- |
 | `status.enabled` | Widget status |
+| `sidebar.enabled` | Opt-in delegated-child markers for the optional Herdr sidebar plugin; off by default |
 | `models.default` | Model for children that specify none |
 | `models.agents` | Per-role model, keyed by role name |
 | `models.tasks` | Ordered exact-ID candidates per category for `task:<category>` |
@@ -264,6 +265,44 @@ or `missing`) makes the write conditional; a stale revision fails with
 retry blindly. Every write holds an advisory `config.json.lock`; a held lock
 fails immediately with `Task model config writer busy`, and it is never broken
 automatically. Remove it only after confirming no writer is active.
+
+## Optional Herdr sidebar plugin
+
+For installation or troubleshooting, first read the
+[sidebar plugin guide](../../plugins/sidebar/README.md). Resolve that path from
+this skill's directory, not the user's working directory. It is the canonical
+reference for requirements, installation, Focus/All, limits, and uninstall.
+
+Setup has two separate parts: **install the Herdr plugin** and **enable markers
+in the Pi extension**. Neither alone enables sidebar filtering.
+
+1. Check the installed extension supports `sidebar.enabled`, and check the
+   guide's Herdr compatibility requirements. Markers require Linux; the Herdr
+   server needs `node` on its `PATH`. Use `pi list` to check package sources;
+   do not load two copies of the extension.
+2. Review the plugin source, then follow the guide to install
+   `giuseppecrj/pi-herdr-agents/plugins/sidebar` with `herdr plugin install`,
+   or link an existing compatible directory with `herdr plugin link`.
+   Installing the Pi package does not install the Herdr plugin.
+3. Merge `"sidebar": { "enabled": true }` into the durable config described
+   above, preserving `status`, `models`, and all other settings. If the file
+   does not exist, first copy the installed package's `config.json.example`;
+   a sidebar-only config is invalid because `status` is required.
+4. Run `/reload` in each parent Pi session inside Herdr, then launch new
+   children. Children already running stay unmarked.
+5. Invoke Focus explicitly; installation and enablement never activate it:
+
+   ```bash
+   herdr plugin action invoke pi-herdr-agents.sidebar.focus
+   ```
+
+Focus changes the server-wide Agents view, replacing any existing view. It
+hides marked children except those blocked or with unknown status; it never
+stops children or suppresses notifications. To restore rows, invoke
+`herdr plugin action invoke pi-herdr-agents.sidebar.all`. All clears only this
+plugin's view and leaves another tool's view untouched. If filtering does not
+work, inspect `herdr plugin log list --plugin pi-herdr-agents.sidebar` and
+follow the guide's troubleshooting steps.
 
 ## Denied tools
 
