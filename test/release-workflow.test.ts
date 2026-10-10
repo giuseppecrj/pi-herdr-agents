@@ -227,6 +227,59 @@ globalThis.fetch = async (_url, options) => {
 	}
 }
 
+test("CI checks pushes and pull requests without release authority", async () => {
+	const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+
+	assert.match(workflow, /^name: CI$/m);
+	assert.match(workflow, /^  push:\n    branches:\n      - main$/m);
+	assert.match(workflow, /^  pull_request:\n    branches:\n      - main$/m);
+	assert.match(workflow, /^  workflow_dispatch:$/m);
+	assert.doesNotMatch(workflow, /pull_request_target|paths(?:-ignore)?:/);
+	assert.match(workflow, /^permissions:\n  contents: read$/m);
+	assert.doesNotMatch(workflow, /:\s*write\b|secrets\.|id-token:/);
+	assert.match(
+		workflow,
+		/group: ci-\$\{\{ github\.event\.pull_request\.number \|\| github\.ref \}\}/,
+	);
+	assert.match(workflow, /cancel-in-progress: true/);
+	assert.match(workflow, /timeout-minutes: 15/);
+	assert.match(workflow, /persist-credentials: false/);
+	assert.match(workflow, /package-manager-cache: false/);
+	assert.doesNotMatch(
+		workflow,
+		/npm publish|gh release|git push|test:integration/,
+	);
+});
+
+test("CI runs the local gates with the release workflow's pinned tools", async () => {
+	const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+	const release = await readFile(".github/workflows/publish.yml", "utf8");
+	const actions = [...workflow.matchAll(/uses: (\S+)/g)].map(
+		(match) => match[1],
+	);
+
+	assert.deepEqual(actions, [
+		"actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
+		"actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444",
+	]);
+	for (const action of actions) assert.ok(release.includes(`uses: ${action}`));
+	assert.equal(
+		workflow.match(/node-version: (\S+)/)?.[1],
+		release.match(/node-version: (\S+)/)?.[1],
+	);
+	assert.deepEqual(
+		[...workflow.matchAll(/^\s+run: (.+)$/gm)].map((match) => match[1]),
+		[
+			"npm ci",
+			"npm run format:check",
+			"npm run lint",
+			"npm test",
+			"npm pack --dry-run",
+			"git diff --check",
+		],
+	);
+});
+
 test("release workflow uses package.json identity and trusted publishing", async () => {
 	const workflow = await readFile(".github/workflows/publish.yml", "utf8");
 	const pkg = JSON.parse(await readFile("package.json", "utf8"));

@@ -1,6 +1,8 @@
 # Pi Herdr Agents
 
 [![npm version](https://img.shields.io/npm/v/pi-herdr-agents)](https://www.npmjs.com/package/pi-herdr-agents)
+[![CI](https://github.com/giuseppecrj/pi-herdr-agents/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/giuseppecrj/pi-herdr-agents/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ![Pi Herdr Agents: a parent Pi session delegating to parallel child agents in dedicated Herdr panes, an isolated worktree and a retained session, with a live status widget.](https://raw.githubusercontent.com/giuseppecrj/pi-herdr-agents/main/docs/assets/pi-herdr-agents-gallery.png)
 
@@ -1412,10 +1414,17 @@ provider; fakes are for conformance tests only.
 See [ADR-0012](docs/adr/0012-adopt-maestro-seams-in-repo.md), the
 [glossary](CONTEXT.md), and the [documentation map](docs/README.md).
 
+The **CI** workflow runs formatting, lint, unit tests, and the package preview
+on pushes and pull requests to `main`, or manually from GitHub Actions. It has
+read-only repository permissions and never publishes. Herdr integration tests
+remain a local gate; the separate **Release** workflow still validates each
+release before publishing.
+
 Run local checks:
 
 ```bash
 npm ci
+npm run format:check
 npm test
 npm run lint
 npm pack --dry-run

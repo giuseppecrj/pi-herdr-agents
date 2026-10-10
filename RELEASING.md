@@ -21,7 +21,15 @@ You need:
 - Permission to manage this repository's GitHub Actions settings and npm package access for `pi-herdr-agents`
 - A clean local `main` branch
 
-Automated release gates (run by the workflow and required locally):
+The **CI** workflow (`.github/workflows/ci.yml`) runs on pushes and pull
+requests to `main`, and supports manual dispatch. Its **Checks** job runs the
+checks below plus `git diff --check`, with read-only repository permissions,
+no publishing, and cancellation of superseded CI runs. It uses the same pinned
+Node.js version as **Release**. Herdr integration remains a local gate.
+
+The separate **Release** workflow reruns the automated release gates before
+publishing; it does not depend on the CI workflow's result. These checks are
+also required locally:
 
 ```bash
 npm ci
