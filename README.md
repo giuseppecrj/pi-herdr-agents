@@ -1,5 +1,7 @@
 # Pi Herdr Agents
 
+[![npm version](https://img.shields.io/npm/v/pi-herdr-agents)](https://www.npmjs.com/package/pi-herdr-agents)
+
 ![Pi Herdr Agents: a parent Pi session delegating to parallel child agents in dedicated Herdr panes, an isolated worktree and a retained session, with a live status widget.](https://raw.githubusercontent.com/giuseppecrj/pi-herdr-agents/main/docs/assets/pi-herdr-agents-gallery.png)
 
 > **Agents:** the tool list is in [What's Included](#whats-included) and the operating guide is [`skills/pi-herdr-agents/SKILL.md`](skills/pi-herdr-agents/SKILL.md). Contributors: read [`AGENTS.md`](AGENTS.md).
