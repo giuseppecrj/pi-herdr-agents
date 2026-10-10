@@ -457,7 +457,7 @@ test("release workflow enforces bootstrap-only token and trusted publishing", as
 
 	assert.match(guide, /workflow fails if `NPM_TOKEN` is still configured/);
 	assert.match(guide, /other refs are rejected/);
-	assert.match(guide, /Later version bumps use trusted publishing only/);
+	assert.match(guide, /releases use npm trusted publishing \(OIDC\)/);
 });
 
 test("release workflow retries only exact-commit npm publishes", async () => {

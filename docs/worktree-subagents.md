@@ -1,6 +1,6 @@
 # Worktree subagents
 
-This guide is the operational reference for running writing agents in isolated Git worktrees with `pi-herdr-agents`. For the complete tool API, installation, and status model, see the [README](../README.md). For the product and open-source research behind these choices, see the [research report](research/worktree-subagent-orchestration.md).
+This guide is the operational reference for running writing agents in isolated Git worktrees with `pi-herdr-agents`. For installation and everyday use, see the [README](../README.md). For the complete tool API and status model, see the [tools and lifecycle reference](tools.md). For the product and open-source research behind these choices, see the [research report](research/worktree-subagent-orchestration.md).
 
 ## Quick start
 

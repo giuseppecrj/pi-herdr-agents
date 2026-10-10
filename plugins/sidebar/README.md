@@ -76,7 +76,7 @@ herdr plugin log list --plugin pi-herdr-agents.sidebar
 - [Requirements](#requirements), [Install](#install), [Use Focus and All](#use-focus-and-all)
 - [Troubleshooting](#troubleshooting), [Safety](#safety), [Uninstall](#uninstall)
 - [Which rows Focus hides](#which-rows-focus-hides), [What a marker proves](#what-a-marker-proves), [Reusing a delegated pane](#reusing-a-delegated-pane), [Limits](#limits)
-- Main package: [Pi Herdr Agents](../../README.md) and its [sidebar markers](../../README.md#sidebar-markers) setting
+- Main package: [Pi Herdr Agents](../../README.md) and its [sidebar markers](../../docs/configuration.md#sidebar-markers) setting
 
 ## Use Focus and All
 

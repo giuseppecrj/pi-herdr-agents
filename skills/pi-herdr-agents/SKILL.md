@@ -7,13 +7,11 @@ description: Operate the pi-herdr-agents host. Use when asked to launch, delegat
 
 ## Authority and version caveat
 
-Live tool descriptions, the installed package's README, and the installed
-version are authoritative; this guide is a summary. An installed release can
-predate or postdate source on a branch, so a tool named here may be absent or
-changed. Check which `subagent*`, `worktree_*`, and `subagents_*` tools you
-actually have, and read the README under the installed package root (see your
-Pi packages settings) before relying on anything marked "verify in your
-installed version".
+Live tool descriptions and the installed package's documentation are
+authoritative; this guide is a summary. Check the installed version and which
+`subagent*`, `worktree_*`, and `subagents_*` tools you have before relying on
+source from another branch or release. Resolve this guide's relative links
+from its directory, not the user's working directory.
 
 ## What the host is
 
@@ -66,7 +64,8 @@ interactive (non-`auto-exit`) children get `subagent_done` to mark themselves
 complete; `auto-exit` roles exit on their own. These exist only inside child
 sessions. Parent-only tools (`worktree_list`, `worktree_remove`,
 `subagents_write_task_models`, `/subagents-init`) are omitted in children. For
-frontmatter authoring, read the README "Custom Agents" and "Tool Access Control".
+frontmatter authoring, read [Custom Agents](../../docs/roles.md#custom-agents)
+and [Tool Access Control](../../docs/roles.md#tool-access-control).
 
 ## Help requests: `caller_ping`
 
@@ -311,17 +310,11 @@ host applies them at launch and they survive resume. Without a restrictive
 allowlist or spawning policy, a child can spawn further children. A `read,bash`
 allowlist is not a read-only boundary.
 
-## GAP 2: post-pack-split surface (verify the live list)
-
-Which skills and roles the installed build exposes depends on its version and
-the packs installed beside it. The README describes `orchestrate`, the former
-bundled roles, and `/plan` as moved to an optional roles pack, but older
-installed versions may still bundle them. Verify with `subagents_list`,
-`/subagent list`, and your live skill list. Do not assume a role exists.
-
 ## Finding current help
 
-Read live tool descriptions first, then the installed README sections
-("Spawning Subagents", "Persistent specialists", "Interrupting a running
-subagent", "Cancelling a running subagent", "The `/worktree` Workflow",
-"Custom Agents", "Configuration"). Confirm the installed version first.
+Read live tool descriptions first, then the installed package's
+[README](../../README.md). Use the detailed references for
+[tools and lifecycle](../../docs/tools.md), [roles](../../docs/roles.md),
+[configuration](../../docs/configuration.md),
+[worktrees](../../docs/worktree-subagents.md), and
+[troubleshooting](../../docs/troubleshooting.md).
