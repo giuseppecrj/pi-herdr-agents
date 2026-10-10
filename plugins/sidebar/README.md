@@ -2,7 +2,7 @@
 
 ![Pi Herdr Agents: a parent Pi session delegating to parallel child agents in dedicated Herdr panes, an isolated worktree and a retained session, with a live status widget.](https://raw.githubusercontent.com/giuseppecrj/pi-herdr-agents/main/docs/assets/pi-herdr-agents-gallery.png)
 
-> **Compatibility.** The npm release `pi-herdr-agents@3.1.0` predates sidebar support. Use a local checkout that contains this plugin and the `sidebar.enabled` setting, or a later release that includes both.
+> **Compatibility.** Sidebar support requires `pi-herdr-agents` version `3.2.0` or later.
 
 An optional [Herdr](https://herdr.dev) plugin for [Pi Herdr Agents](../../README.md). It keeps your main agents easy to find in Herdr's Agents view while [Pi](https://github.com/earendil-works/pi) runs delegated children.
 
@@ -13,7 +13,7 @@ The plugin adds two actions. The extension in the main package marks each delega
 - **Focus.** Hides delegated Pi children from the Agents view, except blocked children and children whose status is unknown.
 - **All.** Removes Focus if this plugin set it, then shows every agent again. If another tool replaced the view, All leaves that view in place and reports which tool owns it.
 - **Display only.** Neither action closes, moves, or signals anything. Hidden children keep running, keep their panes, and still raise notifications. `herdr agent list` still lists them.
-- **No automatic Focus.** Installing, linking, or enabling the plugin never turns Focus on. You invoke it.
+- **No automatic Focus.** Installing or enabling the plugin never turns Focus on. You invoke it.
 - **Opt-in markers.** The extension writes pane markers only when you set `sidebar.enabled` to `true`.
 
 ## Requirements
@@ -21,7 +21,7 @@ The plugin adds two actions. The extension in the main package marks each delega
 - Herdr `0.9.2-preview.2026-09-29-8e78f929d8f0`, the only build the plugin was tested on. Herdr accepts only a plain version in `min_herdr_version` and reports this preview as `0.9.2`, so the manifest declares `0.9.2`. Herdr then also accepts other 0.9.2 builds and newer ones, all untested. A build without the agent view API makes Focus and All fail with Herdr's error.
 - Linux. The extension identifies child processes through `/proc`, so it marks nothing on other systems, and the manifest declares only `linux`.
 - `node` on the `PATH` of the Herdr server. Herdr runs the actions as `node sidebar.mjs focus` and `node sidebar.mjs all`.
-- The `pi-herdr-agents` extension, installed in Pi from a revision that supports `sidebar.enabled`, with that setting turned on. Without markers, Focus hides nothing.
+- The `pi-herdr-agents` extension version `3.2.0` or later, installed in Pi with `sidebar.enabled` turned on. Without markers, Focus hides nothing.
 
 ## Install
 
@@ -29,13 +29,7 @@ Setup has two parts. Install the Herdr plugin, then enable markers in a compatib
 
 ### 1. Install the Herdr plugin
 
-Review the plugin source, then link its directory from your local checkout:
-
-```bash
-herdr plugin link /path/to/pi-herdr-agents/plugins/sidebar
-```
-
-Once the GitHub default branch contains `plugins/sidebar`, you can install the subdirectory instead. Herdr shows the manifest and commands for review:
+Install the plugin from GitHub. Herdr shows the manifest and commands for review:
 
 ```bash
 herdr plugin install giuseppecrj/pi-herdr-agents/plugins/sidebar
@@ -45,13 +39,13 @@ For another published branch, tag, or commit, add `--ref` followed by that revis
 
 ### 2. Turn on markers in the Pi extension
 
-The Pi extension must also contain sidebar support. If you do not already load a compatible copy, install the same local checkout in Pi:
+If you do not already load `pi-herdr-agents` version `3.2.0` or later, install the latest npm release in Pi:
 
 ```bash
-pi install /path/to/pi-herdr-agents
+pi install npm:pi-herdr-agents
 ```
 
-Use `pi list` to check your existing package sources. If another copy of Pi Herdr Agents is enabled, disable that copy with `pi config` before loading the checkout. Do not load both copies. Start Pi inside Herdr.
+Use `pi list` to check your existing package sources. If a copy from another source is enabled, disable that copy with `pi config` before loading the npm package. Do not load both copies. Start Pi inside Herdr.
 
 1. Open `$PI_CODING_AGENT_DIR/herdr-agents/config.json`. The default is `~/.pi/agent/herdr-agents/config.json`.
 2. If the file does not exist, copy `config.json.example` from the extension there first. The extension rejects a `config.json` without its `status` section.
@@ -132,12 +126,11 @@ A Herdr server restart drops the view and every marker. The plugin has no startu
 
 ## Uninstall
 
-1. Run All, or skip this step. Herdr also drops this plugin's view when you disable, unlink, or uninstall the plugin.
-2. Remove the plugin. Use `uninstall` for a GitHub install and `unlink` for a linked directory:
+1. Run All, or skip this step. Herdr also drops this plugin's view when you disable or uninstall the plugin.
+2. Remove the plugin:
 
    ```bash
    herdr plugin uninstall pi-herdr-agents.sidebar
-   herdr plugin unlink pi-herdr-agents.sidebar
    ```
 
 3. Set `sidebar.enabled` to `false`, or delete the `sidebar` key, and run `/reload` in each parent session. The reload clears the markers of children that are still running and stops renewing them. A marker whose clear does not reach Herdr expires within 15 seconds.
