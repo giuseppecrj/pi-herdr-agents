@@ -1213,7 +1213,7 @@ Compare definitions against the reference below and verify them with
 | `session-mode` | string | Default child-session mode: `standalone`, `lineage-only`, or `fork` |
 | `spawning`    | boolean | Set exactly `false` to deny all subagent-spawning tools under the exact unquoted key `spawning:`. Only one `true` or `false` declaration is accepted. |
 | `deny-tools`  | string  | One non-empty inline comma-separated `pi-herdr-agents` tool list to suppress under the exact unquoted key `deny-tools:`; this is not a universal cross-extension deny list. YAML lists, containers, multiline values, quotes, comments, noncanonical keys, and duplicates are rejected. |
-| `auto-exit`   | boolean | Auto-shutdown after Pi fully settles when the latest assistant turn does not end with `stopReason: "aborted"` — no `subagent_done` call needed. User input does not permanently disable auto-exit. Recommended for autonomous roles; not for interactive ones the user drives. Also determines the default value of `interactive` (see below). |
+| `auto-exit`   | boolean | Auto-shutdown after Pi fully settles, unless the run was aborted (Escape or `subagent_interrupt`) or the latest assistant turn ends with `stopReason: "aborted"` — no `subagent_done` call needed. User input does not permanently disable auto-exit. Recommended for autonomous roles; not for interactive ones the user drives. Also determines the default value of `interactive` (see below). |
 | `interactive` | boolean | Override whether stall/recovery transitions wake the parent session. Defaults to the inverse of `auto-exit`: autonomous agents (`auto-exit: true`) are non-interactive and get stall pings; agents without `auto-exit` are interactive and stay quiet. Explicit values take precedence. |
 | `persistent` | boolean | Keep this role's specialist session open between tasks. Follow-up work uses `subagent_send`; persistent specialists cannot be resumed in v1. |
 | `cwd`         | string  | Default working directory. Absolute paths are unambiguous; relative agent-frontmatter paths resolve from Pi's agent config directory (`PI_CODING_AGENT_DIR` or `~/.pi/agent`), not the project root                                                                                                                                                                                                            |
@@ -1244,12 +1244,12 @@ session-mode: lineage-only
 
 ### `auto-exit`
 
-When set to `true`, the agent session shuts down on Pi's `agent_settled` event unless the latest assistant message has `stopReason: "aborted"` — no explicit `subagent_done` call is needed.
+When set to `true`, the agent session shuts down on Pi's `agent_settled` event unless that event reports an aborted run or the latest assistant message has `stopReason: "aborted"` — no explicit `subagent_done` call is needed.
 
 **Behavior:**
 
 - Low-level `agent_end` events do not close the session because Pi may still retry, compact and retry, or process a queued continuation.
-- After `agent_settled`, a normal or error stop exits, while an aborted stop stays open.
+- After `agent_settled`, a normal or error stop exits, while an aborted run stays open. Pi's `agent_settled.aborted` decides: Escape during a tool can leave a final `stopReason: "error"` ("This operation was aborted"), which is still an abort, not a provider failure.
 - User input does not permanently disable auto-exit; the latest settled assistant stop reason determines whether the session exits.
 - The modeHint injected into the agent's task is adjusted accordingly: autonomous agents see "Complete your task autonomously." rather than instructions to call `subagent_done`
 
