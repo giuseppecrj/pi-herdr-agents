@@ -478,6 +478,13 @@ negative task result, never switches models. Completion metadata reports the
 requested candidate, every attempted candidate, the model actually used, and
 each raw model failure in attempt order when fallbacks are tried.
 
+When the session scopes models (`--models` or the `enabledModels` setting), the
+guideline catalog lists only the scoped set, under the same entry cap as
+the authenticated catalog, and task-category shortlists keep only scoped
+candidates. Models
+outside the scope never appear in the catalog, even when they are
+authenticated and visible to the model registry.
+
 A catalog-listed model and configured authentication do not prove that the
 active provider account can use that model. Providers may reject an account /
 model combination only when the request is made. The completion preserves each

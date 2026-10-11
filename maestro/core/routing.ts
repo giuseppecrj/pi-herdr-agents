@@ -384,12 +384,16 @@ function formatTokenCount(value: number | undefined): string | undefined {
 export function getAuthenticatedTaskPreferences(
 	registry: ModelRegistryAdapter,
 	taskPreferences?: TaskPreferences,
+	scopedRefs?: ReadonlySet<string>,
 ): TaskPreferences {
 	const authenticated: TaskPreferences = {};
 	for (const [category, candidates] of Object.entries(taskPreferences ?? {})) {
 		const available = candidates.filter((candidate) => {
 			const parsed = parseExactModelRef(candidate);
-			const model = parsed && registry.find(parsed.provider, parsed.modelId);
+			if (!parsed) return false;
+			if (scopedRefs && !scopedRefs.has(`${parsed.provider}/${parsed.modelId}`))
+				return false;
+			const model = registry.find(parsed.provider, parsed.modelId);
 			return !!model && registry.hasConfiguredAuth(model);
 		});
 		if (available.length > 0) {
@@ -400,48 +404,39 @@ export function getAuthenticatedTaskPreferences(
 	return authenticated;
 }
 
-export function buildAuthenticatedModelCatalog(
+function modelCatalogLine(
 	registry: ModelRegistryAdapter,
-	limit = 24,
-	taskPreferences?: TaskPreferences,
+	model: RoutingModel,
 ): string {
-	const models = registry
-		.available()
-		.filter((model) => registry.hasConfiguredAuth(model))
-		.sort((a, b) =>
-			`${a.provider}/${a.id}`.localeCompare(`${b.provider}/${b.id}`),
-		);
-	const visibleModels = models.slice(0, limit);
-	const lines = [
-		"Authenticated subagent models (use exact provider/model-id only):",
-	];
-	for (const model of visibleModels) {
-		const supportedThinking = registry.supportedThinkingLevels(model);
-		const facts = [
-			model.reasoning
-				? `reasoning (${supportedThinking.join("/") || "no thinking levels"})`
-				: "non-reasoning",
-			model.input?.includes("image") ? "text+image" : "text",
-			formatTokenCount(model.contextWindow)
-				? `${formatTokenCount(model.contextWindow)} context`
-				: undefined,
-			formatTokenCount(model.maxTokens)
-				? `${formatTokenCount(model.maxTokens)} max output`
-				: undefined,
-		].filter(Boolean);
-		lines.push(`- ${model.provider}/${model.id} — ${facts.join(", ")}`);
-	}
-	if (models.length === 0)
+	const supportedThinking = registry.supportedThinkingLevels(model);
+	const facts = [
+		model.reasoning
+			? `reasoning (${supportedThinking.join("/") || "no thinking levels"})`
+			: "non-reasoning",
+		model.input?.includes("image") ? "text+image" : "text",
+		formatTokenCount(model.contextWindow)
+			? `${formatTokenCount(model.contextWindow)} context`
+			: undefined,
+		formatTokenCount(model.maxTokens)
+			? `${formatTokenCount(model.maxTokens)} max output`
+			: undefined,
+	].filter(Boolean);
+	return `- ${model.provider}/${model.id} — ${facts.join(", ")}`;
+}
+
+function finishModelCatalog(
+	lines: string[],
+	modelCount: number,
+	registry: ModelRegistryAdapter,
+	taskPreferences?: TaskPreferences,
+	scopedRefs?: ReadonlySet<string>,
+): string {
+	if (modelCount === 0)
 		lines.push(
 			"- none discovered; omitting model still inherits the parent runtime",
 		);
-	if (models.length > visibleModels.length) {
-		lines.push(
-			`- … ${models.length - visibleModels.length} more authenticated models omitted`,
-		);
-	}
 	const configured = Object.entries(
-		getAuthenticatedTaskPreferences(registry, taskPreferences),
+		getAuthenticatedTaskPreferences(registry, taskPreferences, scopedRefs),
 	);
 	if (configured.length > 0) {
 		lines.push(
@@ -464,4 +459,71 @@ export function buildAuthenticatedModelCatalog(
 		"Omitting model and thinking inherits the parent runtime as a discouraged fallback.",
 	);
 	return lines.join("\n");
+}
+
+export function buildAuthenticatedModelCatalog(
+	registry: ModelRegistryAdapter,
+	limit = 24,
+	taskPreferences?: TaskPreferences,
+): string {
+	const models = registry
+		.available()
+		.filter((model) => registry.hasConfiguredAuth(model))
+		.sort((a, b) =>
+			`${a.provider}/${a.id}`.localeCompare(`${b.provider}/${b.id}`),
+		);
+	const visibleModels = models.slice(0, limit);
+	const lines = [
+		"Authenticated subagent models (use exact provider/model-id only):",
+	];
+	for (const model of visibleModels)
+		lines.push(modelCatalogLine(registry, model));
+	if (models.length > visibleModels.length) {
+		lines.push(
+			`- … ${models.length - visibleModels.length} more authenticated models omitted`,
+		);
+	}
+	return finishModelCatalog(lines, models.length, registry, taskPreferences);
+}
+
+// Scoped catalogs replace the truncated authenticated snapshot with the
+// session's scoped model set (--models / enabledModels): every listed pick is
+// selectable in this session and shortlists keep only scoped candidates. The
+// limit mirrors the authenticated catalog's cap; anything beyond it falls
+// behind an explicit omission tail.
+export function buildScopedModelCatalog(
+	registry: ModelRegistryAdapter,
+	scopedModels: readonly RoutingModel[],
+	taskPreferences?: TaskPreferences,
+	limit = 24,
+): string {
+	const seen = new Set<string>();
+	const models = scopedModels
+		.filter((model) => {
+			const ref = `${model.provider}/${model.id}`;
+			if (seen.has(ref)) return false;
+			seen.add(ref);
+			return true;
+		})
+		.sort((a, b) =>
+			`${a.provider}/${a.id}`.localeCompare(`${b.provider}/${b.id}`),
+		);
+	const lines = [
+		"Authenticated subagent models (use exact provider/model-id only):",
+	];
+	const visibleModels = models.slice(0, limit);
+	for (const model of visibleModels)
+		lines.push(modelCatalogLine(registry, model));
+	if (models.length > visibleModels.length) {
+		lines.push(
+			`- … ${models.length - visibleModels.length} more scoped models omitted`,
+		);
+	}
+	return finishModelCatalog(
+		lines,
+		models.length,
+		registry,
+		taskPreferences,
+		seen,
+	);
 }
