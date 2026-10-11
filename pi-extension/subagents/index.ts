@@ -11,6 +11,7 @@ import {
 import { loadSupervisionConfig } from "../../maestro/core/config/supervision-config.ts";
 import {
 	buildAuthenticatedModelCatalog,
+	buildScopedModelCatalog,
 	getAuthenticatedTaskPreferences,
 	isThinkingLevel,
 } from "../../maestro/core/routing.ts";
@@ -404,15 +405,22 @@ export default function subagentsExtension(
 				ctx.ui.notify(message, "warning");
 		}
 		const registry = wrapPiModelRegistry(ctx.modelRegistry);
+		// Scoped sessions (--models / enabledModels) must not advertise models
+		// the session cannot select: list the scoped set instead of the
+		// truncated authenticated snapshot.
+		const scopedModels = (ctx.scopedModels ?? []).map((entry) => entry.model);
+		const scopedRefs = new Set(
+			scopedModels.map((model) => `${model.provider}/${model.id}`),
+		);
 		const authenticatedTaskPreferences = getAuthenticatedTaskPreferences(
 			registry,
 			modelConfig.tasks,
+			scopedModels.length > 0 ? scopedRefs : undefined,
 		);
-		runtime.modelCatalog = buildAuthenticatedModelCatalog(
-			registry,
-			24,
-			modelConfig.tasks,
-		);
+		runtime.modelCatalog =
+			scopedModels.length > 0
+				? buildScopedModelCatalog(registry, scopedModels, modelConfig.tasks)
+				: buildAuthenticatedModelCatalog(registry, 24, modelConfig.tasks);
 		const refreshedGuidelines = buildSubagentRoutingGuidelines(
 			runtime.modelCatalog,
 			authenticatedTaskPreferences,
