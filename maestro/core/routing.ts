@@ -88,7 +88,7 @@ export function parseExactModelRef(
 	reference: string,
 ): { provider: string; modelId: string } | undefined {
 	const trimmed = reference.trim();
-	const separator = trimmed.indexOf("/");
+	const separator = trimmed.lastIndexOf("/");
 	if (separator <= 0 || separator === trimmed.length - 1) return undefined;
 	const provider = trimmed.slice(0, separator).trim();
 	const modelId = trimmed.slice(separator + 1).trim();

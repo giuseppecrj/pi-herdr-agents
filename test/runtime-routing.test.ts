@@ -4,6 +4,7 @@ import {
 	RuntimeResolutionError,
 	buildAuthenticatedModelCatalog,
 	getAuthenticatedTaskPreferences,
+	parseExactModelRef,
 	resolveRuntimePlan,
 	resolveRuntimePlans,
 	createModelRegistryAdapter,
@@ -457,7 +458,7 @@ describe("runtime routing", () => {
 		);
 	});
 
-	it("parses exact model references at the first slash", () => {
+	it("parses exact model references at the last slash", () => {
 		const nested = model("other", "family/reasoner");
 		const plan = resolveRuntimePlan(
 			{ model: "other/family/reasoner" },
@@ -467,6 +468,45 @@ describe("runtime routing", () => {
 		);
 		assert.equal(plan.provider, "other");
 		assert.equal(plan.modelId, "family/reasoner");
+	});
+
+	
+	it("resolves multi-part providers in task categories", () => {
+		// Multi-part provider and model like self-hosted LM Studio models lmstudio/machine-name/model-name
+		const entries = [
+			model("fake", "parent"),
+			model("lmstudio/machine-name", "model-name"),
+			model("other", "unauthed"),
+		];
+		const tasks = {
+			coding: [
+				"lmstudio/machine-name/model-name",
+				"other/unauthed",
+			],
+		};
+		// Should expand task:coding to only the authenticated multi-part model
+		assert.deepEqual(
+			resolveRuntimePlans(
+				{ model: " task:coding " },
+				{},
+				parent,
+				registry(entries),
+				tasks,
+			).map((plan) => plan.model),
+			["lmstudio/machine-name/model-name"],
+		);
+		// Worktree should take only the first candidate
+		assert.deepEqual(
+			resolveRuntimePlans(
+				{ model: "task:coding" },
+				{},
+				parent,
+				registry(entries),
+				tasks,
+				true,
+			).map((plan) => plan.model),
+			["lmstudio/machine-name/model-name"],
+		);
 	});
 
 	it("rejects fuzzy, unknown, and unauthenticated explicit models", () => {
@@ -812,6 +852,56 @@ describe("authenticated model catalog", () => {
 		assert.ok(
 			genericLines.some((line) => line.startsWith("For ordinary review")),
 			"generic catalog must put ordinary-review guidance on a separate line",
+		);
+	});
+});
+
+describe("parseExactModelRef", () => {
+	it("splits at the last slash so provider may contain slashes", () => {
+		assert.deepEqual(parseExactModelRef("fake/parent"), {
+			provider: "fake",
+			modelId: "parent",
+		});
+		// Multi-part provider (e.g. lmstudio/machine-name)
+		assert.deepEqual(
+			parseExactModelRef("lmstudio/machine-name/model-name"),
+			{
+				provider: "lmstudio/machine-name",
+				modelId: "model-name",
+			},
+		);
+		// Three-level provider
+		assert.deepEqual(
+			parseExactModelRef("a/b/c/d"),
+			{
+				provider: "a/b/c",
+				modelId: "d",
+			},
+		);
+	});
+
+	it("trims whitespace before splitting", () => {
+		assert.deepEqual(parseExactModelRef("  fake/parent  "), {
+			provider: "fake",
+			modelId: "parent",
+		});
+		assert.deepEqual(
+			parseExactModelRef(" lmstudio/machine-name/model-name  "),
+			{
+				provider: "lmstudio/machine-name",
+				modelId: "model-name",
+			},
+		);
+	});
+
+	it("returns undefined for edge cases", () => {
+		assert.equal(parseExactModelRef(""), undefined);
+		assert.equal(parseExactModelRef("/no-provider"), undefined);
+		assert.equal(parseExactModelRef("provider/"), undefined);
+		assert.equal(parseExactModelRef("only-one-part"), undefined);
+		assert.equal(
+			parseExactModelRef("lmstudio/machine-name/"),
+			undefined,
 		);
 	});
 });
