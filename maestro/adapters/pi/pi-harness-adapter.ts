@@ -239,6 +239,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 						opts.behavior?.systemPromptMode ?? defaults?.systemPromptMode,
 					sessionMode:
 						opts.session?.mode ?? defaults?.sessionMode ?? "standalone",
+					solutionSpace: opts.behavior?.solutionSpace,
 				},
 			},
 			this.operations,

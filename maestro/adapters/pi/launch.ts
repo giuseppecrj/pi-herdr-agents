@@ -79,6 +79,7 @@ export interface FreshPiLaunchRequest {
 		systemPromptMode?: "append" | "replace";
 		sessionMode: SubagentSessionMode;
 		cwd?: string;
+		solutionSpace?: string;
 	};
 }
 
@@ -900,6 +901,10 @@ function buildPiCommand(
 		if (request.agent)
 			env.push(`PI_SUBAGENT_AGENT=${shellQuote(request.agent)}`);
 		env.push(`PI_SUBAGENT_AUTO_EXIT=${request.behavior.autoExit ? "1" : "0"}`);
+		if (request.behavior.solutionSpace)
+			env.push(
+				`PI_SUBAGENT_SOLUTION_SPACE=${shellQuote(request.behavior.solutionSpace)}`,
+			);
 		if (request.behavior.persistent) {
 			env.push("PI_SUBAGENT_PERSISTENT=1");
 			env.push(

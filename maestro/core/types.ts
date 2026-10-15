@@ -67,6 +67,8 @@ export interface Task {
 		systemPromptMode?: "replace" | "append";
 		skills?: string[];
 		denyTools?: string[];
+		/** Delegator's description of how open-ended the work is, for child-side thinking selection. */
+		solutionSpace?: string;
 	};
 	/** Explicit tool allowlist; overrides Role.allowedTools when set. */
 	// pi-herdr-agents extension

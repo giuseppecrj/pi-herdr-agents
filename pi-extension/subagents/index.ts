@@ -241,6 +241,12 @@ const SubagentParams = Type.Object({
 		}),
 	),
 	thinking: Type.Optional(ThinkingLevelSchema),
+	solutionSpace: Type.Optional(
+		Type.String({
+			description:
+				"One or two sentences on how open-ended the work is, not the work itself: whether the fix or design is given, or which causes or designs remain open. The child receives it as PI_SUBAGENT_SOLUTION_SPACE, where an installed extension can choose the child's thinking level from it.",
+		}),
+	),
 	skills: Type.Optional(
 		Type.String({
 			description: "Comma-separated skills (overrides agent default)",
@@ -2088,6 +2094,7 @@ function normalizePiAttempt(
 				interactive: effectiveInteractive,
 				persistent,
 				systemPromptMode: agentDefs?.systemPromptMode,
+				solutionSpace: params.solutionSpace?.trim() || undefined,
 			},
 			systemPrompt: params.agent ? undefined : params.systemPrompt,
 		},
