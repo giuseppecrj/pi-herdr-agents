@@ -13790,6 +13790,38 @@ describe("herdr.ts", () => {
 			);
 		});
 
+		it("treats a shell hook still running in the shell's group as not ready", () => {
+			// zsh runs precmd hooks such as direnv in its own process group.
+			assert.equal(
+				__herdrTest__.isHerdrShellReady({
+					paneId: "w1:p9",
+					shellPid: 100,
+					foregroundProcessGroupId: 100,
+					pids: [100, 101, 102],
+					foregroundProcesses: [
+						{
+							pid: 102,
+							name: ".devenv-wrapped",
+							argv: ["devenv", "direnv-export"],
+						},
+						{ pid: 101, name: "direnv" },
+						{ pid: 100, name: "zsh" },
+					],
+				}),
+				false,
+			);
+			assert.equal(
+				__herdrTest__.isHerdrShellReady({
+					paneId: "w1:p9",
+					shellPid: 100,
+					foregroundProcessGroupId: 100,
+					pids: [100],
+					foregroundProcesses: [{ pid: 100, name: "zsh" }],
+				}),
+				true,
+			);
+		});
+
 		it("parses pane process-info identities", () => {
 			const result = __herdrTest__.parsePaneProcessInfo(
 				JSON.stringify({

@@ -1185,9 +1185,15 @@ export async function getHerdrPaneProcessInfoAsync(
 }
 
 function isHerdrShellReady(info: HerdrPaneProcessInfo): boolean {
-	return (
-		info.shellPid != null && info.foregroundProcessGroupId === info.shellPid
-	);
+	if (info.shellPid == null || info.foregroundProcessGroupId !== info.shellPid)
+		return false;
+	// Shell hooks such as direnv run in the shell's own process group, so the
+	// group check alone passes while they are still loading, and the typed
+	// launch command is swallowed. Ready means the shell is alone.
+	for (const process of info.foregroundProcesses) {
+		if (process.pid !== info.shellPid) return false;
+	}
+	return true;
 }
 
 export async function waitForHerdrShellReady(
@@ -1198,7 +1204,11 @@ export async function waitForHerdrShellReady(
 		signal?: AbortSignal;
 	} = {},
 ): Promise<void> {
-	const timeoutMs = options.timeoutMs ?? 10_000;
+	// Opt-in override for hooks (e.g. a cold direnv/nix shell) that need longer.
+	const envTimeout = Number(process.env.PI_HERDR_SHELL_READY_TIMEOUT_MS);
+	const timeoutMs =
+		options.timeoutMs ??
+		(Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 10_000);
 	const intervalMs = options.intervalMs ?? 50;
 	const deadline = Date.now() + timeoutMs;
 	let lastError = "no interactive shell foreground process";
