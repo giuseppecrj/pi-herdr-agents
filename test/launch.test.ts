@@ -575,6 +575,13 @@ describe("Pi launch", () => {
 			let scriptPath = "";
 			const operations: PiLaunchOperations = {
 				worktree: createWorktreeOperations(),
+				resolveSkills: async (names) =>
+					names.map((name) => ({
+						name,
+						filePath: `/skills/${name}/SKILL.md`,
+						baseDir: `/skills/${name}`,
+						content: `# ${name}\nInlined body for ${name}.`,
+					})),
 				createPane(name, cwd) {
 					assert.equal(name, "Worker");
 					assert.equal(cwd, project, "placement must use the child's checkout");
@@ -629,12 +636,18 @@ describe("Pi launch", () => {
 					`${PI_LAUNCH_SESSION_ENV}=${expectedShellQuote(running.sessionFile)}`,
 				),
 			);
-			assert.match(command, /'' '\/skill:tdd' '@[^']+\.md'/);
+			assert.doesNotMatch(command, /\/skill:/);
 
 			const taskPath = command.match(/'@([^']+\.md)'/)?.[1];
 			assert.ok(taskPath, "expected artifact-backed task delivery");
+			const taskArtifact = readFileSync(taskPath, "utf8");
 			assert.match(
-				readFileSync(taskPath, "utf8"),
+				taskArtifact,
+				/<skill name="tdd" location="\/skills\/tdd\/SKILL\.md">/,
+			);
+			assert.match(taskArtifact, /Inlined body for tdd\./);
+			assert.match(
+				taskArtifact,
 				/Complete your task autonomously\.[\s\S]*Implement the bounded change\./,
 			);
 			const systemPromptPath = command.match(

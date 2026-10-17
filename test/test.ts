@@ -1191,7 +1191,7 @@ describe("host adapter migration", () => {
 					`PI_CODING_AGENT_DIR='${join(roleCwd, ".pi", "agent")}'`,
 				),
 			);
-			assert.match(f.commands[0], /\/skill:one.*\/skill:two/);
+			assert.doesNotMatch(f.commands[0], /\/skill:/);
 			assert.ok(!f.commands[0].includes("PI_SUBAGENT_AUTO_EXIT=1"));
 			const identityPath = f.commands[0].match(
 				/--system-prompt '([^']+)'/,
@@ -6311,39 +6311,6 @@ describe("subagent discovery", () => {
 	it("buildSubagentToolAllowlist returns null without an explicit tool restriction", () => {
 		assert.equal(buildSubagentToolAllowlist(undefined), null);
 		assert.equal(buildSubagentToolAllowlist(""), null);
-	});
-
-	it("buildPiPromptArgs inserts separator for artifact-backed launches with skills", () => {
-		assert.deepEqual(
-			testApi.buildPiPromptArgs({
-				effectiveSkills: "review,lint",
-				taskDelivery: "artifact",
-				taskArg: "@artifact.md",
-			}),
-			["", "/skill:review", "/skill:lint", "@artifact.md"],
-		);
-	});
-
-	it("buildPiPromptArgs omits separator for artifact-backed launches without skills", () => {
-		assert.deepEqual(
-			testApi.buildPiPromptArgs({
-				effectiveSkills: undefined,
-				taskDelivery: "artifact",
-				taskArg: "@artifact.md",
-			}),
-			["@artifact.md"],
-		);
-	});
-
-	it("buildPiPromptArgs omits separator for direct launches with skills", () => {
-		assert.deepEqual(
-			testApi.buildPiPromptArgs({
-				effectiveSkills: "review",
-				taskDelivery: "direct",
-				taskArg: "do the task",
-			}),
-			["/skill:review", "do the task"],
-		);
 	});
 
 	it("discovers and launches a Pi package role pack without repeated role names", async () => {

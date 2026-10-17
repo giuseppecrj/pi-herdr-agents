@@ -331,6 +331,13 @@ test("Task17 discovered Role defaults reach the actual runtime launch without sy
 			cwd: f.dir,
 		}).agents[0];
 		f.options.roles.push(definition.role);
+		f.operations.resolveSkills = async (names) =>
+			names.map((name) => ({
+				name,
+				filePath: `/skills/${name}/SKILL.md`,
+				baseDir: `/skills/${name}`,
+				content: `body-${name}`,
+			}));
 		const session = runtime.createDefaultRunSession(f.options, f.session);
 		const handle = await session.spawn({
 			id: "core-role",
@@ -348,8 +355,14 @@ test("Task17 discovered Role defaults reach the actual runtime launch without sy
 		const script = f.commands[0];
 		assert.match(script, /PI_SUBAGENT_AUTO_EXIT=1/);
 		assert.match(script, /PI_DENY_TOOLS=.*write/);
-		assert.match(script, /\/skill:first/);
-		assert.match(script, /\/skill:second/);
+		assert.doesNotMatch(script, /\/skill:/);
+		const taskPath = script.match(/'@([^']+\.md)'/)?.[1];
+		assert.ok(taskPath, "expected artifact-backed task delivery");
+		const taskArtifact = readFileSync(taskPath, "utf8");
+		assert.match(taskArtifact, /<skill name="first"/);
+		assert.match(taskArtifact, /<skill name="second"/);
+		assert.match(taskArtifact, /body-first/);
+		assert.match(taskArtifact, /body-second/);
 		const promptPath = script.match(/--system-prompt '([^']+)'/)?.[1];
 		assert.ok(promptPath);
 		assert.equal(readFileSync(promptPath, "utf8"), "Core role identity");

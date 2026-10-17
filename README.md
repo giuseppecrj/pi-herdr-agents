@@ -71,7 +71,9 @@ The optional [pi-herdr-clean-craft](https://github.com/giuseppecrj/pi-herdr-clea
 pi install npm:pi-herdr-clean-craft@0.1.0
 ```
 
-Start with `/skill:craft-mode` followed by your task. With host 3.2.1, the `skills` argument does not deliver the skill with a standalone child's task. Instead, name the skill and reference files in the task and have the child read them first. See the [compatibility notes](https://github.com/giuseppecrj/pi-herdr-clean-craft/blob/main/docs/compatibility.md).
+Start with `/skill:craft-mode` followed by your task. The host resolves a role's declared
+`skills` through Pi's own discovery and inlines their instructions into the child's first task
+request, so a standalone child receives every declared skill before it starts.
 
 ## Quick start
 
