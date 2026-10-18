@@ -648,6 +648,7 @@ describe("Pi launch", () => {
 			assert.doesNotMatch(command, /subagent_done/);
 			assert.match(command, /PI_DENY_TOOLS='subagent,subagent_resume'/);
 			assert.match(command, /PI_SUBAGENT_AUTO_EXIT=1/);
+			assert.doesNotMatch(command, /PI_SUBAGENT_SELF_SPAWN/);
 			// Documented child-context hint: fresh children receive PI_SUBAGENT_ID.
 			assert.match(command, /PI_SUBAGENT_ID='child-1'/);
 			assert.ok(

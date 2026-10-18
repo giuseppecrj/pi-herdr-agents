@@ -13,6 +13,7 @@ export interface AgentDefaults {
 	thinking?: ThinkingLevel;
 	denyTools?: string;
 	spawning?: boolean;
+	selfSpawn?: boolean;
 	persistent?: boolean;
 	autoExit?: boolean;
 	interactive?: boolean;
@@ -86,6 +87,7 @@ function runtimeRole(
 			thinking: definition.thinking,
 			sessionMode: definition.sessionMode,
 			spawning: definition.spawning,
+			selfSpawn: definition.selfSpawn,
 			autoExit: definition.autoExit,
 			interactive: definition.interactive,
 			persistent: definition.persistent,
@@ -119,6 +121,13 @@ function getFrontmatterValue(
 	return line?.slice(`${key}:`.length).trim() || undefined;
 }
 
+type CapabilityField =
+	| "tools"
+	| "deny-tools"
+	| "spawning"
+	| "self-spawn"
+	| "persistent";
+
 interface CapabilityDeclarations {
 	canonical: string[];
 	hasNoncanonical: boolean;
@@ -126,7 +135,7 @@ interface CapabilityDeclarations {
 
 function isCapabilityDeclaration(
 	line: string,
-	field: "tools" | "deny-tools" | "spawning" | "persistent",
+	field: CapabilityField,
 ): boolean {
 	const trimmed = line.trimStart();
 	const colon = trimmed.indexOf(":");
@@ -137,7 +146,7 @@ function isCapabilityDeclaration(
 
 function getCapabilityDeclarations(
 	frontmatter: string,
-	field: "tools" | "deny-tools" | "spawning" | "persistent",
+	field: CapabilityField,
 ): CapabilityDeclarations {
 	const canonicalPrefix = `${field}:`;
 	const lines = frontmatter.split("\n");
@@ -158,6 +167,7 @@ function validateCapabilityDeclarations(
 		"tools",
 		"deny-tools",
 		"spawning",
+		"self-spawn",
 		"persistent",
 	] as const) {
 		const declarations = getCapabilityDeclarations(frontmatter, field);
@@ -170,7 +180,11 @@ function validateCapabilityDeclarations(
 		if (declarations.canonical.length === 0) continue;
 
 		const value = declarations.canonical[0].slice(`${field}:`.length).trim();
-		if (field === "spawning" || field === "persistent") {
+		if (
+			field === "spawning" ||
+			field === "self-spawn" ||
+			field === "persistent"
+		) {
 			if (value !== "true" && value !== "false") {
 				return `${field} must be true or false.`;
 			}
@@ -238,6 +252,9 @@ function parseAgentDefinition(
 		spawning: parseOptionalBoolean(
 			getFrontmatterValue(frontmatter, "spawning"),
 		),
+		selfSpawn: parseOptionalBoolean(
+			getFrontmatterValue(frontmatter, "self-spawn"),
+		),
 		persistent: parseOptionalBoolean(
 			getFrontmatterValue(frontmatter, "persistent"),
 		),
@@ -272,7 +289,7 @@ function invalidCapabilityDeclarationDiagnostic(
 	if (!error) return null;
 	return {
 		code: "invalid-capability-declaration",
-		message: `Role "${resolvedAgentName}" has an invalid capability declaration in ${path}: ${error} Use documented comma-separated tools or deny-tools values, true or false for spawning, or omit the field.`,
+		message: `Role "${resolvedAgentName}" has an invalid capability declaration in ${path}: ${error} Use documented comma-separated tools or deny-tools values, true or false for spawning or self-spawn, or omit the field.`,
 		path,
 		agentName: resolvedAgentName,
 	};

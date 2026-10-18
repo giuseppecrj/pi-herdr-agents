@@ -58,8 +58,9 @@ A named `agent` resolves by precedence: project (`.pi/agents/`), then global
 registered by installed role packs. An empty catalog is valid. `subagents_list`
 and `/subagent list` show each visible role and its source. Roles that request
 an external CLI (`cli`) fail before launch. Role frontmatter can set
-`spawning: false` (denies all subagent lifecycle tools) and `deny-tools`
-(tools registered by this package). Children also get `caller_ping`, and
+`spawning: false` (denies all subagent lifecycle tools), `self-spawn: true`
+(lets a role launch another instance of itself; blocked by default), and
+`deny-tools` (tools registered by this package). Children also get `caller_ping`, and
 interactive (non-`auto-exit`) children get `subagent_done` to mark themselves
 complete; `auto-exit` roles exit on their own, after the children they launched
 have delivered. These exist only inside child

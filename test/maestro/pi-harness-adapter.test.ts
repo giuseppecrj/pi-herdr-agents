@@ -186,6 +186,44 @@ describe("PiHarnessAdapter", () => {
 			assert.equal(f.surface.listSurfaces().length, 1);
 			assert.equal(f.supervision.diagnostics().watcherCount, 0);
 		}));
+	it("exports PI_SUBAGENT_SELF_SPAWN only for a named role that declared self-spawn and kept spawning", async () =>
+		usingFixture(async (f) => {
+			const commands: string[] = [];
+			f.operations.runScript = (_surface, command, options) => {
+				commands.push(command);
+				return options.scriptPath;
+			};
+			const launch = async (
+				defaults: NonNullable<SpawnOptions["role"]["defaults"]>,
+			) => {
+				await f.adapter.spawn({
+					...f.options,
+					role: { ...f.options.role, defaults },
+				});
+				return commands.at(-1) ?? "";
+			};
+			assert.doesNotMatch(
+				await launch({ autoExit: true }),
+				/PI_SUBAGENT_SELF_SPAWN/,
+			);
+			assert.doesNotMatch(
+				await launch({ autoExit: true, selfSpawn: false }),
+				/PI_SUBAGENT_SELF_SPAWN/,
+			);
+			const enabled = await launch({ autoExit: true, selfSpawn: true });
+			assert.match(enabled, /PI_SUBAGENT_AGENT='worker'/);
+			assert.match(enabled, /PI_SUBAGENT_SELF_SPAWN=1/);
+			assert.doesNotMatch(enabled, /PI_DENY_TOOLS/);
+
+			// `spawning: false` denies the spawning tools and wins over `self-spawn`.
+			const denied = await launch({
+				autoExit: true,
+				selfSpawn: true,
+				spawning: false,
+			});
+			assert.doesNotMatch(denied, /PI_SUBAGENT_SELF_SPAWN/);
+			assert.match(denied, /PI_DENY_TOOLS='subagent,/);
+		}));
 	it("preserves an already validated host plan without consulting the registry again", async () =>
 		usingFixture(async (f) => {
 			const plan = {
