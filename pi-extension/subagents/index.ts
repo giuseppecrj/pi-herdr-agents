@@ -2586,6 +2586,9 @@ export default function subagentsExtension(
 
 	// Clean up on session shutdown
 	pi.on("session_shutdown", async (event, _ctx) => {
+		// Pi invalidates this context once shutdown returns. Watchers that survive a reload
+		// must not read it before the replacement's session_start sets the next one.
+		runtime.latestCtx = undefined;
 		if (widgetInterval) {
 			clearInterval(widgetInterval);
 			widgetInterval = null;
