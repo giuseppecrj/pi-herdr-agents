@@ -7317,6 +7317,79 @@ describe("subagent discovery", () => {
 		);
 	});
 });
+describe("self-spawn guard", () => {
+	async function runSelfSpawnLaunch(
+		currentAgent: string,
+		requestedAgent: string | undefined,
+		selfSpawn: string | undefined,
+	) {
+		const previous = {
+			agent: process.env.PI_SUBAGENT_AGENT,
+			selfSpawn: process.env.PI_SUBAGENT_SELF_SPAWN,
+			herdr: process.env.HERDR_ENV,
+		};
+		process.env.PI_SUBAGENT_AGENT = currentAgent;
+		restoreEnvVar("PI_SUBAGENT_SELF_SPAWN", selfSpawn);
+		// Without Herdr, a launch that passes the guard stops at a later check.
+		delete process.env.HERDR_ENV;
+		try {
+			const { api, registeredTools } = createMockExtensionApi();
+			subagentsModule.default(api);
+			const tool = registeredTools.find((entry) => entry.name === "subagent");
+			assert.ok(tool, "expected subagent to be registered");
+			return await tool.execute(
+				"call-1",
+				{ name: "Peer", task: "Take the second half", agent: requestedAgent },
+				new AbortController().signal,
+				() => {},
+				{},
+			);
+		} finally {
+			restoreEnvVar("PI_SUBAGENT_AGENT", previous.agent);
+			restoreEnvVar("PI_SUBAGENT_SELF_SPAWN", previous.selfSpawn);
+			restoreEnvVar("HERDR_ENV", previous.herdr);
+		}
+	}
+
+	it("blocks a role from launching its own role by default", async () => {
+		const result = await runSelfSpawnLaunch("worker", "worker", undefined);
+		assert.equal(result.details.error, "self-spawn blocked");
+		assert.match(result.content[0].text, /do not start another worker/);
+	});
+
+	it("allows a role that declared self-spawn to launch its own role", async () => {
+		const result = await runSelfSpawnLaunch("worker", "worker", "1");
+		assert.notEqual(result.details.error, "self-spawn blocked");
+		assert.equal(result.details.error, "herdr not available");
+	});
+
+	it("does not treat other self-spawn env values as an opt-in", async () => {
+		for (const value of ["0", "true", ""]) {
+			const result = await runSelfSpawnLaunch("worker", "worker", value);
+			assert.equal(result.details.error, "self-spawn blocked", value);
+		}
+	});
+
+	it("never blocks launching a different role or a bare agent", async () => {
+		for (const requested of ["reviewer", undefined]) {
+			const result = await runSelfSpawnLaunch("worker", requested, undefined);
+			assert.notEqual(result.details.error, "self-spawn blocked");
+		}
+	});
+
+	it("keeps spawning false denying every spawning tool regardless of self-spawn", () => {
+		const denied = subagentsModule.__test__.resolveDenyTools({
+			spawning: false,
+			selfSpawn: true,
+		});
+		assert.equal(denied.has("subagent"), true);
+		assert.equal(denied.has("subagent_send"), true);
+		const allowed = subagentsModule.__test__.resolveDenyTools({
+			selfSpawn: true,
+		});
+		assert.equal(allowed.has("subagent"), false);
+	});
+});
 describe("subagent-done.ts", () => {
 	it("builds a persistent task completion event", () => {
 		const event = buildPersistentTaskEvent("task-1", "generation-1");
