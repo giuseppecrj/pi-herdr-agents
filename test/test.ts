@@ -1397,6 +1397,43 @@ describe("host adapter migration", () => {
 			assert.equal(f.closed.length, 2);
 			assert.equal(f.registrations(), 2);
 		}));
+	it("a child that ends between a reload's shutdown and the replacement's start leaves the replaced parent context alone", async () =>
+		withAdapterHost(async (f) => {
+			const invoking = invalidatableContext(f.ctx);
+			const old = await f.launch(
+				{ name: "old", task: "bounded" },
+				f.mock,
+				invoking.ctx,
+			);
+			for (const shutdown of f.mock.eventHandlers.get("session_shutdown") ?? [])
+				await shutdown({ reason: "reload" }, {});
+			invoking.invalidate();
+			assert.equal(
+				f.runtime.latestCtx,
+				undefined,
+				"the replaced context is dropped at shutdown",
+			);
+			const errors: unknown[] = [];
+			const onException: NodeJS.UncaughtExceptionListener = (error) =>
+				void errors.push(error);
+			const onRejection: NodeJS.UnhandledRejectionListener = (reason) =>
+				void errors.push(reason);
+			process.on("uncaughtException", onException);
+			process.on("unhandledRejection", onRejection);
+			try {
+				await f.finish(old);
+				await f.turn();
+			} finally {
+				process.off("uncaughtException", onException);
+				process.off("unhandledRejection", onRejection);
+			}
+			assert.deepEqual(errors, []);
+			assert.equal(
+				f.mock.sentMessages.length,
+				1,
+				"the result is still delivered",
+			);
+		}));
 	for (const cwd of [undefined, "work"])
 		it(`launches a fallback through the replacement parent after reload in the invocation's ${cwd ? "relative tool cwd" : "parent cwd"}`, async () =>
 			withAdapterHost(async (f) => {
