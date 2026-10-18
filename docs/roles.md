@@ -226,10 +226,10 @@ collision rules, and rejected alternatives.
 - `/subagent list` shows the expected source and a smoke launch succeeds.
 
 Capability declarations are strict: use the unquoted, unindented keys
-`tools:`, `deny-tools:`, and `spawning:` exactly once when present. Declare
-`tools` and `deny-tools` as non-empty inline comma-separated scalars, and
-`spawning` as exactly `true` or `false`. YAML lists, containers, multiline
-values, quotes, comments, empty values, duplicates, noncanonical key spelling,
+`tools:`, `deny-tools:`, `spawning:`, and `self-spawn:` exactly once when
+present. Declare `tools` and `deny-tools` as non-empty inline comma-separated
+scalars, and `spawning` and `self-spawn` as exactly `true` or `false`. YAML
+lists, containers, multiline values, quotes, comments, empty values, duplicates, noncanonical key spelling,
 and invalid booleans are rejected. A role with an invalid capability declaration
 is excluded from discovery, and an exact-name launch reports the diagnostic
 before creating a Herdr pane or worktree. Other unsupported or unknown
@@ -250,6 +250,7 @@ Compare definitions against the reference below and verify them with
 | `skills`      | string  | Comma-separated installed skill names to auto-load. Use this plural form for new definitions; legacy project/global definitions using singular `skill` remain compatible. |
 | `session-mode` | string | Default child-session mode: `standalone`, `lineage-only`, or `fork` |
 | `spawning`    | boolean | Set exactly `false` to deny all subagent-spawning tools under the exact unquoted key `spawning:`. Only one `true` or `false` declaration is accepted. |
+| `self-spawn`  | boolean | Set exactly `true` under the exact unquoted key `self-spawn:` to let a child of this role launch another instance of the same role. Absent or `false` keeps the default, which blocks it. `spawning: false` still denies all spawning and wins. Only one `true` or `false` declaration is accepted. |
 | `deny-tools`  | string  | One non-empty inline comma-separated `pi-herdr-agents` tool list to suppress under the exact unquoted key `deny-tools:`; this is not a universal cross-extension deny list. YAML lists, containers, multiline values, quotes, comments, noncanonical keys, and duplicates are rejected. |
 | `auto-exit`   | boolean | Auto-shutdown after Pi fully settles when the latest assistant turn does not end with `stopReason: "aborted"` — no `subagent_done` call needed. User input does not permanently disable auto-exit. Recommended for autonomous roles; not for interactive ones the user drives. Also determines the default value of `interactive` (see below). |
 | `interactive` | boolean | Override whether stall/recovery transitions wake the parent session. Defaults to the inverse of `auto-exit`: autonomous agents (`auto-exit: true`) are non-interactive and get stall pings; agents without `auto-exit` are interactive and stay quiet. Explicit values take precedence. |
@@ -346,6 +347,32 @@ spawning: false
 ---
 ```
 
+### `self-spawn: true`
+
+By default, a child launched from a named role cannot launch another child of
+that same role: the `subagent` call returns a `self-spawn blocked` message that
+tells it to do the work itself. That default suits single-purpose roles. A
+general-purpose worker role that legitimately splits work across parallel peers
+can opt in:
+
+```yaml
+---
+name: worker
+self-spawn: true
+---
+```
+
+The host records the declaration at launch, so the child does not need to find
+its own definition again. Notes:
+
+- The default is unchanged when the key is absent or `false`.
+- `spawning: false` removes every spawning tool, so it wins over `self-spawn: true`.
+- This setting adds no depth limit. A peer inherits no allowance
+  from its parent: each child gets it only if its own role declares it.
+- The default block is a role-design default, not a recursion boundary: role A
+  can still launch role B, which can launch role A. Use `spawning: false` or
+  `deny-tools` to stop delegation.
+
 ### `deny-tools`
 
 Fine-grained control over tools registered by `pi-herdr-agents`:
@@ -362,6 +389,7 @@ deny-tools: subagent
 | Role shape | `spawning` | Rationale |
 | --- | --- | --- |
 | Leaf (scouting, implementation, review, QA) | `false` | Performs one bounded responsibility without delegation. |
+| Parallel worker that splits work across peers | `true` with `self-spawn: true` | Launches peers of its own role; keep the split bounded in the role prompt. |
 | Coordinator | `true` | Delegates bounded children; a multi-wave coordinator sets `auto-exit: false` so automatic child-result steers drive each wave, then calls `subagent_done`. |
 | Interactive collaborator | *(default)* | May delegate factual gaps while the user drives the session. |
 

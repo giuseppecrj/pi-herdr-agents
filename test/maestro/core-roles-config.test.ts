@@ -84,6 +84,7 @@ test("Task17 core discovery consumes the injected role-pack protocol and preserv
 				thinking: "high",
 				sessionMode: "lineage-only",
 				spawning: false,
+				selfSpawn: undefined,
 				autoExit: true,
 				interactive: undefined,
 				persistent: undefined,
@@ -105,6 +106,63 @@ test("Task17 core discovery consumes the injected role-pack protocol and preserv
 			failed.agents.map((agent) => agent.name),
 			["alpha", "gamma"],
 		);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("self-spawn is an opt-in capability declaration parsed as strictly as spawning", () => {
+	const root = mkdtempSync(join(tmpdir(), "core-self-spawn-"));
+	try {
+		const agentDir = join(root, "agent");
+		const cwd = join(root, "project");
+		const agents = join(cwd, ".pi", "agents");
+		mkdirSync(agents, { recursive: true });
+		mkdirSync(join(agentDir, "agents"), { recursive: true });
+		const role = (name: string, fields: string[]) =>
+			writeFileSync(
+				join(agents, `${name}.md`),
+				`---\nname: ${name}\ndescription: ${name}\n${fields.join("\n")}\n---\n${name} body`,
+			);
+		role("absent", []);
+		role("enabled", ["self-spawn: true"]);
+		role("disabled", ["self-spawn: false"]);
+		role("enabled-no-spawning", ["self-spawn: true", "spawning: false"]);
+		const invalid = [
+			["invalid-maybe", ["self-spawn: maybe"]],
+			["invalid-empty", ["self-spawn:"]],
+			["invalid-capitalized", ["self-spawn: True"]],
+			["invalid-quoted-value", ['self-spawn: "true"']],
+			["invalid-comment", ["self-spawn: true # opt in"]],
+			["invalid-duplicate", ["self-spawn: true", "self-spawn: false"]],
+			["invalid-indented", ["  self-spawn: true"]],
+			["invalid-quoted-key", ['"self-spawn": true']],
+			["invalid-spaced-key", ["self-spawn : true"]],
+		] as const;
+		for (const [name, fields] of invalid) role(name, [...fields]);
+
+		const catalog = discoverAgentCatalog({ agentConfigDir: agentDir, cwd });
+		const defaults = (name: string) =>
+			catalog.agents.find((agent) => agent.name === name)?.role.defaults;
+		assert.equal(defaults("absent")?.selfSpawn, undefined);
+		assert.equal(defaults("enabled")?.selfSpawn, true);
+		assert.equal(defaults("disabled")?.selfSpawn, false);
+		assert.equal(defaults("enabled-no-spawning")?.selfSpawn, true);
+		assert.equal(defaults("enabled-no-spawning")?.spawning, false);
+
+		for (const [name] of invalid) {
+			assert.equal(
+				catalog.agents.some((agent) => agent.name === name),
+				false,
+				`${name} must be rejected`,
+			);
+			const diagnostic = catalog.diagnostics.find(
+				(candidate) => candidate.agentName === name,
+			);
+			assert.equal(diagnostic?.code, "invalid-capability-declaration", name);
+			assert.match(diagnostic?.message ?? "", /self-spawn/, name);
+		}
+		assert.equal(catalog.diagnostics.length, invalid.length);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

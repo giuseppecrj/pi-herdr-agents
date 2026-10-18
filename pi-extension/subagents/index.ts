@@ -2810,9 +2810,17 @@ export default function subagentsExtension(
 			parameters: SubagentParams,
 
 			async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-				// Prevent a named role from spawning another instance of itself
+				// Prevent a named role from spawning another instance of itself unless
+				// its definition opted in with `self-spawn: true`. This is a role-design
+				// default, not a recursion boundary: role A can still launch role B,
+				// which can launch role A.
 				const currentAgent = process.env.PI_SUBAGENT_AGENT;
-				if (params.agent && currentAgent && params.agent === currentAgent) {
+				if (
+					params.agent &&
+					currentAgent &&
+					params.agent === currentAgent &&
+					process.env.PI_SUBAGENT_SELF_SPAWN !== "1"
+				) {
 					return {
 						content: [
 							{
