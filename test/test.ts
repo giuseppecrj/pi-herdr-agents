@@ -144,6 +144,7 @@ import subagentDoneExtension, {
 	buildPersistentTaskEvent,
 	isPersistentStopDirective,
 } from "../maestro/adapters/pi/child/subagent-done.ts";
+import { hasUndeliveredChildren } from "../maestro/core/undelivered-children.ts";
 import {
 	interpretExitSidecar,
 	waitForCompletion,
@@ -7502,6 +7503,163 @@ describe("subagent-done.ts", () => {
 				restoreEnvVar("PI_SUBAGENT_AUTO_EXIT", previousAutoExit);
 				restoreEnvVar("PI_SUBAGENT_SESSION", previousSession);
 			}
+		});
+	});
+
+	describe("auto-exit with launched children", () => {
+		const registry = subagentsModule.__test__.runningSubagents;
+
+		function launchedChild(
+			id: string,
+			extra: { persistent?: boolean; lifecycle?: { delivery: string } } = {},
+		) {
+			registry.set(id, {
+				id,
+				name: id,
+				task: "work",
+				surface: "pane",
+				startTime: Date.now(),
+				sessionFile: `/tmp/${id}.jsonl`,
+				...extra,
+			});
+		}
+
+		function settle(
+			messages: any[],
+			run: (settle: () => void, shutdowns: () => number, file: string) => void,
+		) {
+			withTempDir((dir) => {
+				const previousAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+				const previousSession = process.env.PI_SUBAGENT_SESSION;
+				const sessionFile = join(dir, "child.jsonl");
+				process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+				process.env.PI_SUBAGENT_SESSION = sessionFile;
+				registry.clear();
+				try {
+					const { api, eventHandlers } = createMockExtensionApi();
+					subagentDoneExtension(api);
+					let shutdowns = 0;
+					const ctx = {
+						shutdown: () => shutdowns++,
+						sessionManager: {
+							getBranch: () =>
+								messages.map((message) => ({ type: "message", message })),
+						},
+					};
+					run(
+						() => {
+							eventHandlers.get("agent_end")?.[0]({ messages }, ctx);
+							eventHandlers.get("agent_settled")?.[0]({}, ctx);
+						},
+						() => shutdowns,
+						`${sessionFile}.exit`,
+					);
+				} finally {
+					registry.clear();
+					restoreEnvVar("PI_SUBAGENT_AUTO_EXIT", previousAutoExit);
+					restoreEnvVar("PI_SUBAGENT_SESSION", previousSession);
+				}
+			});
+		}
+
+		const stopped = [{ role: "assistant", stopReason: "stop" }];
+
+		it("shares the registry that the subagents extension owns", () => {
+			registry.clear();
+			assert.equal(hasUndeliveredChildren(), false);
+			launchedChild("grandchild");
+			try {
+				assert.equal(hasUndeliveredChildren(), true);
+			} finally {
+				registry.clear();
+			}
+		});
+
+		it("exits as before when the child launched nothing", () => {
+			settle(stopped, (run, shutdowns, exitFile) => {
+				run();
+				assert.deepEqual(JSON.parse(readFileSync(exitFile, "utf8")), {
+					type: "done",
+				});
+				assert.equal(shutdowns(), 1);
+			});
+		});
+
+		it("defers exit while a launched child has not delivered", () => {
+			settle(stopped, (run, shutdowns, exitFile) => {
+				launchedChild("grandchild");
+				run();
+				assert.equal(existsSync(exitFile), false);
+				assert.equal(shutdowns(), 0);
+				run();
+				assert.equal(shutdowns(), 0);
+			});
+		});
+
+		it("exits once the last child result is delivered and the turn settles", () => {
+			settle(stopped, (run, shutdowns, exitFile) => {
+				launchedChild("first");
+				launchedChild("second");
+				run();
+				assert.equal(shutdowns(), 0);
+				// Delivery removes the row and then sends the result steer.
+				registry.delete("first");
+				run();
+				assert.equal(shutdowns(), 0);
+				registry.delete("second");
+				run();
+				assert.deepEqual(JSON.parse(readFileSync(exitFile, "utf8")), {
+					type: "done",
+				});
+				assert.equal(shutdowns(), 1);
+			});
+		});
+
+		it("does not wait for a child whose delivery was suppressed", () => {
+			settle(stopped, (run, shutdowns) => {
+				launchedChild("suppressed", { lifecycle: { delivery: "suppressed" } });
+				run();
+				assert.equal(shutdowns(), 1);
+			});
+		});
+
+		it("does not wait for a persistent specialist", () => {
+			settle(stopped, (run, shutdowns) => {
+				launchedChild("specialist", { persistent: true });
+				run();
+				assert.equal(shutdowns(), 1);
+			});
+		});
+
+		it("still stays open after an abort while children are pending", () => {
+			settle(
+				[{ role: "assistant", stopReason: "aborted" }],
+				(run, shutdowns) => {
+					launchedChild("grandchild");
+					run();
+					assert.equal(shutdowns(), 0);
+				},
+			);
+		});
+
+		it("still reports a settled provider error without waiting", () => {
+			const failed = [
+				{ role: "assistant", stopReason: "error", errorMessage: "boom" },
+			];
+			settle(failed, (run, shutdowns, exitFile) => {
+				launchedChild("grandchild");
+				run();
+				assert.deepEqual(JSON.parse(readFileSync(exitFile, "utf8")), {
+					type: "error",
+					errorMessage: "boom",
+					stopReason: "error",
+				});
+				assert.equal(shutdowns(), 1);
+			});
+		});
+
+		it("reads no children from a missing slot", () => {
+			assert.equal(hasUndeliveredChildren({}), false);
 		});
 	});
 

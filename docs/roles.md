@@ -251,7 +251,7 @@ Compare definitions against the reference below and verify them with
 | `session-mode` | string | Default child-session mode: `standalone`, `lineage-only`, or `fork` |
 | `spawning`    | boolean | Set exactly `false` to deny all subagent-spawning tools under the exact unquoted key `spawning:`. Only one `true` or `false` declaration is accepted. |
 | `deny-tools`  | string  | One non-empty inline comma-separated `pi-herdr-agents` tool list to suppress under the exact unquoted key `deny-tools:`; this is not a universal cross-extension deny list. YAML lists, containers, multiline values, quotes, comments, noncanonical keys, and duplicates are rejected. |
-| `auto-exit`   | boolean | Auto-shutdown after Pi fully settles when the latest assistant turn does not end with `stopReason: "aborted"` — no `subagent_done` call needed. User input does not permanently disable auto-exit. Recommended for autonomous roles; not for interactive ones the user drives. Also determines the default value of `interactive` (see below). |
+| `auto-exit`   | boolean | Auto-shutdown after Pi fully settles when the latest assistant turn does not end with `stopReason: "aborted"` — no `subagent_done` call needed. If the child launched subagents whose results have not been delivered to it yet, the shutdown waits for them. User input does not permanently disable auto-exit. Recommended for autonomous roles; not for interactive ones the user drives. Also determines the default value of `interactive` (see below). |
 | `interactive` | boolean | Override whether stall/recovery transitions wake the parent session. Defaults to the inverse of `auto-exit`: autonomous agents (`auto-exit: true`) are non-interactive and get stall pings; agents without `auto-exit` are interactive and stay quiet. Explicit values take precedence. |
 | `persistent` | boolean | Keep this role's specialist session open between tasks. Follow-up work uses `subagent_send`; persistent specialists cannot be resumed in v1. |
 | `cwd`         | string  | Default working directory. Absolute paths are unambiguous; relative agent-frontmatter paths resolve from Pi's agent config directory (`PI_CODING_AGENT_DIR` or `~/.pi/agent`), not the project root                                                                                                                                                                                                            |
@@ -288,6 +288,7 @@ When set to `true`, the agent session shuts down on Pi's `agent_settled` event u
 
 - Low-level `agent_end` events do not close the session because Pi may still retry, compact and retry, or process a queued continuation.
 - After `agent_settled`, a normal or error stop exits, while an aborted stop stays open.
+- A normal stop does not exit while the child still has launched subagents whose result, help request, or cancellation has not been delivered to it. Delivery steers a new turn into the child; once the last one has been delivered and the turn settles normally, the child exits. A child that launched nothing is unaffected, a settled error still exits and is reported, and persistent specialists never hold the exit. The child therefore needs no `subagent_done` call to collect its children's results.
 - User input does not permanently disable auto-exit; the latest settled assistant stop reason determines whether the session exits.
 - The modeHint injected into the agent's task is adjusted accordingly: autonomous agents see "Complete your task autonomously." rather than instructions to call `subagent_done`
 
@@ -362,7 +363,7 @@ deny-tools: subagent
 | Role shape | `spawning` | Rationale |
 | --- | --- | --- |
 | Leaf (scouting, implementation, review, QA) | `false` | Performs one bounded responsibility without delegation. |
-| Coordinator | `true` | Delegates bounded children; a multi-wave coordinator sets `auto-exit: false` so automatic child-result steers drive each wave, then calls `subagent_done`. |
+| Coordinator | `true` | Delegates bounded children; an `auto-exit: true` coordinator stays open while its children are outstanding and exits after the settlement that follows the last delivery. Set `auto-exit: false` only when it should stay open between waves with nothing outstanding, then call `subagent_done`. |
 | Interactive collaborator | *(default)* | May delegate factual gaps while the user drives the session. |
 
 Each role pack documents the settings of the roles it ships.

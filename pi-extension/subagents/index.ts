@@ -136,13 +136,14 @@ import type {
 	WorktreeHandoff,
 	WorktreeLaunch,
 } from "../../maestro/core/worktree.ts";
+import { SUBAGENT_RUNTIME_KEY } from "../../maestro/core/undelivered-children.ts";
 
 // Survive /reload: replace presentation timers while keeping active completion
 // watchers and their registry alive. Old module closures continue watching the
 // children; the reloaded module adopts the shared registry for status/interrupts.
 const WIDGET_INTERVAL_KEY = Symbol.for("pi-subagents/widget-interval");
 const STATUS_INTERVAL_KEY = Symbol.for("pi-subagents/status-interval");
-const RUNTIME_KEY = Symbol.for("pi-subagents/runtime");
+const RUNTIME_KEY = SUBAGENT_RUNTIME_KEY;
 
 function readGlobalSlot<T>(key: symbol): T | undefined {
 	// SAFETY: `globalThis` has no index signature for our extension-private
