@@ -5,6 +5,7 @@ import {
 	renameSync,
 	lstatSync,
 	readdirSync,
+	readlinkSync,
 	realpathSync,
 	readFileSync,
 	writeFileSync,
@@ -228,6 +229,32 @@ function exists(path: string): boolean {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
 		throw error;
 	}
+}
+/**
+ * Resolve symbolic links with lstat and readlink only, matching Node's
+ * JavaScript realpathSync. Bun's realpathSync opens the path, and open()
+ * blocks indefinitely on some protected macOS directories, such as another
+ * app's sandbox container, freezing the whole process.
+ */
+function realpathWithoutOpening(path: string): string {
+	const parts = (from: string) => resolve(from).split(sep).filter(Boolean);
+	let pending = parts(path);
+	let resolved: string = sep;
+	let links = 0;
+	while (pending.length) {
+		const next = join(resolved, pending.shift() ?? "");
+		if (!lstatSync(next).isSymbolicLink()) {
+			resolved = next;
+			continue;
+		}
+		if (++links > 40)
+			throw Object.assign(new Error(`Too many symbolic links: ${path}`), {
+				code: "ELOOP",
+			});
+		pending = [...parts(resolve(resolved, readlinkSync(next))), ...pending];
+		resolved = sep;
+	}
+	return resolved;
 }
 function directories(path: string): string[] {
 	if (!exists(path)) return [];
@@ -472,7 +499,8 @@ function processHolders(
 			try {
 				if (!cwd || !isAbsolute(cwd))
 					throw new Error("Process cwd unavailable");
-				if (contained(checkout, realpathSync(cwd)))
+				// Every same-user cwd is resolved, so this must never open a path.
+				if (contained(checkout, realpathWithoutOpening(cwd)))
 					blockers.push(`Live process ${pid} holds the checkout`);
 			} catch {
 				unreadable.add(pid);
@@ -491,7 +519,10 @@ function processHolders(
 	return { blockers, warnings };
 }
 
-export const __worktreeCleanupTest__ = { processHolders };
+export const __worktreeCleanupTest__ = {
+	processHolders,
+	realpathWithoutOpening,
+};
 
 export function createWorktreeCleanupOperations(
 	provider: SurfaceProvider,

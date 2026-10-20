@@ -306,6 +306,93 @@ describe("cleanup process visibility policy", () => {
 			assert.match(result.message, /Warning:.*protected process/);
 		});
 	}
+	it("resolves Darwin cwd records without opening them", (t) => {
+		// Bun's realpathSync opens the path; open() can block forever on a
+		// protected macOS directory, such as another app's sandbox container.
+		const dir = mkdtempSync(join(tmpdir(), "cleanup-darwin-open-"));
+		const checkout = join(dir, "checkout");
+		const protectedDir = join(dir, "protected");
+		const link = join(dir, "link");
+		mkdirSync(checkout);
+		mkdirSync(protectedDir);
+		symlinkSync("checkout", link);
+		const realpath = fs.realpathSync;
+		const opened: string[] = [];
+		const refuseProtected = (path: fs.PathLike) => {
+			if (String(path).startsWith(protectedDir)) {
+				opened.push(String(path));
+				throw new Error("would block on open");
+			}
+		};
+		const mocks = [
+			t.mock.method(
+				childProcess,
+				"execFileSync",
+				() => `p101
+czsh
+n${protectedDir}
+p202
+cnode
+n${link}
+`,
+			),
+			t.mock.method(fs, "realpathSync", (path: string) => {
+				refuseProtected(path);
+				return realpath(path);
+			}),
+			t.mock.method(fs, "openSync", refuseProtected),
+			t.mock.method(fs, "opendirSync", refuseProtected),
+		];
+		syncBuiltinESMExports();
+		try {
+			const result = __worktreeCleanupTest__.processHolders(
+				checkout,
+				new Set(),
+				"/proc",
+				"darwin",
+			);
+			assert.deepEqual(opened, []);
+			assert.deepEqual(result.blockers, [
+				"Live process 202 holds the checkout",
+			]);
+			assert.doesNotMatch(result.warnings.join(), /unreadable/);
+		} finally {
+			for (const mock of mocks) mock.mock.restore();
+			syncBuiltinESMExports();
+			rmSync(dir, { recursive: true });
+		}
+	});
+	it("resolves symbolic links without opening paths like realpathSync", () => {
+		const dir = mkdtempSync(join(tmpdir(), "cleanup-realpath-"));
+		const { realpathWithoutOpening } = __worktreeCleanupTest__;
+		try {
+			mkdirSync(join(dir, "a", "b"), { recursive: true });
+			symlinkSync(join(dir, "a"), join(dir, "absolute"));
+			symlinkSync("a/b", join(dir, "relative"));
+			symlinkSync("relative", join(dir, "chained"));
+			symlinkSync("..", join(dir, "a", "b", "up"));
+			symlinkSync("loop-b", join(dir, "loop-a"));
+			symlinkSync("loop-a", join(dir, "loop-b"));
+			for (const path of [
+				dir,
+				join(dir, "a", "b"),
+				join(dir, "absolute", "b"),
+				join(dir, "relative"),
+				join(dir, "chained"),
+				join(dir, "chained", "up", "b"),
+				join(dir, "a", "..", "relative"),
+			])
+				assert.equal(realpathWithoutOpening(path), fs.realpathSync(path));
+			assert.throws(() => realpathWithoutOpening(join(dir, "missing")), {
+				code: "ENOENT",
+			});
+			assert.throws(() => realpathWithoutOpening(join(dir, "loop-a")), {
+				code: "ELOOP",
+			});
+		} finally {
+			rmSync(dir, { recursive: true });
+		}
+	});
 	it("continues past unreadable Darwin cwd records but blocks a failed global lsof", async (t) => {
 		const dir = mkdtempSync(join(tmpdir(), "cleanup-darwin-"));
 		const mocked = t.mock.method(
