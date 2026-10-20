@@ -8,6 +8,7 @@ import {
 	resolveRuntimePlan,
 	resolveRuntimePlans,
 	createModelRegistryAdapter,
+	scopeModelRegistryAdapter,
 	type ParentRuntime,
 	type RoutingModel,
 	type RuntimeRequest,
@@ -600,6 +601,81 @@ describe("runtime routing", () => {
 		);
 	});
 
+	it("hides out-of-scope models while delegating capability helpers", () => {
+		const entries = [
+			model("fake", "parent"),
+			model("zai", "glm-5.3"),
+			model("other", "fast", { reasoning: false }),
+		];
+		const scoped = scopeModelRegistryAdapter(
+			registry(entries),
+			new Set(["fake/parent", "zai/glm-5.3"]),
+		);
+		assert.equal(scoped.find("other", "fast"), undefined);
+		assert.equal(scoped.find("zai", "glm-5.3")?.id, "glm-5.3");
+		assert.deepEqual(
+			scoped.available().map((entry) => `${entry.provider}/${entry.id}`),
+			["fake/parent", "zai/glm-5.3"],
+		);
+		assert.equal(
+			scoped.hasConfiguredAuth(model("other", "fast")),
+			true,
+			"auth checks delegate to the underlying registry unfiltered",
+		);
+		assert.ok(
+			scoped.supportedThinkingLevels(entries[0]).length > 0,
+			"thinking capabilities delegate to the underlying registry",
+		);
+		assert.equal(scoped.clampThinkingLevel(entries[2], "high"), "off");
+	});
+
+	it("scopes task expansion and exact refs to the session's scoped models", () => {
+		const entries = [
+			model("fake", "parent"),
+			model("zai", "glm-5.3"),
+			model("zai", "glm-5.3-flash"),
+			model("other", "fast"),
+		];
+		const tasks = {
+			coding: ["other/fast", "zai/glm-5.3"],
+			review: ["other/fast"],
+		};
+		const scoped = scopeModelRegistryAdapter(
+			registry(entries),
+			new Set(["fake/parent", "zai/glm-5.3", "zai/glm-5.3-flash"]),
+		);
+		assert.deepEqual(
+			resolveRuntimePlans(
+				{ model: "task:coding" },
+				{},
+				parent,
+				scoped,
+				tasks,
+			).map((plan) => plan.model),
+			["zai/glm-5.3"],
+			"scoped task expansion must skip out-of-scope candidates",
+		);
+		assert.throws(
+			() =>
+				resolveRuntimePlans(
+					{ model: "task:review" },
+					{},
+					parent,
+					scoped,
+					tasks,
+				),
+			/task category "review" has no authenticated candidates; authenticated alternatives: fake\/parent, zai\/glm-5.3, zai\/glm-5.3-flash/,
+		);
+		assert.throws(
+			() => resolveRuntimePlans({ model: "other/fast" }, {}, parent, scoped),
+			/unknown model "other\/fast"; exact registry match required\. Available: fake\/parent, zai\/glm-5.3, zai\/glm-5.3-flash/,
+		);
+		assert.equal(
+			resolveRuntimePlans({}, {}, parent, scoped)[0]?.model,
+			"fake/parent",
+			"parent-inherit resolution stays available for the in-scope parent model",
+		);
+	});
 	it("keeps the selected source when agent defaults provide fallbacks", () => {
 		const plans = resolveRuntimePlans(
 			{},
@@ -824,14 +900,19 @@ describe("authenticated model catalog", () => {
 		};
 		assert.deepEqual(
 			getAuthenticatedTaskPreferences(
-				registry(entries),
+				scopeModelRegistryAdapter(
+					registry(entries),
+					new Set(["zai/glm-5.3", "zai/glm-5.3-flash"]),
+				),
 				tasks,
-				new Set(["zai/glm-5.3", "zai/glm-5.3-flash"]),
 			),
 			{ coding: ["zai/glm-5.3"], review: ["zai/glm-5.3-flash"] },
 		);
 		const catalog = buildScopedModelCatalog(
-			registry(entries),
+			scopeModelRegistryAdapter(
+				registry(entries),
+				new Set(["zai/glm-5.3", "zai/glm-5.3-flash"]),
+			),
 			[model("zai", "glm-5.3"), model("zai", "glm-5.3-flash")],
 			tasks,
 		);
