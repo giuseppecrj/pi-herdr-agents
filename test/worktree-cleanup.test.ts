@@ -373,6 +373,8 @@ n${link}
 			symlinkSync("..", join(dir, "a", "b", "up"));
 			symlinkSync("loop-b", join(dir, "loop-a"));
 			symlinkSync("loop-a", join(dir, "loop-b"));
+			symlinkSync("missing/../a", join(dir, "through-missing"));
+			symlinkSync(".", join(dir, "self"));
 			for (const path of [
 				dir,
 				join(dir, "a", "b"),
@@ -380,15 +382,21 @@ n${link}
 				join(dir, "relative"),
 				join(dir, "chained"),
 				join(dir, "chained", "up", "b"),
-				join(dir, "a", "..", "relative"),
+				// Unnormalized input: `..` is lexical, as in Node's realpathSync.
+				// `relative` -> `a/b`, so a physical parent would be `a`, not `dir`.
+				`${dir}/relative/../relative`,
+				// Valid repeated traversals are not loops.
+				join(dir, ...Array(41).fill("self"), "a"),
 			])
 				assert.equal(realpathWithoutOpening(path), fs.realpathSync(path));
-			assert.throws(() => realpathWithoutOpening(join(dir, "missing")), {
-				code: "ENOENT",
-			});
-			assert.throws(() => realpathWithoutOpening(join(dir, "loop-a")), {
-				code: "ELOOP",
-			});
+			for (const [name, code] of [
+				["missing", "ENOENT"],
+				["through-missing", "ENOENT"],
+				["loop-a", "ELOOP"],
+			]) {
+				assert.throws(() => fs.realpathSync(join(dir, name)), { code });
+				assert.throws(() => realpathWithoutOpening(join(dir, name)), { code });
+			}
 		} finally {
 			rmSync(dir, { recursive: true });
 		}

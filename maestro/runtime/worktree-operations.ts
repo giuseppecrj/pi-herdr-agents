@@ -8,6 +8,7 @@ import {
 	readlinkSync,
 	realpathSync,
 	readFileSync,
+	statSync,
 	writeFileSync,
 	unlinkSync,
 } from "node:fs";
@@ -231,10 +232,11 @@ function exists(path: string): boolean {
 	}
 }
 /**
- * Resolve symbolic links with lstat and readlink only, matching Node's
- * JavaScript realpathSync. Bun's realpathSync opens the path, and open()
- * blocks indefinitely on some protected macOS directories, such as another
- * app's sandbox container, freezing the whole process.
+ * Resolve symbolic links with lstat, stat, and readlink only, matching Node's
+ * JavaScript realpathSync, including its lexical `..` handling. Bun's
+ * realpathSync opens the path, and open() blocks indefinitely on some
+ * protected macOS directories, such as another app's sandbox container,
+ * freezing the whole process.
  */
 function realpathWithoutOpening(path: string): string {
 	const parts = (from: string) => resolve(from).split(sep).filter(Boolean);
@@ -247,7 +249,11 @@ function realpathWithoutOpening(path: string): string {
 			resolved = next;
 			continue;
 		}
-		if (++links > 40)
+		// Like Node, let the kernel validate the target: missing targets throw
+		// ENOENT and real cycles throw ELOOP.
+		statSync(next);
+		// Backstop only; valid repeated traversals stay far below this.
+		if (++links > 4096)
 			throw Object.assign(new Error(`Too many symbolic links: ${path}`), {
 				code: "ELOOP",
 			});
