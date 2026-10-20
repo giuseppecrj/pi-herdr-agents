@@ -5,6 +5,7 @@ import {
 } from "@earendil-works/pi-ai";
 import {
 	createModelRegistryAdapter,
+	scopeModelRegistryAdapter,
 	type ModelRegistryAdapter,
 	type RoutingModel,
 	type RoutingRegistrySource,
@@ -19,6 +20,22 @@ export function wrapPiModelRegistry(
 		clampThinkingLevel: (model, level) =>
 			clampThinkingLevel(asPiModel(model), level),
 	});
+}
+
+// Scoped sessions (--models / enabledModels) resolve every model selection —
+// task shortlists, exact refs, fallback alternatives — against the session's
+// scoped set: out-of-scope models are invisible to spawn-time resolution.
+export function sessionModelRegistry(ctx: {
+	modelRegistry: RoutingRegistrySource;
+	scopedModels?: readonly { model: { provider: string; id: string } }[];
+}): ModelRegistryAdapter {
+	const registry = wrapPiModelRegistry(ctx.modelRegistry);
+	const scopedModels = (ctx.scopedModels ?? []).map((entry) => entry.model);
+	if (scopedModels.length === 0) return registry;
+	return scopeModelRegistryAdapter(
+		registry,
+		new Set(scopedModels.map((model) => `${model.provider}/${model.id}`)),
+	);
 }
 
 function asPiModel(model: RoutingModel): Model<any> {

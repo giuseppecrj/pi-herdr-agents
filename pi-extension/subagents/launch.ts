@@ -8,7 +8,7 @@ import {
 	type ResolvedRuntimePlan,
 	type ThinkingLevel,
 } from "../../maestro/core/routing.ts";
-import { wrapPiModelRegistry } from "./model-registry.ts";
+import { sessionModelRegistry } from "./model-registry.ts";
 import {
 	resolveModelDefault,
 	type ModelConfig,
@@ -194,7 +194,7 @@ export function createLaunchPlanner({
 				modelId: ctx.model.id,
 				thinking: parentThinking,
 			},
-			wrapPiModelRegistry(ctx.modelRegistry),
+			sessionModelRegistry(ctx),
 			modelConfig.tasks,
 			!!params.worktree,
 		);
@@ -223,7 +223,7 @@ export function createLaunchPlanner({
 				ctx.model && thinking
 					? { provider: ctx.model.provider, modelId: ctx.model.id, thinking }
 					: undefined,
-			modelRegistry: wrapPiModelRegistry(ctx.modelRegistry),
+			modelRegistry: sessionModelRegistry(ctx),
 			paneConfig,
 		};
 	}

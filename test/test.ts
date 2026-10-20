@@ -10159,6 +10159,49 @@ describe("tool registration", () => {
 		);
 	});
 
+	it("scopes spawn-time model resolution to the session's scoped models", () => {
+		const modelRegistry = {
+			find: (provider: string, id: string) => ({
+				provider,
+				id,
+				reasoning: true,
+			}),
+			getAvailable: () => [
+				{ provider: "zai", id: "glm-5.3", reasoning: true },
+				{ provider: "other", id: "fast", reasoning: true },
+			],
+			hasConfiguredAuth: () => true,
+		};
+		const scoped = subagentsModule.__test__.sessionModelRegistry({
+			modelRegistry,
+			scopedModels: [
+				{
+					model: {
+						provider: "zai",
+						id: "glm-5.3",
+						reasoning: true,
+						input: ["text"],
+						contextWindow: 131_072,
+						maxTokens: 65_536,
+					},
+				},
+			],
+		});
+		assert.ok(scoped.find("zai", "glm-5.3"));
+		assert.equal(
+			scoped.find("other", "fast"),
+			undefined,
+			"scoped sessions must not resolve models outside the scoped set",
+		);
+		const unscoped = subagentsModule.__test__.sessionModelRegistry({
+			modelRegistry,
+		});
+		assert.ok(
+			unscoped.find("other", "fast"),
+			"unscoped sessions keep the full authenticated registry",
+		);
+	});
+
 	it("distinguishes ordinary context-isolated review from strict cross-family review", () => {
 		const registry = wrapPiModelRegistry({
 			find: (p: string, id: string) => ({ provider: p, id, reasoning: true }),

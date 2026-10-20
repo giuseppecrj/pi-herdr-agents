@@ -7,7 +7,7 @@ import {
 	resolveRuntimePlan,
 	isThinkingLevel,
 } from "../../maestro/core/routing.ts";
-import { wrapPiModelRegistry } from "./model-registry.ts";
+import { sessionModelRegistry } from "./model-registry.ts";
 import { getAgentConfigDir } from "./config-path.ts";
 import type { PaneConfig } from "../../maestro/core/config/pane-config.ts";
 import {
@@ -183,7 +183,7 @@ export function registerWorktreeCommand(
 						modelId: ctx.model.id,
 						thinking,
 					},
-					wrapPiModelRegistry(ctx.modelRegistry),
+					sessionModelRegistry(ctx),
 				);
 				const result = await runtime.session!.handoffWorktree({
 					name: `wt: ${branch}`,
@@ -201,7 +201,7 @@ export function registerWorktreeCommand(
 							agentDir: getAgentConfigDir(),
 						},
 						paneConfig,
-						modelRegistry: wrapPiModelRegistry(ctx.modelRegistry),
+						modelRegistry: sessionModelRegistry(ctx),
 					},
 				});
 				const worktree = result.record.worktree;

@@ -15,7 +15,7 @@ import {
 	getAuthenticatedTaskPreferences,
 	isThinkingLevel,
 } from "../../maestro/core/routing.ts";
-import { wrapPiModelRegistry } from "./model-registry.ts";
+import { sessionModelRegistry } from "./model-registry.ts";
 import { loadModelConfig } from "../../maestro/core/config/model-config.ts";
 import {
 	getAgentConfigDir,
@@ -228,6 +228,7 @@ export const __test__ = {
 	formatNoProgressAdvisoryLine,
 	resolveDenyTools,
 	buildSubagentRoutingGuidelines,
+	sessionModelRegistry,
 	resolveInterruptTarget,
 	requestSubagentInterrupt,
 	handleSubagentInterrupt,
@@ -375,18 +376,14 @@ export default function subagentsExtension(
 			for (const message of roleConfig.deprecations)
 				ctx.ui.notify(message, "warning");
 		}
-		const registry = wrapPiModelRegistry(ctx.modelRegistry);
-		// Scoped sessions (--models / enabledModels) must not advertise models
-		// the session cannot select: list the scoped set instead of the
-		// truncated authenticated snapshot.
+		// Scoped sessions (--models / enabledModels) advertise only the scoped
+		// set: sessionModelRegistry hides out-of-scope models from the catalog
+		// and its task shortlists alike.
+		const registry = sessionModelRegistry(ctx);
 		const scopedModels = (ctx.scopedModels ?? []).map((entry) => entry.model);
-		const scopedRefs = new Set(
-			scopedModels.map((model) => `${model.provider}/${model.id}`),
-		);
 		const authenticatedTaskPreferences = getAuthenticatedTaskPreferences(
 			registry,
 			modelConfig.tasks,
-			scopedModels.length > 0 ? scopedRefs : undefined,
 		);
 		runtime.modelCatalog =
 			scopedModels.length > 0

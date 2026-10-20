@@ -172,6 +172,33 @@ export function createModelRegistryAdapter(
 	};
 }
 
+// pi-herdr-agents extension
+// Scoped sessions (--models / enabledModels) can use only their scoped model
+// set, so every selection path resolves against it: wrapping the registry
+// hides out-of-scope models from task shortlists, exact-ref validation, and
+// "Available:" alternative lists, while capability helpers delegate unchanged.
+export function scopeModelRegistryAdapter(
+	registry: ModelRegistryAdapter,
+	scopedRefs: ReadonlySet<string>,
+): ModelRegistryAdapter {
+	return {
+		find(provider, modelId) {
+			return scopedRefs.has(`${provider}/${modelId}`)
+				? registry.find(provider, modelId)
+				: undefined;
+		},
+		available() {
+			return registry
+				.available()
+				.filter((model) => scopedRefs.has(`${model.provider}/${model.id}`));
+		},
+		hasConfiguredAuth: (model) => registry.hasConfiguredAuth(model),
+		supportedThinkingLevels: (model) => registry.supportedThinkingLevels(model),
+		clampThinkingLevel: (model, level) =>
+			registry.clampThinkingLevel(model, level),
+	};
+}
+
 function formatSupported(
 	model: RoutingModel,
 	registry: ModelRegistryAdapter,
@@ -384,16 +411,12 @@ function formatTokenCount(value: number | undefined): string | undefined {
 export function getAuthenticatedTaskPreferences(
 	registry: ModelRegistryAdapter,
 	taskPreferences?: TaskPreferences,
-	scopedRefs?: ReadonlySet<string>,
 ): TaskPreferences {
 	const authenticated: TaskPreferences = {};
 	for (const [category, candidates] of Object.entries(taskPreferences ?? {})) {
 		const available = candidates.filter((candidate) => {
 			const parsed = parseExactModelRef(candidate);
-			if (!parsed) return false;
-			if (scopedRefs && !scopedRefs.has(`${parsed.provider}/${parsed.modelId}`))
-				return false;
-			const model = registry.find(parsed.provider, parsed.modelId);
+			const model = parsed && registry.find(parsed.provider, parsed.modelId);
 			return !!model && registry.hasConfiguredAuth(model);
 		});
 		if (available.length > 0) {
@@ -429,14 +452,13 @@ function finishModelCatalog(
 	modelCount: number,
 	registry: ModelRegistryAdapter,
 	taskPreferences?: TaskPreferences,
-	scopedRefs?: ReadonlySet<string>,
 ): string {
 	if (modelCount === 0)
 		lines.push(
 			"- none discovered; omitting model still inherits the parent runtime",
 		);
 	const configured = Object.entries(
-		getAuthenticatedTaskPreferences(registry, taskPreferences, scopedRefs),
+		getAuthenticatedTaskPreferences(registry, taskPreferences),
 	);
 	if (configured.length > 0) {
 		lines.push(
@@ -488,9 +510,10 @@ export function buildAuthenticatedModelCatalog(
 
 // Scoped catalogs replace the truncated authenticated snapshot with the
 // session's scoped model set (--models / enabledModels): every listed pick is
-// selectable in this session and shortlists keep only scoped candidates. The
-// limit mirrors the authenticated catalog's cap; anything beyond it falls
-// behind an explicit omission tail.
+// selectable in this session. Pass a registry wrapped by
+// scopeModelRegistryAdapter so task-category shortlists also keep only scoped
+// candidates. The limit mirrors the authenticated catalog's cap; anything
+// beyond it falls behind an explicit omission tail.
 export function buildScopedModelCatalog(
 	registry: ModelRegistryAdapter,
 	scopedModels: readonly RoutingModel[],
@@ -519,11 +542,5 @@ export function buildScopedModelCatalog(
 			`- … ${models.length - visibleModels.length} more scoped models omitted`,
 		);
 	}
-	return finishModelCatalog(
-		lines,
-		models.length,
-		registry,
-		taskPreferences,
-		seen,
-	);
+	return finishModelCatalog(lines, models.length, registry, taskPreferences);
 }
