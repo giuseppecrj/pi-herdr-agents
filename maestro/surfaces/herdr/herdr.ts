@@ -1,4 +1,5 @@
 import { execFile, execSync, execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { promisify } from "node:util";
 import { realpathSync } from "node:fs";
 import { resolve, relative, isAbsolute, sep } from "node:path";
@@ -1185,11 +1186,68 @@ export async function getHerdrPaneProcessInfoAsync(
 }
 
 function isHerdrShellReady(info: HerdrPaneProcessInfo): boolean {
-	return (
-		info.shellPid != null && info.foregroundProcessGroupId === info.shellPid
-	);
+	if (info.shellPid == null || info.foregroundProcessGroupId !== info.shellPid)
+		return false;
+	// Shell hooks such as direnv run in the shell's own process group, so the
+	// group check alone passes while they are still loading, and the typed
+	// launch command is swallowed. Ready means the shell is alone.
+	for (const process of info.foregroundProcesses) {
+		if (process.pid !== info.shellPid) return false;
+	}
+	return true;
 }
 
+const SHELL_READY_PROBE_MS = 2_000;
+
+/** A probe whose output, not its echoed command line, contains the token. */
+interface ShellReadyProbe {
+	command: string;
+	token: string;
+}
+
+function buildShellReadyProbe(nonce: string): ShellReadyProbe {
+	return {
+		command: ` printf '__PI_READY_%s\\n' ${nonce}`,
+		token: `__PI_READY_${nonce}`,
+	};
+}
+
+async function probeHerdrShell(
+	surface: string,
+	timeoutMs: number,
+): Promise<boolean> {
+	const probe = buildShellReadyProbe(randomBytes(6).toString("hex"));
+	// Clear anything a swallowed earlier probe left on the line editor.
+	await herdrExecAsync(["pane", "send-keys", surface, "ctrl+u"]);
+	await herdrExecAsync(["pane", "run", surface, probe.command]);
+	try {
+		await herdrExecAsync(
+			[
+				"pane",
+				"wait-output",
+				surface,
+				"--match",
+				probe.token,
+				"--timeout",
+				String(timeoutMs),
+			],
+			timeoutMs + 5_000,
+		);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Wait until the pane's shell is at an interactive prompt.
+ *
+ * Process inspection alone is not enough: while zsh reads its rc files the
+ * shell is alone in the foreground, and only afterwards does a precmd hook
+ * such as direnv start devenv, which swallows typed input. So once the shell
+ * looks idle, a probe command is run and its output awaited; a probe that a
+ * hook swallowed is retried until the deadline.
+ */
 export async function waitForHerdrShellReady(
 	surface: string,
 	options: {
@@ -1198,7 +1256,11 @@ export async function waitForHerdrShellReady(
 		signal?: AbortSignal;
 	} = {},
 ): Promise<void> {
-	const timeoutMs = options.timeoutMs ?? 10_000;
+	// Opt-in override for hooks (e.g. a cold direnv/nix shell) that need longer.
+	const envTimeout = Number(process.env.PI_HERDR_SHELL_READY_TIMEOUT_MS);
+	const timeoutMs =
+		options.timeoutMs ??
+		(Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 10_000);
 	const intervalMs = options.intervalMs ?? 50;
 	const deadline = Date.now() + timeoutMs;
 	let lastError = "no interactive shell foreground process";
@@ -1207,8 +1269,12 @@ export async function waitForHerdrShellReady(
 		if (options.signal?.aborted)
 			throw new Error("Shell readiness wait cancelled.");
 		try {
-			if (isHerdrShellReady(await getHerdrPaneProcessInfoAsync(surface)))
-				return;
+			if (isHerdrShellReady(await getHerdrPaneProcessInfoAsync(surface))) {
+				const remaining = deadline - Date.now();
+				const probeMs = Math.max(1, Math.min(SHELL_READY_PROBE_MS, remaining));
+				if (await probeHerdrShell(surface, probeMs)) return;
+				lastError = "shell did not answer the readiness probe";
+			}
 		} catch (error) {
 			lastError = error instanceof Error ? error.message : String(error);
 		}
@@ -1348,5 +1414,6 @@ export const __herdrTest__ = {
 	parseHerdrPaneSnapshot,
 	parsePaneProcessInfo,
 	isHerdrShellReady,
+	buildShellReadyProbe,
 	withMockHerdrExec,
 };

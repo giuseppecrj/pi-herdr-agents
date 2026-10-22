@@ -78,6 +78,7 @@ import {
 import {
 	isHerdrAvailable,
 	waitForProcessesExit,
+	waitForHerdrShellReady,
 	__herdrTest__,
 } from "../maestro/surfaces/herdr/herdr.ts";
 import {
@@ -13788,6 +13789,78 @@ describe("herdr.ts", () => {
 				}),
 				false,
 			);
+		});
+
+		it("treats a shell hook still running in the shell's group as not ready", () => {
+			// zsh runs precmd hooks such as direnv in its own process group.
+			assert.equal(
+				__herdrTest__.isHerdrShellReady({
+					paneId: "w1:p9",
+					shellPid: 100,
+					foregroundProcessGroupId: 100,
+					pids: [100, 101, 102],
+					foregroundProcesses: [
+						{
+							pid: 102,
+							name: ".devenv-wrapped",
+							argv: ["devenv", "direnv-export"],
+						},
+						{ pid: 101, name: "direnv" },
+						{ pid: 100, name: "zsh" },
+					],
+				}),
+				false,
+			);
+			assert.equal(
+				__herdrTest__.isHerdrShellReady({
+					paneId: "w1:p9",
+					shellPid: 100,
+					foregroundProcessGroupId: 100,
+					pids: [100],
+					foregroundProcesses: [{ pid: 100, name: "zsh" }],
+				}),
+				true,
+			);
+		});
+
+		it("keeps the readiness token out of the probe's command line", () => {
+			const probe = __herdrTest__.buildShellReadyProbe("abc123");
+			assert.equal(probe.token, "__PI_READY_abc123");
+			assert.equal(probe.command.includes(probe.token), false);
+		});
+
+		it("retries the readiness probe until the shell answers", async () => {
+			// The shell looks idle while it reads rc files, before a direnv hook
+			// starts and swallows the first probe; only the second is answered.
+			const calls: string[][] = [];
+			let waits = 0;
+			await __herdrTest__.withMockHerdrExec(
+				async (args) => {
+					calls.push(args);
+					if (args[1] === "process-info") {
+						return JSON.stringify({
+							result: {
+								process_info: {
+									pane_id: "w1:p9",
+									shell_pid: 100,
+									foreground_process_group_id: 100,
+									foreground_processes: [{ pid: 100, name: "zsh" }],
+								},
+							},
+						});
+					}
+					if (args[1] === "wait-output") {
+						waits += 1;
+						if (waits === 1) throw new Error("timed out");
+					}
+					return JSON.stringify({ result: { type: "ok" } });
+				},
+				() =>
+					waitForHerdrShellReady("w1:p9", { timeoutMs: 5_000, intervalMs: 1 }),
+			);
+			assert.equal(waits, 2);
+			const runs = calls.filter((args) => args[1] === "run");
+			assert.equal(runs.length, 2);
 		});
 
 		it("parses pane process-info identities", () => {

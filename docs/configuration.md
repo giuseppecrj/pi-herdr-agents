@@ -424,6 +424,10 @@ Ownership is tracked by returned pane/tab/workspace IDs, never labels. Separate 
 
 Run `/reload` after changing role, model, or pane settings.
 
+### Shell readiness
+
+Before typing a launch command, the host waits until the pane's shell is the only foreground process. Shell hooks such as direnv run in the shell's own process group, so a pane is not ready while a hook (for example `devenv direnv-export` or a nix shell build) is still running. The wait defaults to 10 seconds. If cold shell hooks need longer, opt in to a longer wait by setting the `PI_HERDR_SHELL_READY_TIMEOUT_MS` environment variable (milliseconds) in the parent Pi process, for example `300000`. On timeout the launch fails with `Timed out waiting for interactive shell in Herdr pane …`.
+
 ## Model resolution and fallback
 
 `models.default` sets the model for subagents that do not specify a model.

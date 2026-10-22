@@ -27,6 +27,10 @@ Subagent tabs, panes, and worktree workspaces are created without stealing keybo
 
 The widget shows `stalled` when pane inspection fails or the pane disappears without a completion record. Time alone never makes a run stalled. A no-progress advisory warns once per episode and never interrupts, kills, retries, or restarts a child. Interrupt the child with `subagent_interrupt`, end an ordinary run with `subagent_cancel`, or stop a persistent specialist with `subagent_stop`. See [In-progress status updates](tools.md#in-progress-status-updates) and [Supervision transport](configuration.md#supervision-transport).
 
+## A launch command is typed but the child never starts
+
+If the command appears in the pane but Pi never starts, a shell hook was probably still loading when it was typed. Readiness now waits for hooks such as direnv to finish; if a cold environment takes longer than the readiness timeout, raise `PI_HERDR_SHELL_READY_TIMEOUT_MS`. See [Shell readiness](configuration.md#shell-readiness).
+
 ## A model fails
 
 A catalog-listed model and configured authentication do not prove that your provider account can use the model. The completion keeps each raw provider reason with its model. Check account access, launch a new subagent with a supported model, or configure a fallback. See [Model resolution and fallback](configuration.md#model-resolution-and-fallback).
