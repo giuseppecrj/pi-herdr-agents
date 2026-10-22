@@ -225,6 +225,9 @@ export class PiHarnessAdapter implements HarnessAdapter {
 					cwd: roleCwd,
 					skills: (opts.behavior?.skills ?? defaults?.skills)?.join(","),
 					deniedTools: [...denied],
+					// `spawning: false` removes the spawning tools, so it always wins.
+					selfSpawn:
+						defaults?.selfSpawn === true && defaults.spawning !== false,
 					autoExit,
 					interactive,
 					persistent,

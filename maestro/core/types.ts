@@ -99,6 +99,7 @@ export interface Role {
 		thinking?: ThinkingLevel;
 		sessionMode?: "standalone" | "lineage-only" | "fork";
 		spawning?: boolean;
+		selfSpawn?: boolean;
 		autoExit?: boolean;
 		interactive?: boolean;
 		persistent?: boolean;
