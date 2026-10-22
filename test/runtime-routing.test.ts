@@ -3,10 +3,12 @@ import { describe, it } from "node:test";
 import {
 	RuntimeResolutionError,
 	buildAuthenticatedModelCatalog,
+	buildScopedModelCatalog,
 	getAuthenticatedTaskPreferences,
 	resolveRuntimePlan,
 	resolveRuntimePlans,
 	createModelRegistryAdapter,
+	scopeModelRegistryAdapter,
 	type ParentRuntime,
 	type RoutingModel,
 	type RuntimeRequest,
@@ -599,6 +601,81 @@ describe("runtime routing", () => {
 		);
 	});
 
+	it("hides out-of-scope models while delegating capability helpers", () => {
+		const entries = [
+			model("fake", "parent"),
+			model("zai", "glm-5.3"),
+			model("other", "fast", { reasoning: false }),
+		];
+		const scoped = scopeModelRegistryAdapter(
+			registry(entries),
+			new Set(["fake/parent", "zai/glm-5.3"]),
+		);
+		assert.equal(scoped.find("other", "fast"), undefined);
+		assert.equal(scoped.find("zai", "glm-5.3")?.id, "glm-5.3");
+		assert.deepEqual(
+			scoped.available().map((entry) => `${entry.provider}/${entry.id}`),
+			["fake/parent", "zai/glm-5.3"],
+		);
+		assert.equal(
+			scoped.hasConfiguredAuth(model("other", "fast")),
+			true,
+			"auth checks delegate to the underlying registry unfiltered",
+		);
+		assert.ok(
+			scoped.supportedThinkingLevels(entries[0]).length > 0,
+			"thinking capabilities delegate to the underlying registry",
+		);
+		assert.equal(scoped.clampThinkingLevel(entries[2], "high"), "off");
+	});
+
+	it("scopes task expansion and exact refs to the session's scoped models", () => {
+		const entries = [
+			model("fake", "parent"),
+			model("zai", "glm-5.3"),
+			model("zai", "glm-5.3-flash"),
+			model("other", "fast"),
+		];
+		const tasks = {
+			coding: ["other/fast", "zai/glm-5.3"],
+			review: ["other/fast"],
+		};
+		const scoped = scopeModelRegistryAdapter(
+			registry(entries),
+			new Set(["fake/parent", "zai/glm-5.3", "zai/glm-5.3-flash"]),
+		);
+		assert.deepEqual(
+			resolveRuntimePlans(
+				{ model: "task:coding" },
+				{},
+				parent,
+				scoped,
+				tasks,
+			).map((plan) => plan.model),
+			["zai/glm-5.3"],
+			"scoped task expansion must skip out-of-scope candidates",
+		);
+		assert.throws(
+			() =>
+				resolveRuntimePlans(
+					{ model: "task:review" },
+					{},
+					parent,
+					scoped,
+					tasks,
+				),
+			/task category "review" has no authenticated candidates; authenticated alternatives: fake\/parent, zai\/glm-5.3, zai\/glm-5.3-flash/,
+		);
+		assert.throws(
+			() => resolveRuntimePlans({ model: "other/fast" }, {}, parent, scoped),
+			/unknown model "other\/fast"; exact registry match required\. Available: fake\/parent, zai\/glm-5.3, zai\/glm-5.3-flash/,
+		);
+		assert.equal(
+			resolveRuntimePlans({}, {}, parent, scoped)[0]?.model,
+			"fake/parent",
+			"parent-inherit resolution stays available for the in-scope parent model",
+		);
+	});
 	it("keeps the selected source when agent defaults provide fallbacks", () => {
 		const plans = resolveRuntimePlans(
 			{},
@@ -770,6 +847,84 @@ describe("authenticated model catalog", () => {
 		const catalog = buildAuthenticatedModelCatalog(registry(available), 5);
 		assert.equal((catalog.match(/^- fake\//gm) ?? []).length, 5);
 		assert.match(catalog, /25 more authenticated models omitted/);
+	});
+
+	it("builds an untruncated catalog from the scoped model set", () => {
+		const available = [
+			...Array.from({ length: 30 }, (_, index) =>
+				model("fake", `model-${index}`),
+			),
+			model("zai", "glm-5.3"),
+			model("zai", "glm-5.3-flash"),
+		];
+		const catalog = buildScopedModelCatalog(registry(available), [
+			model("zai", "glm-5.3-flash"),
+			model("zai", "glm-5.3"),
+			model("zai", "glm-5.3-flash"),
+		]);
+		assert.match(catalog, /- zai\/glm-5.3 — /);
+		assert.match(catalog, /- zai\/glm-5.3-flash — /);
+		assert.equal(
+			(catalog.match(/^- /gm) ?? []).length,
+			2,
+			"scoped catalogs dedupe refs and list the whole scoped set",
+		);
+		assert.doesNotMatch(catalog, /fake\//);
+		assert.doesNotMatch(catalog, /more authenticated models omitted/);
+	});
+
+	it("keeps an upper bound on scoped catalogs behind an explicit tail", () => {
+		const available = Array.from({ length: 30 }, (_, index) =>
+			model("zai", `glm-${index}`),
+		);
+		const catalog = buildScopedModelCatalog(
+			registry(available),
+			available,
+			undefined,
+			5,
+		);
+		assert.equal((catalog.match(/^- zai\//gm) ?? []).length, 5);
+		assert.match(catalog, /- … 25 more scoped models omitted/);
+	});
+
+	it("keeps only scoped shortlist candidates and drops emptied categories", () => {
+		const entries = [
+			model("zai", "glm-5.3"),
+			model("zai", "glm-5.3-flash"),
+			model("other", "fast"),
+		];
+		const tasks = {
+			coding: ["zai/glm-5.3", "other/fast"],
+			review: ["zai/glm-5.3-flash"],
+			qa: ["other/fast"],
+		};
+		assert.deepEqual(
+			getAuthenticatedTaskPreferences(
+				scopeModelRegistryAdapter(
+					registry(entries),
+					new Set(["zai/glm-5.3", "zai/glm-5.3-flash"]),
+				),
+				tasks,
+			),
+			{ coding: ["zai/glm-5.3"], review: ["zai/glm-5.3-flash"] },
+		);
+		const catalog = buildScopedModelCatalog(
+			scopeModelRegistryAdapter(
+				registry(entries),
+				new Set(["zai/glm-5.3", "zai/glm-5.3-flash"]),
+			),
+			[model("zai", "glm-5.3"), model("zai", "glm-5.3-flash")],
+			tasks,
+		);
+		assert.match(catalog, /- coding: zai\/glm-5.3$/m);
+		assert.match(catalog, /- review: zai\/glm-5.3-flash$/m);
+		assert.doesNotMatch(catalog, /- qa:/);
+		assert.doesNotMatch(catalog, /other\/fast/);
+	});
+
+	it("keeps the none-discovered shape for an empty scoped set", () => {
+		const catalog = buildScopedModelCatalog(registry(), []);
+		assert.match(catalog, /- none discovered; omitting model still inherits/);
 	});
 
 	it("keeps ordinary fallback separate from strict orchestration guidance in both catalog branches", () => {

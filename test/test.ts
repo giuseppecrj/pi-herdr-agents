@@ -10098,6 +10098,123 @@ describe("tool registration", () => {
 		assert.match(subagent.promptGuidelines.join("\n"), /login-test2/);
 	});
 
+	it("scopes refreshed routing guidance to the session's scoped models", () => {
+		const { api, registeredTools, eventHandlers } = createMockExtensionApi();
+		subagentsModule.default(api);
+
+		const subagent = registeredTools.find((tool) => tool.name === "subagent");
+		assert.ok(subagent);
+		const sessionStart = eventHandlers.get("session_start")?.[0];
+		assert.ok(sessionStart);
+		sessionStart(
+			{},
+			{
+				hasUI: false,
+				modelRegistry: {
+					find: (provider: string, id: string) => ({
+						provider,
+						id,
+						reasoning: true,
+					}),
+					getAvailable: () => [
+						{
+							provider: "fake",
+							id: "fast",
+							reasoning: true,
+							input: ["text"],
+							contextWindow: 128_000,
+							maxTokens: 16_000,
+							cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+						},
+						{
+							provider: "opencode",
+							id: "disabled",
+							reasoning: true,
+							input: ["text"],
+							contextWindow: 128_000,
+							maxTokens: 16_000,
+							cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+						},
+					],
+					hasConfiguredAuth: () => true,
+				},
+				scopedModels: [
+					{
+						model: {
+							provider: "zai",
+							id: "glm-5.3",
+							reasoning: true,
+							input: ["text"],
+							contextWindow: 131_072,
+							maxTokens: 65_536,
+						},
+					},
+				],
+			},
+		);
+
+		const guidelines = subagent.promptGuidelines.join("\n");
+		assert.match(guidelines, /- zai\/glm-5.3 —/);
+		assert.doesNotMatch(
+			guidelines,
+			/fake\/fast/,
+			"scoped guidance must not list available-but-unscoped models",
+		);
+		assert.doesNotMatch(
+			guidelines,
+			/opencode\/disabled/,
+			"scoped guidance must not list provider-disabled models",
+		);
+		assert.doesNotMatch(
+			guidelines,
+			/more authenticated models omitted/,
+			"scoped guidance lists the whole scoped set without an omission tail",
+		);
+	});
+
+	it("scopes spawn-time model resolution to the session's scoped models", () => {
+		const modelRegistry = {
+			find: (provider: string, id: string) => ({
+				provider,
+				id,
+				reasoning: true,
+			}),
+			getAvailable: () => [
+				{ provider: "zai", id: "glm-5.3", reasoning: true },
+				{ provider: "other", id: "fast", reasoning: true },
+			],
+			hasConfiguredAuth: () => true,
+		};
+		const scoped = subagentsModule.__test__.sessionModelRegistry({
+			modelRegistry,
+			scopedModels: [
+				{
+					model: {
+						provider: "zai",
+						id: "glm-5.3",
+						reasoning: true,
+						input: ["text"],
+						contextWindow: 131_072,
+						maxTokens: 65_536,
+					},
+				},
+			],
+		});
+		assert.ok(scoped.find("zai", "glm-5.3"));
+		assert.equal(
+			scoped.find("other", "fast"),
+			undefined,
+			"scoped sessions must not resolve models outside the scoped set",
+		);
+		const unscoped = subagentsModule.__test__.sessionModelRegistry({
+			modelRegistry,
+		});
+		assert.ok(
+			unscoped.find("other", "fast"),
+			"unscoped sessions keep the full authenticated registry",
+		);
+	});
+
 	it("distinguishes ordinary context-isolated review from strict cross-family review", () => {
 		const registry = wrapPiModelRegistry({
 			find: (p: string, id: string) => ({ provider: p, id, reasoning: true }),
