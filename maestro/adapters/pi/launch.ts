@@ -4,6 +4,11 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { getSubagentActivityFile } from "./activity-file.ts";
 import {
+	formatSkillBlocks,
+	resolveSkillBodies,
+	type SkillResolver,
+} from "./skills.ts";
+import {
 	createLifecycle,
 	type SubagentLifecycle,
 } from "../../core/lifecycle.ts";
@@ -180,6 +185,11 @@ export interface PiLaunchOperations {
 		expected: ProcessIdentityExpectation,
 		options?: { timeoutMs?: number },
 	): Promise<PiProcessIdentity>;
+	/**
+	 * Resolve a role's declared skills to their instruction bodies. Defaults to
+	 * Pi's own resource discovery; tests and embedders may override it.
+	 */
+	resolveSkills?: SkillResolver;
 }
 
 function placementFromPaneConfig(config: PaneConfig) {
@@ -357,6 +367,7 @@ export function launchOperationsFromSurface(
 ): PiLaunchOperations {
 	return {
 		worktree,
+		resolveSkills: resolveSkillBodies,
 		createPane(name, cwd) {
 			return provider.createSurface({
 				name,
@@ -480,12 +491,14 @@ async function launchFreshPiSubagent(
 	try {
 		surface = await prepareLaunchSurface(resolved, operations);
 		const session = prepareChildSession(resolved, surface, operations);
+		const skillBlocks = await buildSkillBlocks(resolved, session, operations);
 		const handoffArtifacts = request.handoff
 			? prepareTaskArtifacts(resolved, session, operations)
 			: undefined;
 		await confirmShellReady(session, operations);
 		const artifacts =
-			handoffArtifacts ?? prepareTaskArtifacts(resolved, session, operations);
+			handoffArtifacts ??
+			prepareTaskArtifacts(resolved, session, operations, skillBlocks);
 		const command = buildPiCommand(resolved, artifacts);
 		const launchScriptFile = await startPiProcess(
 			resolved,
@@ -750,10 +763,31 @@ function buildWorktreeHandoffMessage(
 	].join("\n");
 }
 
+/** Build the skill blocks prepended to a child's first task request. */
+async function buildSkillBlocks(
+	resolved: ResolvedLaunch,
+	session: PreparedSession,
+	operations: PiLaunchOperations,
+): Promise<string> {
+	if (resolved.request.handoff) return "";
+	const names = (resolved.request.behavior.skills ?? "")
+		.split(",")
+		.map((name) => name.trim())
+		.filter(Boolean);
+	if (names.length === 0) return "";
+	const resolver = operations.resolveSkills ?? resolveSkillBodies;
+	const skills = await resolver(names, {
+		cwd: session.targetCwd,
+		agentDir: session.effectiveAgentDir,
+	});
+	return formatSkillBlocks(skills);
+}
+
 function prepareTaskArtifacts(
 	resolved: ResolvedLaunch,
 	session: PreparedSession,
 	operations: PiLaunchOperations,
+	skillBlocks = "",
 ): PreparedArtifacts {
 	const { request } = resolved;
 	if (request.handoff) {
@@ -803,11 +837,12 @@ function prepareTaskArtifacts(
 	const summaryInstruction = request.behavior.autoExit
 		? "Your FINAL assistant message should summarize what you accomplished."
 		: "Your FINAL assistant message (before calling subagent_done or before the user exits) should summarize what you accomplished.";
+	const skillPrefix = skillBlocks ? `${skillBlocks}\n\n` : "";
 	const fullTask = request.handoff
 		? request.task
 		: resolved.sessionMode === "fork"
-			? request.task
-			: `${roleBlock}\n\n${modeHint}\n\n${request.task}\n\n${summaryInstruction}`;
+			? `${skillPrefix}${request.task}`
+			: `${skillPrefix}${roleBlock}\n\n${modeHint}\n\n${request.task}\n\n${summaryInstruction}`;
 	let taskArg = fullTask;
 	if (resolved.taskDelivery === "artifact" && !request.handoff) {
 		const artifactPath = join(
@@ -861,15 +896,7 @@ function buildPiCommand(
 		request.behavior.autoExit,
 	);
 	if (toolAllowlist) parts.push("--tools", shellQuote(toolAllowlist));
-	if (!request.handoff) {
-		for (const prompt of buildPromptArgs(
-			request.behavior.skills,
-			resolved.taskDelivery,
-			artifacts.taskArg,
-		)) {
-			parts.push(shellQuote(prompt));
-		}
-	}
+	if (!request.handoff) parts.push(shellQuote(artifacts.taskArg));
 
 	const env = [`${PI_LAUNCH_SESSION_ENV}=${shellQuote(artifacts.sessionFile)}`];
 	if (artifacts.localAgentDir) {
@@ -1137,23 +1164,6 @@ export function buildSubagentToolAllowlist(
 	allow.add("caller_ping");
 	if (!autoExit) allow.add("subagent_done");
 	return [...allow].join(",");
-}
-
-function buildPromptArgs(
-	skills: string | undefined,
-	taskDelivery: "direct" | "artifact",
-	taskArg: string,
-): string[] {
-	const skillPrompts = (skills ?? "")
-		.split(",")
-		.map((skill) => skill.trim())
-		.filter(Boolean)
-		.map((skill) => `/skill:${skill}`);
-	return [
-		...(taskDelivery === "artifact" && skillPrompts.length > 0 ? [""] : []),
-		...skillPrompts,
-		taskArg,
-	];
 }
 
 function getDefaultSessionDirFor(cwd: string, agentDir: string): string {

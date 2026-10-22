@@ -1191,35 +1191,6 @@ function updateWidget() {
 	);
 }
 
-/**
- * Build the positional prompt args for a Pi CLI subagent launch.
- *
- * In artifact-backed launches (lineage-only, standalone), Pi's buildInitialMessage()
- * concatenates @file content with messages[0] into one initial prompt. That breaks
- * /skill: expansion because the message no longer starts with "/skill:". Only
- * messages[1..] are sent as separate follow-up prompts where /skill: is recognized.
- *
- * When there are skill prompts AND artifact-backed delivery, we prepend an empty
- * first positional message so that /skill: args land in messages[1..] and arrive
- * as standalone prompts in the child session.
- */
-function buildPiPromptArgs(params: {
-	effectiveSkills?: string;
-	taskDelivery: "direct" | "artifact";
-	taskArg: string;
-}): string[] {
-	const skillPrompts = (params.effectiveSkills ?? "")
-		.split(",")
-		.map((s) => s.trim())
-		.filter(Boolean)
-		.map((skill) => `/skill:${skill}`);
-
-	const needsSeparator =
-		params.taskDelivery === "artifact" && skillPrompts.length > 0;
-
-	return [...(needsSeparator ? [""] : []), ...skillPrompts, params.taskArg];
-}
-
 function ensureLifecycle(running: RunningSubagent): SubagentLifecycle {
 	if (running.lifecycle) return running.lifecycle;
 	let lifecycle = createLifecycle(running.startTime);
@@ -1980,7 +1951,6 @@ export const __test__ = {
 	resolveLaunchBehavior,
 	resolveEffectiveAutoExit,
 	resolveEffectiveInteractive,
-	buildPiPromptArgs,
 	resolveEffectivePersistent,
 	observeRunningSubagent,
 	evaluateNoProgressAdvisory,
