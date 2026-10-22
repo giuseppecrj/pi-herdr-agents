@@ -61,7 +61,8 @@ an external CLI (`cli`) fail before launch. Role frontmatter can set
 `spawning: false` (denies all subagent lifecycle tools) and `deny-tools`
 (tools registered by this package). Children also get `caller_ping`, and
 interactive (non-`auto-exit`) children get `subagent_done` to mark themselves
-complete; `auto-exit` roles exit on their own. These exist only inside child
+complete; `auto-exit` roles exit on their own, after the children they launched
+have delivered. These exist only inside child
 sessions. Parent-only tools (`worktree_list`, `worktree_remove`,
 `subagents_write_task_models`, `/subagents-init`) are omitted in children. For
 frontmatter authoring, read [Custom Agents](../../docs/roles.md#custom-agents)

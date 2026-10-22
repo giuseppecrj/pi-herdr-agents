@@ -19,6 +19,7 @@ import {
 	writeProcessIdentityRecord,
 } from "../process-identity.ts";
 import { isString } from "../../../core/config/type-guards.ts";
+import { hasUndeliveredChildren } from "../../../core/undelivered-children.ts";
 
 export function shouldMarkUserTookOver(agentStarted: boolean): boolean {
 	return agentStarted;
@@ -294,6 +295,12 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		if (!shouldAutoExitOnAgentEnd(userTookOver, messages)) return;
+		// Children this session launched deliver their results as steers. Exiting
+		// now would drop them, so wait: the last delivery starts a new turn, and
+		// its settlement reaches this point again. A settled error still exits so
+		// the parent learns of it promptly.
+		if (findLatestAssistantError(messages) === null && hasUndeliveredChildren())
+			return;
 		completionFinalized = true;
 
 		// Surface a settled stopReason: "error" to the parent via the .exit
