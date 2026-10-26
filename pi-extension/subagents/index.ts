@@ -29,6 +29,10 @@ import { loadStatusConfig } from "../../maestro/core/status.ts";
 import { markDelivery } from "../../maestro/core/lifecycle.ts";
 import type { WorktreeCleanupOperations } from "../../maestro/core/worktree-cleanup.ts";
 import {
+	CHILD_BUSY_CHANNEL,
+	type ChildBusyProbe,
+} from "../../maestro/core/child-busy.ts";
+import {
 	WIDGET_INTERVAL_KEY,
 	STATUS_INTERVAL_KEY,
 	RUNTIME_KEY,
@@ -37,6 +41,7 @@ import {
 	type SubagentResult,
 	type RunningSubagent,
 	type SubagentRuntime,
+	hasWorkingSubagents,
 	shouldDeliverSubagentCompletion,
 	selectCompletionApi,
 } from "./state.ts";
@@ -81,7 +86,11 @@ import {
 	registerSubagentCommand,
 } from "./launch-tools.ts";
 
-export { shouldDeliverSubagentCompletion, selectCompletionApi };
+export {
+	hasWorkingSubagents,
+	shouldDeliverSubagentCompletion,
+	selectCompletionApi,
+};
 
 // Replace presentation timers left by a previous load (see state.ts).
 {
@@ -400,8 +409,17 @@ export default function subagentsExtension(
 		}
 	});
 
+	// A child that is itself waiting on subagents is not asked whether it is done.
+	const stopChildBusy = pi.events.on(CHILD_BUSY_CHANNEL, (raw) => {
+		// SAFETY: the channel's only emitter, isChildBusy, sends a ChildBusyProbe.
+		const probe = raw as ChildBusyProbe | undefined;
+		if (probe && hasWorkingSubagents(runningSubagents.values()))
+			probe.busy = true;
+	});
+
 	// Clean up on session shutdown
 	pi.on("session_shutdown", async (event, _ctx) => {
+		stopChildBusy();
 		stopRefresh();
 
 		const session = runtime.session;

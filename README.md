@@ -138,7 +138,7 @@ The parent session gets these tools:
 | `worktree_remove` | Remove one managed worktree on explicit request. |
 | `subagents_write_task_models` | Internal writer for `models.tasks` preferences. |
 
-Children get `caller_ping` to ask the parent for help. Interactive children also get `subagent_done` to mark themselves complete.
+Children get `caller_ping` to ask the parent for help. Interactive children also get `subagent_done` to mark themselves complete, and are asked whether they are done when a run ends without it.
 
 | Command | Use |
 | --- | --- |

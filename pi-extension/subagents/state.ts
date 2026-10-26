@@ -143,6 +143,21 @@ export interface SubagentRuntime {
 	modelCatalog?: string;
 }
 
+/**
+ * Any running subagent except a persistent specialist idle between tasks or
+ * one whose stop failed, which may never leave the table.
+ */
+export function hasWorkingSubagents(
+	subagents: Iterable<RunningSubagent>,
+): boolean {
+	for (const running of subagents) {
+		if (running.stopState === "failed") continue;
+		if (running.persistent && !running.taskId && !running.stopState) continue;
+		return true;
+	}
+	return false;
+}
+
 export function shouldDeliverSubagentCompletion(
 	running: Pick<RunningSubagent, "lifecycle">,
 ): boolean {

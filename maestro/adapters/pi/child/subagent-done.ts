@@ -14,6 +14,8 @@ import {
 	readPersistentTaskEvents,
 } from "../session.ts";
 import { createSubagentActivityRecorder } from "../activity-file.ts";
+import { createDoneNudge } from "./done-nudge.ts";
+import { isChildBusy } from "../../../core/child-busy.ts";
 import {
 	readOwnProcessIdentity,
 	writeProcessIdentityRecord,
@@ -219,6 +221,15 @@ export default function (pi: ExtensionAPI) {
 	let latestAgentMessages: any[] | undefined;
 	let completionFinalized = false;
 	let sessionContext: { shutdown(): void } | undefined;
+	// A child without auto-exit closes only through subagent_done, so one that
+	// forgets it is asked once whether its task is complete.
+	const doneNudge =
+		!autoExit && !persistent
+			? createDoneNudge({
+					send: (message) => pi.sendUserMessage(message),
+					isBusy: () => isChildBusy(pi.events),
+				})
+			: undefined;
 
 	// Show widget + status bar on session start
 	pi.on("session_start", (_event, ctx) => {
@@ -239,8 +250,14 @@ export default function (pi: ExtensionAPI) {
 		userTookOver = true;
 	});
 
-	pi.on("before_agent_start", () => {
+	pi.on("before_agent_start", (event) => {
 		recorder.beforeAgentStart();
+		// A run started by a custom message, such as a subagent result, has no prompt.
+		const prompt =
+			event && "prompt" in event && isString(event.prompt)
+				? event.prompt
+				: undefined;
+		doneNudge?.runStarting(prompt);
 	});
 
 	pi.on("agent_start", () => {
@@ -258,7 +275,10 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("agent_settled", (_event, ctx) => {
+	pi.on("agent_settled", (event, ctx) => {
+		if (doneNudge && !completionFinalized) {
+			doneNudge.settled(latestAgentMessages, event?.aborted === true, ctx);
+		}
 		if (persistent && !completionFinalized) {
 			let messages = latestAgentMessages;
 			try {
@@ -358,6 +378,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", (event) => {
 		if (inboxPoller) clearInterval(inboxPoller);
+		doneNudge?.cancel();
 		recorder.sessionShutdown(event.reason);
 	});
 
