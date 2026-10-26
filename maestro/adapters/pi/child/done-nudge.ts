@@ -26,7 +26,7 @@ export interface DoneNudgeOptions {
 }
 
 export interface DoneNudge {
-	runStarting(prompt: string | undefined): void;
+	runStarting(): void;
 	settled(
 		messages: readonly { role?: string; stopReason?: string }[] | undefined,
 		aborted: boolean,
@@ -54,6 +54,9 @@ export function endedNormally(
  */
 export function createDoneNudge(options: DoneNudgeOptions): DoneNudge {
 	let armed = false;
+	// Set when the nudge speaks, so the run it starts does not re-arm it. A flag,
+	// not a text match: another extension's input handler may rewrite the prompt.
+	let nudgeInFlight = false;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 
 	function cancel() {
@@ -74,13 +77,15 @@ export function createDoneNudge(options: DoneNudgeOptions): DoneNudge {
 		}
 		if (options.isBusy()) return;
 		armed = false;
+		nudgeInFlight = true;
 		options.send(DONE_NUDGE_MESSAGE);
 	}
 
 	return {
-		runStarting(prompt) {
+		runStarting() {
 			cancel();
-			armed = prompt !== DONE_NUDGE_MESSAGE;
+			armed = !nudgeInFlight;
+			nudgeInFlight = false;
 		},
 		settled(messages, aborted, ctx) {
 			cancel();

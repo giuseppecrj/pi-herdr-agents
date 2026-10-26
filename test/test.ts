@@ -7351,20 +7351,20 @@ describe("subagent-done.ts", () => {
 		it("asks once, 3 seconds after a normal run, and not after the run it started", (t) => {
 			const { nudge, sent, wait } = harness(t);
 			assert.equal(DONE_NUDGE_DELAY_MS, 3_000);
-			nudge.runStarting("task");
+			nudge.runStarting();
 			nudge.settled(stopped, false, idleCtx);
 			wait(DONE_NUDGE_DELAY_MS - 1);
 			assert.deepEqual(sent, []);
 			wait(1);
 			assert.deepEqual(sent, [DONE_NUDGE_MESSAGE]);
 
-			nudge.runStarting(DONE_NUDGE_MESSAGE);
+			nudge.runStarting();
 			nudge.settled(stopped, false, idleCtx);
 			wait();
 			assert.deepEqual(sent, [DONE_NUDGE_MESSAGE]);
 
-			// A run started by a custom message, such as a subagent result, re-arms it.
-			nudge.runStarting(undefined);
+			// Any later run, such as one a subagent result starts, re-arms it.
+			nudge.runStarting();
 			nudge.settled(stopped, false, idleCtx);
 			wait();
 			assert.deepEqual(sent, [DONE_NUDGE_MESSAGE, DONE_NUDGE_MESSAGE]);
@@ -7374,7 +7374,7 @@ describe("subagent-done.ts", () => {
 			const { nudge, sent, wait } = harness(t);
 			nudge.settled(stopped, false, idleCtx);
 			wait();
-			nudge.runStarting("task");
+			nudge.runStarting();
 			nudge.settled(stopped, true, idleCtx);
 			wait();
 			for (const stopReason of ["aborted", "error"]) {
@@ -7386,17 +7386,17 @@ describe("subagent-done.ts", () => {
 
 		it("cancels when a new run starts within the delay", (t) => {
 			const { nudge, sent, wait } = harness(t);
-			nudge.runStarting("task");
+			nudge.runStarting();
 			nudge.settled(stopped, false, idleCtx);
 			wait(1_000);
-			nudge.runStarting("user follow-up");
+			nudge.runStarting();
 			wait();
 			assert.deepEqual(sent, []);
 		});
 
 		it("skips a child with working subagents, queued messages, or a draft in its editor", (t) => {
 			const busy = harness(t, { busy: true });
-			busy.nudge.runStarting("task");
+			busy.nudge.runStarting();
 			busy.nudge.settled(stopped, false, idleCtx);
 			busy.wait();
 			assert.deepEqual(busy.sent, []);
@@ -7411,7 +7411,7 @@ describe("subagent-done.ts", () => {
 					send: (message) => sent.push(message),
 					isBusy: () => false,
 				});
-				nudge.runStarting("task");
+				nudge.runStarting();
 				nudge.settled(stopped, false, ctx);
 				busy.wait();
 				assert.deepEqual(sent, []);
@@ -7485,7 +7485,7 @@ describe("subagent-done.ts", () => {
 			}
 		});
 
-		it("counts every running subagent except a persistent specialist idle between tasks", () => {
+		it("counts every running subagent except an idle persistent specialist or a failed stop", () => {
 			const { hasWorkingSubagents } = hostModule;
 			// SAFETY: hasWorkingSubagents reads only persistent, taskId, and stopState.
 			const rows = (...partial: object[]) => partial as RunningSubagentRow[];
@@ -7495,6 +7495,12 @@ describe("subagent-done.ts", () => {
 			assert.equal(
 				hasWorkingSubagents(rows({ persistent: true, taskId: "task" })),
 				true,
+			);
+			assert.equal(
+				hasWorkingSubagents(
+					rows({ persistent: true, taskId: "task", stopState: "failed" }),
+				),
+				false,
 			);
 
 			const { api } = createMockExtensionApi();

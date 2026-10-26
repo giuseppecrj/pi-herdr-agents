@@ -226,7 +226,10 @@ export default function (pi: ExtensionAPI) {
 	const doneNudge =
 		!autoExit && !persistent
 			? createDoneNudge({
-					send: (message) => pi.sendUserMessage(message),
+					// A run that starts between the idle check and delivery queues the
+					// question instead of rejecting it.
+					send: (message) =>
+						pi.sendUserMessage(message, { deliverAs: "followUp" }),
 					isBusy: () => isChildBusy(pi.events),
 				})
 			: undefined;
@@ -250,14 +253,9 @@ export default function (pi: ExtensionAPI) {
 		userTookOver = true;
 	});
 
-	pi.on("before_agent_start", (event) => {
+	pi.on("before_agent_start", () => {
 		recorder.beforeAgentStart();
-		// A run started by a custom message, such as a subagent result, has no prompt.
-		const prompt =
-			event && "prompt" in event && isString(event.prompt)
-				? event.prompt
-				: undefined;
-		doneNudge?.runStarting(prompt);
+		doneNudge?.runStarting();
 	});
 
 	pi.on("agent_start", () => {
