@@ -8,11 +8,11 @@
 export const DONE_NUDGE_DELAY_MS = 3_000;
 
 export const DONE_NUDGE_MESSAGE =
-	"Is your task complete? If it is, call subagent_done now; your last " +
-	"message before it becomes the summary returned to your caller. If you " +
-	"are waiting for something, such as the user's answer or your own " +
-	"subagents, say what you are waiting for in one line and do not call " +
-	"subagent_done.";
+	"Is your task complete? If it is, call subagent_done now without writing " +
+	"anything else, so your previous answer stays the summary returned to " +
+	"your caller. If you are waiting for something, such as the user's " +
+	"answer or your own subagents, say what you are waiting for in one line " +
+	"and do not call subagent_done.";
 
 export interface DoneNudgeContext {
 	isIdle(): boolean;
