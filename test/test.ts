@@ -7420,9 +7420,19 @@ describe("subagent-done.ts", () => {
 
 		it("is wired into children without auto-exit only", (t) => {
 			t.mock.timers.enable({ apis: ["setTimeout"] });
-			const previousAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
-			const previousPersistent = process.env.PI_SUBAGENT_PERSISTENT;
-			delete process.env.PI_SUBAGENT_PERSISTENT;
+			// An auto-exit settle writes the completion sidecar of PI_SUBAGENT_SESSION,
+			// so a run inside a real subagent must not reach that subagent's files.
+			const dir = createTestDir();
+			const inherited = [
+				"PI_SUBAGENT_AUTO_EXIT",
+				"PI_SUBAGENT_PERSISTENT",
+				"PI_SUBAGENT_SESSION",
+				"PI_SUBAGENT_ID",
+				"PI_SUBAGENT_ACTIVITY_FILE",
+				"PI_SUBAGENT_PROCESS_FILE",
+			].map((name) => [name, process.env[name]] as const);
+			for (const [name] of inherited) delete process.env[name];
+			process.env.PI_SUBAGENT_SESSION = join(dir, "child.jsonl");
 			try {
 				const run = (autoExit: boolean, busy = false) => {
 					if (autoExit) process.env.PI_SUBAGENT_AUTO_EXIT = "1";
@@ -7470,8 +7480,8 @@ describe("subagent-done.ts", () => {
 				assert.deepEqual(run(false, true), []);
 				assert.deepEqual(run(true), []);
 			} finally {
-				restoreEnvVar("PI_SUBAGENT_AUTO_EXIT", previousAutoExit);
-				restoreEnvVar("PI_SUBAGENT_PERSISTENT", previousPersistent);
+				for (const [name, value] of inherited) restoreEnvVar(name, value);
+				rmSync(dir, { recursive: true, force: true });
 			}
 		});
 
