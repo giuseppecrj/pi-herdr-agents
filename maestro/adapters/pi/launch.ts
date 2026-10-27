@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { getSubagentActivityFile } from "./activity-file.ts";
@@ -54,8 +54,6 @@ export interface FreshPiLaunchRequest {
 	fork?: boolean;
 	handoff?: { leafId: string };
 	surface?: string;
-	/** Ordinary children record their process identity too (sidebar markers). */
-	recordProcessIdentity?: boolean;
 	parent: {
 		cwd: string;
 		invocationCwd?: string;
@@ -88,8 +86,6 @@ export interface ResumePiLaunchRequest {
 	name: string;
 	sessionFile: string;
 	message?: string;
-	/** Record the resumed process's identity (sidebar markers). */
-	recordProcessIdentity?: boolean;
 	parent: {
 		sessionId: string;
 		sessionDir: string;
@@ -129,15 +125,9 @@ export interface PiRunningChild {
 	stopState?: "requested" | "pending" | "failed";
 	stopFailure?: string;
 	crashNotified?: boolean;
-	/**
-	 * Where the child records its own process identity: every managed worktree
-	 * child, and other children when the launch asks for it.
-	 */
+	/** Managed worktree children: where the child records its own process identity. */
 	processIdentityFile?: string;
-	/**
-	 * Verified at launch readiness. A worktree cancel's only signal and exit
-	 * evidence; sidebar markers renew only while it is alive.
-	 */
+	/** Verified at launch readiness; a worktree cancel's only signal and exit evidence. */
 	processIdentity?: PiProcessIdentity;
 	/** Settles when launch-readiness capture verifies or gives up; never rejects. */
 	processIdentityCapture?: Promise<PiProcessIdentity | undefined>;
@@ -728,8 +718,7 @@ function prepareChildSession(
 		activityFile,
 		// A handoff Pi loads no child protocol extension, so it records nothing.
 		processIdentityFile:
-			(surface.worktree || resolved.request.recordProcessIdentity) &&
-			!resolved.request.handoff
+			surface.worktree && !resolved.request.handoff
 				? getSubagentProcessIdentityFile(sessionFile)
 				: undefined,
 	};
@@ -1012,9 +1001,16 @@ export function startProcessIdentityCapture(
 }
 
 async function launchResumedPiSubagent(
-	request: ResumePiLaunchRequest,
+	callerRequest: ResumePiLaunchRequest,
 	operations: PiLaunchOperations,
 ): Promise<PiRunningChild> {
+	// Pi resolves `--session` against the pane's cwd, not the caller's. Resolve
+	// it here once, so every read, the command, and the running child's
+	// session file name the same absolute path that Pi then reports to Herdr.
+	const request = {
+		...callerRequest,
+		sessionFile: resolve(callerRequest.sessionFile),
+	};
 	const id = request.id ?? Math.random().toString(16).slice(2, 10);
 	const policy = readSubagentSessionPolicy(request.sessionFile);
 	if (policy.owner !== "public") {
@@ -1045,11 +1041,6 @@ async function launchResumedPiSubagent(
 		await operations.waitForShellReady(surface);
 		const activityFile = getSubagentActivityFile(artifactDir, id);
 		mkdirSync(dirname(activityFile), { recursive: true });
-		// The session file is reused, and its sidecar keeps the first identity
-		// ever published for it, so each resumed run records under its own ID.
-		const processIdentityFile = request.recordProcessIdentity
-			? join(artifactDir, "process-identity", `${id}.json`)
-			: undefined;
 
 		let messageFile: string | undefined;
 		if (request.message) {
@@ -1074,9 +1065,6 @@ async function launchResumedPiSubagent(
 			`PI_SUBAGENT_ID=${shellQuote(id)}`,
 			`PI_SUBAGENT_ACTIVITY_FILE=${shellQuote(activityFile)}`,
 			`PI_SUBAGENT_AUTO_EXIT=${autoExit ? "1" : "0"}`,
-			...(processIdentityFile
-				? [`PI_SUBAGENT_PROCESS_FILE=${shellQuote(processIdentityFile)}`]
-				: []),
 		];
 		const toolAllowlist = buildSubagentToolAllowlist(
 			policy.tools?.join(","),
@@ -1112,7 +1100,7 @@ async function launchResumedPiSubagent(
 				].join("\n"),
 			},
 		);
-		const running: PiRunningChild = {
+		return {
 			id,
 			name: request.name,
 			task: request.message ?? "resumed session",
@@ -1124,10 +1112,7 @@ async function launchResumedPiSubagent(
 			interactive,
 			runtimePlan: undefined,
 			lifecycle: createLifecycle(startTime),
-			processIdentityFile,
 		};
-		startProcessIdentityCapture(running, operations);
-		return running;
 	} catch (error) {
 		try {
 			await operations.closePane(surface);

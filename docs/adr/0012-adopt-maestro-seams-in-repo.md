@@ -40,6 +40,6 @@ The rest of [ADR-0008](0008-adopt-pi-only-subagent-execution.md) remains in
 force, including Pi-only execution and rejection of legacy external CLI roles.
 [ADR-0003](0003-installable-role-packs.md) continues to govern role packs.
 This decision does not extract or publish a new package, promise another
-harness, or establish that migration verification is complete. See the
-[design and migration status](../superpowers/specs/2026-10-02-maestro-seams-design.md)
-and [code map](../../README.md#code-map).
+harness, or establish that migration verification is complete. The migration
+design was a development artifact and is not included in this package. See the
+current [code map](../development.md#code-map).

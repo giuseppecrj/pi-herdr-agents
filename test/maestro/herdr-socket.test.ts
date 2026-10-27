@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
 	parseHerdrSocketReply,
+	readPaneAgentSession,
 	reportPaneToken,
 	requestHerdrSocket,
 } from "../../maestro/surfaces/herdr/herdr-socket.ts";
+import type { JsonObject } from "../../maestro/core/config/type-guards.ts";
 import {
 	replyError,
 	replyResult,
@@ -217,5 +219,82 @@ describe("pane token report", () => {
 				assert.equal(await reportPaneToken(path, write), "failed");
 			},
 		);
+	});
+});
+
+describe("pane agent session read", () => {
+	const paneInfo = (pane: JsonObject) =>
+		replyResult({ type: "pane_info", pane: { pane_id: "w1:p2", ...pane } });
+
+	it("asks pane.get for one pane and returns its stored session path", () =>
+		withFakeHerdrSocket(
+			// The shape Herdr 0.9.1 reports for a delegated Pi child's pane.
+			paneInfo({
+				agent: "pi",
+				agent_session: {
+					agent: "pi",
+					kind: "path",
+					source: "herdr:pi",
+					value: "/home/u/.pi/agent/sessions/child.jsonl",
+				},
+			}),
+			async (path, requests) => {
+				assert.deepEqual(await readPaneAgentSession(path, "w1:p2"), {
+					kind: "session",
+					path: "/home/u/.pi/agent/sessions/child.jsonl",
+				});
+				assert.deepEqual(
+					requests.map(({ method, params }) => ({ method, params })),
+					[{ method: "pane.get", params: { pane_id: "w1:p2" } }],
+				);
+			},
+		));
+
+	it("distinguishes no session, an id-only session, and a missing pane", async () => {
+		await withFakeHerdrSocket(paneInfo({ agent: "pi" }), async (path) => {
+			assert.deepEqual(await readPaneAgentSession(path, "w1:p2"), {
+				kind: "none",
+			});
+		});
+		await withFakeHerdrSocket(
+			paneInfo({
+				agent_session: {
+					agent: "codex",
+					kind: "id",
+					source: "herdr:codex",
+					value: "019a",
+				},
+			}),
+			async (path) => {
+				assert.deepEqual(await readPaneAgentSession(path, "w1:p2"), {
+					kind: "session",
+				});
+			},
+		);
+		await withFakeHerdrSocket(
+			replyError("pane_not_found", "gone"),
+			async (path) => {
+				assert.deepEqual(await readPaneAgentSession(path, "w1:p2"), {
+					kind: "pane-missing",
+				});
+			},
+		);
+	});
+
+	it("fails on Herdr errors, another pane, and malformed sessions", async () => {
+		const replies = [
+			replyError("invalid_params", "bad"),
+			replyResult({ type: "pane_info", pane: { pane_id: "w1:p9" } }),
+			replyResult({ type: "pane_info" }),
+			paneInfo({ agent_session: "/not/an/object.jsonl" }),
+			paneInfo({ agent_session: null }),
+		];
+		for (const reply of replies)
+			await withFakeHerdrSocket(reply, async (path) => {
+				assert.equal(
+					(await readPaneAgentSession(path, "w1:p2")).kind,
+					"failed",
+				);
+			});
 	});
 });

@@ -12,7 +12,8 @@ The extension is fire-and-forget: `subagent` returns an acknowledgement, and com
 
 ## Read these first
 
-- [`README.md`](./README.md) — canonical installation, API, configuration, lifecycle, and agent-authoring reference
+- [`README.md`](./README.md) — canonical installation and everyday-use guide
+- [`docs/tools.md`](docs/tools.md), [`docs/configuration.md`](docs/configuration.md), and [`docs/roles.md`](docs/roles.md) — canonical API and lifecycle, configuration, and agent-authoring references
 - [`docs/README.md`](docs/README.md) — map of shipped contracts, active design, ADRs, and background research
 - [`CONTEXT.md`](CONTEXT.md) — workflow-domain glossary; read it before changing orchestration design
 - [`docs/adr/0003-installable-role-packs.md`](docs/adr/0003-installable-role-packs.md) — installable role-pack discovery, precedence, and collision contract
@@ -73,12 +74,16 @@ Read [`docs/worktree-subagents.md`](docs/worktree-subagents.md) before changing 
 
 When behavior changes, update every affected surface in the same commit:
 
-- public tool parameters, role-pack protocol, or lifecycle → `README.md`
+- public tool parameters or lifecycle → `docs/tools.md`, plus the `README.md` summary when everyday use changes
+- configuration keys, model routing, or task-model init events → `docs/configuration.md`, plus the `README.md` summary when everyday use changes
+- role-pack protocol or role frontmatter → `docs/roles.md`
+- troubleshooting steps → `docs/troubleshooting.md`
+- code map → this file and `docs/development.md`
 - role-pack discovery, precedence, or collision policy → `docs/adr/0003-installable-role-packs.md`
 - worktree behavior, handoff, recovery, or cleanup → `docs/worktree-subagents.md`
 - role prompts, `/plan`, and review-workflow methodology → the owning role pack, not this repository
-- the `PI_SUBAGENT_ID` child-context hint → `README.md` and `CONTEXT.md`
-- contributor/release verification → this file, `.pi/skills/run-integration-tests/SKILL.md`, or `RELEASING.md`
+- the `PI_SUBAGENT_ID` child-context hint → `docs/tools.md` and `CONTEXT.md`
+- contributor/release verification → this file, `docs/development.md`, `.pi/skills/run-integration-tests/SKILL.md`, or `RELEASING.md`
 - domain terminology → `CONTEXT.md`
 - hard-to-reverse orchestration trade-offs → the relevant ADR; do not create an ADR for every design question
 - architectural evidence and alternatives only → research docs, clearly marked when later decisions supersede them

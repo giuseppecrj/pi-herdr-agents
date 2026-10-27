@@ -67,20 +67,19 @@ _Avoid_: Interrupt, suppression, persistent stop, pane-close fallback
 **Process identity**:
 A child's Pi process named by immutable kernel facts (PID, start time, boot,
 and PID namespace), recorded by the child at launch and verified by the parent
-against the Herdr pane. Every managed worktree child records it; other children
-record it when sidebar markers are on. A worktree cancel signals and judges
-exit only by it, and a delegated marker renews only while it is alive.
+against the Herdr pane. Every managed worktree child records it. A worktree
+cancel signals and judges exit only by it. It reads Linux `/proc`.
 _Avoid_: argv match, foreground process, shell visibility
 
 **Delegated marker**:
 The display-only pane token `piha_delegated_v1=live` that a parent reports on
-a delegated child's pane when `sidebar.enabled` is on. It means the parent
-classified the pane's process as its child within the last 15 seconds, not
-that the process is alive when Herdr draws the row. One stable source, a
-15-second TTL, and increasing sequence numbers bound a leftover marker;
-renewal requires the original process identity. A `/worktree` handoff is
-never marked.
-_Avoid_: liveness proof, ownership record, security boundary, per-run source
+a delegated child's pane when `sidebar.enabled` is on. It means Herdr reported
+the child's own session file as the pane's agent session within the last 15
+seconds, not that the child is alive when Herdr draws the row. One stable
+source, a 15-second TTL, and increasing sequence numbers bound a leftover
+marker; each renewal first rereads that agent session from Herdr. A
+`/worktree` handoff is never marked.
+_Avoid_: liveness proof, ownership record, security boundary, per-run source, process identity
 
 **Sidebar Focus**:
 The Herdr agent view that the optional `pi-herdr-agents.sidebar` plugin sets

@@ -1,19 +1,17 @@
 ---
 name: pi-herdr-agents
-description: Operate the pi-herdr-agents host. Use when asked to launch, delegate to, supervise, interrupt, cancel, stop, resume, or clean up Pi subagents; to use worktrees, persistent specialists, or model routing; to edit the host's config.json or task-model preferences; or when a child looks hung, stalled, or unwanted.
+description: Operate the pi-herdr-agents host. Use when asked to launch, delegate to, supervise, interrupt, cancel, stop, resume, or clean up Pi subagents; to use worktrees, persistent specialists, or model routing; to edit the host's config.json or task-model preferences; to install, configure, troubleshoot, or uninstall the optional Herdr sidebar plugin; or when a child looks hung, stalled, or unwanted.
 ---
 
 # pi-herdr-agents operating guide
 
 ## Authority and version caveat
 
-Live tool descriptions, the installed package's README, and the installed
-version are authoritative; this guide is a summary. An installed release can
-predate or postdate source on a branch, so a tool named here may be absent or
-changed. Check which `subagent*`, `worktree_*`, and `subagents_*` tools you
-actually have, and read the README under the installed package root (see your
-Pi packages settings) before relying on anything marked "verify in your
-installed version".
+Live tool descriptions and the installed package's documentation are
+authoritative; this guide is a summary. Check the installed version and which
+`subagent*`, `worktree_*`, and `subagents_*` tools you have before relying on
+source from another branch or release. Resolve this guide's relative links
+from its directory, not the user's working directory.
 
 ## What the host is
 
@@ -66,7 +64,8 @@ interactive (non-`auto-exit`) children get `subagent_done` to mark themselves
 complete; `auto-exit` roles exit on their own. These exist only inside child
 sessions. Parent-only tools (`worktree_list`, `worktree_remove`,
 `subagents_write_task_models`, `/subagents-init`) are omitted in children. For
-frontmatter authoring, read the README "Custom Agents" and "Tool Access Control".
+frontmatter authoring, read [Custom Agents](../../docs/roles.md#custom-agents)
+and [Tool Access Control](../../docs/roles.md#tool-access-control).
 
 ## Help requests: `caller_ping`
 
@@ -236,6 +235,7 @@ changes. Without a real file, only non-model settings fall back to the example.
 | Key | Purpose |
 | --- | --- |
 | `status.enabled` | Widget status |
+| `sidebar.enabled` | Opt-in delegated-child markers for the optional Herdr sidebar plugin; off by default |
 | `models.default` | Model for children that specify none |
 | `models.agents` | Per-role model, keyed by role name |
 | `models.tasks` | Ordered exact-ID candidates per category for `task:<category>` |
@@ -265,6 +265,46 @@ retry blindly. Every write holds an advisory `config.json.lock`; a held lock
 fails immediately with `Task model config writer busy`, and it is never broken
 automatically. Remove it only after confirming no writer is active.
 
+## Optional Herdr sidebar plugin
+
+For installation or troubleshooting, first read the
+[sidebar plugin guide](../../plugins/sidebar/README.md). Resolve that path from
+this skill's directory, not the user's working directory. It is the canonical
+reference for requirements, installation, Focus/All, limits, and uninstall.
+
+Setup has two separate parts: **install the Herdr plugin** and **enable markers
+in the Pi extension**. Neither alone enables sidebar filtering.
+
+1. Check the installed extension supports `sidebar.enabled`, and check the
+   guide's Herdr compatibility requirements. Markers work on Linux and macOS
+   and need Herdr's Pi integration (`herdr integration install pi`) in the
+   agent directory children use; the Herdr server needs `node` on its
+   `PATH`. Use `pi list` to check package sources; do not load two copies of
+   the extension.
+2. Review the plugin source, then follow the guide to install
+   `giuseppecrj/pi-herdr-agents/plugins/sidebar` with `herdr plugin install`,
+   or link an existing compatible directory with `herdr plugin link`.
+   Installing the Pi package does not install the Herdr plugin.
+3. Merge `"sidebar": { "enabled": true }` into the durable config described
+   above, preserving `status`, `models`, and all other settings. If the file
+   does not exist, first copy the installed package's `config.json.example`;
+   a sidebar-only config is invalid because `status` is required.
+4. Run `/reload` in each parent Pi session inside Herdr, then launch new
+   children. Children already running stay unmarked.
+5. Invoke Focus explicitly; installation and enablement never activate it:
+
+   ```bash
+   herdr plugin action invoke pi-herdr-agents.sidebar.focus
+   ```
+
+Focus changes the server-wide Agents view, replacing any existing view. It
+hides marked children except those blocked or with unknown status; it never
+stops children or suppresses notifications. To restore rows, invoke
+`herdr plugin action invoke pi-herdr-agents.sidebar.all`. All clears only this
+plugin's view and leaves another tool's view untouched. If filtering does not
+work, inspect `herdr plugin log list --plugin pi-herdr-agents.sidebar` and
+follow the guide's troubleshooting steps.
+
 ## Denied tools
 
 Role `spawning: false` and `deny-tools` restrict what a child may call; the
@@ -272,17 +312,11 @@ host applies them at launch and they survive resume. Without a restrictive
 allowlist or spawning policy, a child can spawn further children. A `read,bash`
 allowlist is not a read-only boundary.
 
-## GAP 2: post-pack-split surface (verify the live list)
-
-Which skills and roles the installed build exposes depends on its version and
-the packs installed beside it. The README describes `orchestrate`, the former
-bundled roles, and `/plan` as moved to an optional roles pack, but older
-installed versions may still bundle them. Verify with `subagents_list`,
-`/subagent list`, and your live skill list. Do not assume a role exists.
-
 ## Finding current help
 
-Read live tool descriptions first, then the installed README sections
-("Spawning Subagents", "Persistent specialists", "Interrupting a running
-subagent", "Cancelling a running subagent", "The `/worktree` Workflow",
-"Custom Agents", "Configuration"). Confirm the installed version first.
+Read live tool descriptions first, then the installed package's
+[README](../../README.md). Use the detailed references for
+[tools and lifecycle](../../docs/tools.md), [roles](../../docs/roles.md),
+[configuration](../../docs/configuration.md),
+[worktrees](../../docs/worktree-subagents.md), and
+[troubleshooting](../../docs/troubleshooting.md).

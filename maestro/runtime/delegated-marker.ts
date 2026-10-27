@@ -1,12 +1,7 @@
 import {
-	judgeProcessIdentity,
-	linuxProcessProbe,
-	type PiProcessIdentity,
-	type ProcessIdentityProbe,
-	type ProcessIdentityState,
-} from "../adapters/pi/process-identity.ts";
-import {
+	readPaneAgentSession,
 	reportPaneToken,
+	type PaneAgentSessionRead,
 	type PaneTokenOutcome,
 	type PaneTokenWrite,
 } from "../surfaces/herdr/herdr-socket.ts";
@@ -24,14 +19,25 @@ export const DELEGATED_MARKER_TTL_MS = 15_000;
  * 1s fallback polling. Both leave several renewals inside one TTL.
  */
 export const DELEGATED_MARKER_RENEW_MS = 4_000;
-/** Consecutive failed writes before a marker stops trying; its TTL ends it. */
+/**
+ * Consecutive failed renewal reads or writes before a live marker stops; its
+ * TTL ends it. Discovery instead retries until its window ends.
+ */
 export const DELEGATED_MARKER_MAX_FAILURES = 3;
+/** How long a new marker waits for Herdr to report the child's session. */
+export const DELEGATED_MARKER_DISCOVERY_MS = 15_000;
+export const DELEGATED_MARKER_DISCOVERY_POLL_MS = 250;
 
 export type MarkerWriter = (write: {
 	paneId: string;
 	seq: number;
 	live: boolean;
 }) => Promise<PaneTokenOutcome>;
+
+/** The agent session Herdr currently stores for a pane. */
+export type MarkerSessionReader = (
+	paneId: string,
+) => Promise<PaneAgentSessionRead>;
 
 export function herdrMarkerWriter(socketPath: string): MarkerWriter {
 	return ({ paneId, seq, live }) => {
@@ -50,10 +56,21 @@ export function herdrMarkerWriter(socketPath: string): MarkerWriter {
 	};
 }
 
+export function herdrMarkerSessionReader(
+	socketPath: string,
+): MarkerSessionReader {
+	return (paneId) => readPaneAgentSession(socketPath, paneId);
+}
+
 type MarkerState =
 	| { kind: "pending" }
-	| { kind: "live"; identity: PiProcessIdentity; lastSentAt: number }
+	| { kind: "live"; lastSentAt: number }
 	| { kind: "retired" };
+
+function unrefSleep(ms: number): Promise<void> {
+	// Discovery must never hold the parent process open.
+	return new Promise((resolve) => setTimeout(resolve, ms).unref());
+}
 
 /**
  * This parent process's marker writes. Every pane shares one sequence that
@@ -62,37 +79,29 @@ type MarkerState =
  */
 export class DelegatedMarkers {
 	readonly write: MarkerWriter;
+	readonly readSession: MarkerSessionReader;
 	readonly now: () => number;
-	private readonly probe: ProcessIdentityProbe;
+	readonly sleep: (ms: number) => Promise<void>;
 	private lastSeq = 0;
 
 	constructor(options: {
 		write: MarkerWriter;
-		probe?: ProcessIdentityProbe;
+		readSession: MarkerSessionReader;
 		now?: () => number;
+		sleep?: (ms: number) => Promise<void>;
 	}) {
 		this.write = options.write;
-		this.probe = options.probe ?? linuxProcessProbe;
+		this.readSession = options.readSession;
 		this.now = options.now ?? Date.now;
+		this.sleep = options.sleep ?? unrefSleep;
 	}
 
 	/**
-	 * A marker for one launched child. It publishes only after the child's
-	 * own process identity is verified; without one it never writes.
+	 * A marker for one launched child. It publishes only once Herdr reports
+	 * the child's own session file for its pane; until then it never writes.
 	 */
-	attach(child: {
-		surface: string;
-		processIdentityCapture?: Promise<PiProcessIdentity | undefined>;
-	}): DelegatedMarker {
-		return new DelegatedMarker(
-			this,
-			child.surface,
-			child.processIdentityCapture,
-		);
-	}
-
-	judge(identity: PiProcessIdentity): ProcessIdentityState {
-		return judgeProcessIdentity(identity, this.probe);
+	attach(child: { surface: string; sessionFile: string }): DelegatedMarker {
+		return new DelegatedMarker(this, child.surface, child.sessionFile);
 	}
 
 	nextSeq(): number {
@@ -103,43 +112,40 @@ export class DelegatedMarkers {
 
 /**
  * One child's marker. Writes are serialized: at most one renewal is queued or
- * in flight, followed by at most one clear. Renewal continues only while the
- * launch-verified process identity is alive, so a later process in the same
- * pane never inherits it.
+ * in flight, followed by at most one clear. Renewal continues only while
+ * Herdr reports the child's session file for the pane. Herdr drops that
+ * session when the child exits or another agent takes the pane, so a later
+ * occupant never inherits the marker's renewal.
  */
 export class DelegatedMarker {
 	readonly paneId: string;
+	readonly sessionFile: string;
 	private readonly owner: DelegatedMarkers;
 	private state: MarkerState = { kind: "pending" };
 	private sentLive = false;
-	private liveQueued = false;
+	private renewalQueued = false;
 	private failures = 0;
 	private queue: Promise<void> = Promise.resolve();
+	private readonly discovery: Promise<void>;
 
-	constructor(
-		owner: DelegatedMarkers,
-		paneId: string,
-		capture: Promise<PiProcessIdentity | undefined> | undefined,
-	) {
+	constructor(owner: DelegatedMarkers, paneId: string, sessionFile: string) {
 		this.owner = owner;
 		this.paneId = paneId;
-		if (!capture) {
-			this.state = { kind: "retired" };
-			return;
-		}
-		void capture.then(
-			(identity) => this.start(identity),
-			() => this.start(undefined),
-		);
+		this.sessionFile = sessionFile;
+		this.discovery = this.discover();
 	}
 
 	get kind(): MarkerState["kind"] {
 		return this.state.kind;
 	}
 
-	/** Resolves when every write queued so far has settled. */
-	settled(): Promise<void> {
-		return this.queue;
+	/** Resolves once discovery ends and every write queued by then settles. */
+	async settled(): Promise<void> {
+		await this.discovery;
+		for (let seen: Promise<void> | undefined; seen !== this.queue; ) {
+			seen = this.queue;
+			await seen;
+		}
 	}
 
 	/** Called on each supervision observation; renews at most every 4s. */
@@ -148,43 +154,79 @@ export class DelegatedMarker {
 		const at = this.owner.now();
 		if (
 			state.kind !== "live" ||
-			this.liveQueued ||
+			this.renewalQueued ||
 			at - state.lastSentAt < DELEGATED_MARKER_RENEW_MS
 		)
 			return;
-		if (this.owner.judge(state.identity).kind !== "alive") {
-			this.retire();
-			return;
-		}
 		state.lastSentAt = at;
-		this.queueWrite(true);
+		this.renewalQueued = true;
+		this.queue = this.queue.then(() => this.renewal());
 	}
 
 	/** Idempotent. Clears the token if any live write may have reached Herdr. */
 	retire(): void {
 		if (this.state.kind === "retired") return;
 		this.state = { kind: "retired" };
-		if (this.sentLive) this.queueWrite(false);
+		if (this.sentLive) this.queue = this.queue.then(() => this.send(false));
 	}
 
-	private start(identity: PiProcessIdentity | undefined): void {
-		if (this.state.kind !== "pending") return;
-		if (!identity || this.owner.judge(identity).kind !== "alive") {
-			this.state = { kind: "retired" };
-			return;
+	private async discover(): Promise<void> {
+		const deadline = this.owner.now() + DELEGATED_MARKER_DISCOVERY_MS;
+		for (;;) {
+			if (this.state.kind !== "pending") return;
+			const read = await this.read();
+			if (this.state.kind !== "pending") return;
+			if (this.owns(read)) {
+				this.state = { kind: "live", lastSentAt: this.owner.now() };
+				this.queue = this.queue.then(() => this.send(true));
+				return;
+			}
+			if (read.kind === "pane-missing" || this.owner.now() >= deadline) {
+				this.state = { kind: "retired" };
+				return;
+			}
+			await this.owner.sleep(DELEGATED_MARKER_DISCOVERY_POLL_MS);
 		}
-		this.state = { kind: "live", identity, lastSentAt: this.owner.now() };
-		this.queueWrite(true);
 	}
 
-	private queueWrite(live: boolean): void {
-		if (live) this.liveQueued = true;
-		this.queue = this.queue.then(() => this.send(live));
+	private async renewal(): Promise<void> {
+		// The guard holds until this renewal's read and write settle, so a slow
+		// renewal never lets another queue behind it.
+		try {
+			// A renewal queued before retirement is dropped, never sent after it.
+			if (this.state.kind !== "live") return;
+			const read = await this.read();
+			if (this.state.kind !== "live") return;
+			if (this.owns(read)) await this.send(true);
+			else if (read.kind === "pane-missing") this.state = { kind: "retired" };
+			else if (read.kind === "failed") this.fail();
+			// No session or another one: the child exited or the pane was reused.
+			else this.retire();
+		} finally {
+			this.renewalQueued = false;
+		}
+	}
+
+	private owns(read: PaneAgentSessionRead): boolean {
+		return read.kind === "session" && read.path === this.sessionFile;
+	}
+
+	private async read(): Promise<PaneAgentSessionRead> {
+		try {
+			return await this.owner.readSession(this.paneId);
+		} catch (error) {
+			return {
+				kind: "failed",
+				reason: error instanceof Error ? error.message : String(error),
+			};
+		}
+	}
+
+	private fail(): void {
+		if (++this.failures >= DELEGATED_MARKER_MAX_FAILURES) this.retire();
 	}
 
 	private async send(live: boolean): Promise<void> {
-		if (live) this.liveQueued = false;
-		// A renewal queued before retirement is dropped, never sent after it.
 		if (live && this.state.kind !== "live") return;
 		if (live) this.sentLive = true;
 		let outcome: PaneTokenOutcome;
@@ -201,6 +243,6 @@ export class DelegatedMarker {
 		if (!live || this.state.kind !== "live") return;
 		if (outcome === "answered") this.failures = 0;
 		else if (outcome === "pane-missing") this.state = { kind: "retired" };
-		else if (++this.failures >= DELEGATED_MARKER_MAX_FAILURES) this.retire();
+		else this.fail();
 	}
 }

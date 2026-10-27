@@ -1,33 +1,31 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+	DELEGATED_MARKER_DISCOVERY_MS,
+	DELEGATED_MARKER_DISCOVERY_POLL_MS,
 	DELEGATED_MARKER_RENEW_MS,
 	DELEGATED_MARKER_TTL_MS,
 	DelegatedMarkers,
+	herdrMarkerSessionReader,
 	herdrMarkerWriter,
+	type MarkerSessionReader,
 	type MarkerWriter,
 } from "../../maestro/runtime/delegated-marker.ts";
 import { RECONCILE_INTERVAL_MS } from "../../maestro/core/supervision.ts";
 import type {
-	PiProcessIdentity,
-	ProcessIdentityProbe,
-} from "../../maestro/adapters/pi/process-identity.ts";
-import type { PaneTokenOutcome } from "../../maestro/surfaces/herdr/herdr-socket.ts";
+	PaneAgentSessionRead,
+	PaneTokenOutcome,
+} from "../../maestro/surfaces/herdr/herdr-socket.ts";
 import { replyResult, withFakeHerdrSocket } from "../fake-herdr-socket.ts";
 
-const identity: PiProcessIdentity = {
-	pid: 4242,
-	startTime: "100",
-	bootId: "boot",
-	pidNamespace: "pid:[1]",
+const SESSION = "/home/u/.pi/agent/sessions/child.jsonl";
+const PANE = "w1:p2";
+
+const own: PaneAgentSessionRead = { kind: "session", path: SESSION };
+const other: PaneAgentSessionRead = {
+	kind: "session",
+	path: "/home/u/.pi/agent/sessions/other.jsonl",
 };
-
-type ProcessFact = "alive" | "exited" | "replaced" | "unreadable";
-
-/** What the fake /proc reports for the child's PID. */
-interface ChildProcess {
-	fact: ProcessFact;
-}
 
 interface PendingWrite {
 	paneId: string;
@@ -36,91 +34,138 @@ interface PendingWrite {
 	settle(outcome: PaneTokenOutcome): void;
 }
 
-function harness() {
+/**
+ * A fake Herdr pane: `session` is what `pane.get` reports for it now.
+ * Discovery polls advance the fake clock at once, or, when `gated`, only as
+ * `poll()` releases them one at a time.
+ */
+function harness(initial: PaneAgentSessionRead = own, gated = false) {
 	const clock = { now: 1_000_000 };
-	const child: ChildProcess = { fact: "alive" };
-	const probe: ProcessIdentityProbe = {
-		host: () => ({ bootId: "boot", pidNamespace: "pid:[1]" }),
-		stat(pid) {
-			assert.equal(pid, identity.pid);
-			if (child.fact === "unreadable") throw new Error("EACCES");
-			if (child.fact === "exited") return undefined;
-			return {
-				state: "S",
-				ppid: 1,
-				startTime: child.fact === "replaced" ? "999" : identity.startTime,
-			};
-		},
-		terminate() {
-			throw new Error("markers never signal");
-		},
-	};
+	const pane = { session: initial };
+	const reads: string[] = [];
+	const sleeps: number[] = [];
+	const waiting: Array<() => void> = [];
 	const writes: PendingWrite[] = [];
 	const write: MarkerWriter = (request) =>
 		new Promise((settle) => writes.push({ ...request, settle }));
+	const readSession: MarkerSessionReader = async (paneId) => {
+		reads.push(paneId);
+		return pane.session;
+	};
 	const markers = new DelegatedMarkers({
 		write,
-		probe,
+		readSession,
 		now: () => clock.now,
+		sleep: async (ms) => {
+			sleeps.push(ms);
+			if (gated) await new Promise<void>((resolve) => waiting.push(resolve));
+			clock.now += ms;
+		},
 	});
-	return { clock, child, writes, markers };
+	const poll = async () => {
+		await flush();
+		waiting.shift()?.();
+		await flush();
+	};
+	return { clock, pane, reads, sleeps, writes, markers, poll };
 }
 
-const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+const flush = async () => {
+	for (let i = 0; i < 5; i++)
+		await new Promise<void>((resolve) => setImmediate(resolve));
+};
 
 async function liveMarker(h: ReturnType<typeof harness>) {
-	const marker = h.markers.attach({
-		surface: "w1:p2",
-		processIdentityCapture: Promise.resolve(identity),
-	});
+	const marker = h.markers.attach({ surface: PANE, sessionFile: SESSION });
 	await flush();
+	assert.equal(marker.kind, "live");
 	return marker;
 }
 
 describe("delegated marker", () => {
-	it("never writes without a verified, live identity", async () => {
-		const h = harness();
-		const uncaptured = h.markers.attach({ surface: "w1:p1" });
-		const failed = h.markers.attach({
-			surface: "w1:p2",
-			processIdentityCapture: Promise.resolve(undefined),
-		});
-		const rejected = h.markers.attach({
-			surface: "w1:p3",
-			processIdentityCapture: Promise.reject(new Error("capture failed")),
-		});
-		h.child.fact = "exited";
-		const dead = h.markers.attach({
-			surface: "w1:p4",
-			processIdentityCapture: Promise.resolve(identity),
-		});
+	it("publishes once Herdr reports the child's own session for its pane", async () => {
+		const h = harness({ kind: "none" }, true);
+		const marker = h.markers.attach({ surface: PANE, sessionFile: SESSION });
 		await flush();
-		h.clock.now += DELEGATED_MARKER_RENEW_MS * 2;
-		for (const marker of [uncaptured, failed, rejected, dead]) {
+		h.pane.session = other;
+		await h.poll();
+		assert.equal(marker.kind, "pending");
+		h.pane.session = own;
+		await h.poll();
+		assert.equal(marker.kind, "live");
+		assert.deepEqual(h.reads, [PANE, PANE, PANE]);
+		assert.ok(
+			h.sleeps.every((ms) => ms === DELEGATED_MARKER_DISCOVERY_POLL_MS),
+		);
+		assert.deepEqual(
+			h.writes.map(({ paneId, live }) => ({ paneId, live })),
+			[{ paneId: PANE, live: true }],
+		);
+	});
+
+	for (const [label, session] of [
+		["no session", { kind: "none" }],
+		["another session", other],
+		["an id-only session", { kind: "session" }],
+		["only failed reads", { kind: "failed", reason: "timeout" }],
+	] as const)
+		it(`never writes when Herdr reports ${label} for the whole discovery window`, async () => {
+			const h = harness(session);
+			const marker = h.markers.attach({ surface: PANE, sessionFile: SESSION });
+			await marker.settled();
+			assert.equal(marker.kind, "retired");
+			assert.ok(
+				h.sleeps.reduce((sum, ms) => sum + ms, 0) >=
+					DELEGATED_MARKER_DISCOVERY_MS,
+			);
 			marker.renew();
 			marker.retire();
-			assert.equal(marker.kind, "retired");
-		}
-		await flush();
+			await flush();
+			assert.deepEqual(h.writes, []);
+		});
+
+	it("stops discovering without a write once the pane is missing", async () => {
+		const h = harness({ kind: "pane-missing" });
+		const marker = h.markers.attach({ surface: PANE, sessionFile: SESSION });
+		await marker.settled();
+		assert.equal(marker.kind, "retired");
+		assert.equal(h.reads.length, 1);
 		assert.deepEqual(h.writes, []);
 	});
 
-	it("publishes after verification and renews at most every 4s while alive", async () => {
+	it("retiring before the session appears writes nothing", async () => {
+		const h = harness({ kind: "none" });
+		const marker = h.markers.attach({ surface: PANE, sessionFile: SESSION });
+		marker.retire();
+		h.pane.session = own;
+		await marker.settled();
+		assert.equal(marker.kind, "retired");
+		assert.deepEqual(h.writes, []);
+	});
+
+	it("renews at most every 4s, each time only after Herdr still reports the session", async () => {
 		const h = harness();
 		const marker = await liveMarker(h);
 		assert.deepEqual(
 			h.writes.map(({ paneId, seq, live }) => ({ paneId, seq, live })),
-			[{ paneId: "w1:p2", seq: 1_000_000_000, live: true }],
+			[{ paneId: PANE, seq: 1_000_000_000, live: true }],
 		);
 		h.writes[0].settle("answered");
+		const readsAfterStart = h.reads.length;
 		await flush();
 		h.clock.now += DELEGATED_MARKER_RENEW_MS - 1;
 		marker.renew();
 		await flush();
 		assert.equal(h.writes.length, 1);
+		assert.equal(
+			h.reads.length,
+			readsAfterStart,
+			"no read inside the interval",
+		);
 		h.clock.now += 1;
 		marker.renew();
 		await flush();
+		assert.equal(h.reads.length, readsAfterStart + 1);
 		assert.equal(h.writes.length, 2);
 		assert.ok(h.writes[1].live && h.writes[1].seq > h.writes[0].seq);
 	});
@@ -141,13 +186,41 @@ describe("delegated marker", () => {
 		assert.equal(h.writes.length, 2);
 	});
 
-	for (const fact of ["exited", "replaced", "unreadable"] as const)
-		it(`stops renewing and clears once the original process is ${fact}`, async () => {
+	it("never queues a renewal behind a stalled renewal", async () => {
+		const h = harness();
+		const marker = await liveMarker(h);
+		h.writes[0].settle("answered");
+		await flush();
+		h.clock.now += DELEGATED_MARKER_RENEW_MS;
+		marker.renew();
+		await flush();
+		assert.equal(h.writes.length, 2, "the renewal's write is in flight");
+		const reads = h.reads.length;
+		for (let i = 0; i < 3; i++) {
+			h.clock.now += DELEGATED_MARKER_RENEW_MS * 2;
+			marker.renew();
+			await flush();
+		}
+		assert.equal(h.reads.length, reads, "no read while a renewal is in flight");
+		h.writes[1].settle("answered");
+		await flush();
+		assert.equal(h.writes.length, 2, "no catch-up renewal ran");
+		marker.renew();
+		await flush();
+		assert.equal(h.writes.length, 3, "the next observation renews again");
+	});
+
+	for (const [label, session] of [
+		["no session (the child exited)", { kind: "none" }],
+		["another agent's session (the pane was reused)", other],
+		["an id-only session", { kind: "session" }],
+	] as const)
+		it(`stops renewing and clears once Herdr reports ${label}`, async () => {
 			const h = harness();
 			const marker = await liveMarker(h);
 			h.writes[0].settle("answered");
 			await flush();
-			h.child.fact = fact;
+			h.pane.session = session;
 			h.clock.now += DELEGATED_MARKER_RENEW_MS;
 			marker.renew();
 			await flush();
@@ -156,13 +229,80 @@ describe("delegated marker", () => {
 				h.writes.map(({ live }) => live),
 				[true, false],
 			);
-			h.child.fact = "alive";
+			h.pane.session = own;
 			h.clock.now += DELEGATED_MARKER_RENEW_MS;
 			marker.renew();
 			h.writes[1].settle("answered");
 			await flush();
-			assert.equal(h.writes.length, 2);
+			assert.equal(h.writes.length, 2, "a retired marker never revives");
 		});
+
+	it("retires without a clear when a renewal finds the pane missing", async () => {
+		const h = harness();
+		const marker = await liveMarker(h);
+		h.writes[0].settle("answered");
+		await flush();
+		h.pane.session = { kind: "pane-missing" };
+		h.clock.now += DELEGATED_MARKER_RENEW_MS;
+		marker.renew();
+		await flush();
+		assert.equal(marker.kind, "retired");
+		marker.retire();
+		await flush();
+		assert.equal(h.writes.length, 1);
+	});
+
+	it("skips a renewal it cannot read and stops after three failed reads", async () => {
+		const h = harness();
+		const marker = await liveMarker(h);
+		h.writes[0].settle("answered");
+		await flush();
+		h.pane.session = { kind: "failed", reason: "timeout" };
+		for (let attempt = 0; attempt < 3; attempt++) {
+			assert.equal(marker.kind, "live");
+			h.clock.now += DELEGATED_MARKER_RENEW_MS;
+			marker.renew();
+			await flush();
+		}
+		assert.equal(marker.kind, "retired");
+		assert.deepEqual(
+			h.writes.map(({ live }) => live),
+			[true, false],
+		);
+	});
+
+	it("counts a throwing reader as a failed read", async () => {
+		const clock = { now: 1_000_000 };
+		let reads = 0;
+		const writes: boolean[] = [];
+		const markers = new DelegatedMarkers({
+			write: async ({ live }) => {
+				writes.push(live);
+				return "answered";
+			},
+			readSession: async () => {
+				if (++reads > 1) throw new Error("socket exploded");
+				return own;
+			},
+			now: () => clock.now,
+		});
+		const marker = markers.attach({ surface: PANE, sessionFile: SESSION });
+		await marker.settled();
+		assert.equal(marker.kind, "live");
+		for (let attempt = 0; attempt < 3; attempt++) {
+			assert.equal(
+				marker.kind,
+				"live",
+				`still live before throw ${attempt + 1}`,
+			);
+			clock.now += DELEGATED_MARKER_RENEW_MS;
+			marker.renew();
+			await marker.settled();
+		}
+		assert.equal(reads, 4, "one discovery read and three throwing renewals");
+		assert.equal(marker.kind, "retired");
+		assert.deepEqual(writes, [true, false]);
+	});
 
 	it("orders the clear after an in-flight write and ignores that write's late result", async () => {
 		const h = harness();
@@ -201,22 +341,7 @@ describe("delegated marker", () => {
 		);
 	});
 
-	it("retiring before the identity is verified writes nothing", async () => {
-		const h = harness();
-		let resolve!: (value: PiProcessIdentity) => void;
-		const marker = h.markers.attach({
-			surface: "w1:p2",
-			processIdentityCapture: new Promise((r) => {
-				resolve = r;
-			}),
-		});
-		marker.retire();
-		resolve(identity);
-		await flush();
-		assert.deepEqual(h.writes, []);
-	});
-
-	it("retires without a clear when Herdr reports the pane missing", async () => {
+	it("retires without a clear when Herdr reports the pane missing to a write", async () => {
 		const h = harness();
 		const marker = await liveMarker(h);
 		h.writes[0].settle("pane-missing");
@@ -277,17 +402,9 @@ describe("delegated marker", () => {
 				calls++;
 				throw new Error("socket exploded");
 			},
-			probe: {
-				host: () => ({ bootId: "boot", pidNamespace: "pid:[1]" }),
-				stat: () => ({ state: "S", ppid: 1, startTime: "100" }),
-				terminate() {},
-			},
+			readSession: async () => own,
 		});
-		const marker = markers.attach({
-			surface: "w1:p2",
-			processIdentityCapture: Promise.resolve(identity),
-		});
-		await flush();
+		const marker = markers.attach({ surface: PANE, sessionFile: SESSION });
 		await marker.settled();
 		assert.equal(calls, 1);
 		assert.equal(marker.kind, "live");
@@ -322,30 +439,30 @@ describe("delegated marker", () => {
 	});
 });
 
-describe("Herdr marker writer", () => {
+describe("Herdr marker transport", () => {
 	it("writes the exact marker contract with a TTL and clears without one", () =>
 		withFakeHerdrSocket(replyResult({ type: "ok" }), async (path, requests) => {
 			const write = herdrMarkerWriter(path);
 			assert.equal(
-				await write({ paneId: "w1:p2", seq: 5, live: true }),
+				await write({ paneId: PANE, seq: 5, live: true }),
 				"answered",
 			);
 			assert.equal(
-				await write({ paneId: "w1:p2", seq: 6, live: false }),
+				await write({ paneId: PANE, seq: 6, live: false }),
 				"answered",
 			);
 			assert.deepEqual(
 				requests.map(({ params }) => params),
 				[
 					{
-						pane_id: "w1:p2",
+						pane_id: PANE,
 						source: "pi-herdr-agents",
 						seq: 5,
 						tokens: { piha_delegated_v1: "live" },
 						ttl_ms: 15_000,
 					},
 					{
-						pane_id: "w1:p2",
+						pane_id: PANE,
 						source: "pi-herdr-agents",
 						seq: 6,
 						tokens: { piha_delegated_v1: null },
@@ -353,4 +470,19 @@ describe("Herdr marker writer", () => {
 				],
 			);
 		}));
+
+	it("reads the pane's session through pane.get", () =>
+		withFakeHerdrSocket(
+			replyResult({
+				type: "pane_info",
+				pane: {
+					pane_id: PANE,
+					agent_session: { agent: "pi", kind: "path", value: SESSION },
+				},
+			}),
+			async (path, requests) => {
+				assert.deepEqual(await herdrMarkerSessionReader(path)(PANE), own);
+				assert.equal(requests[0].method, "pane.get");
+			},
+		));
 });

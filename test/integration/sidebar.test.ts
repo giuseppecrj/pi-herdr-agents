@@ -2,11 +2,21 @@
  * The sidebar plugin and the extension's marker writer against real,
  * isolated Herdr servers. A second server runs a real client attached to the
  * first, so assertions read the rendered Agents view, not `agent.list`.
+ * Session evidence comes from real Pi processes running Herdr's own Pi
+ * integration, installed into the lab's HOME.
  * Nothing here talks to the caller's Herdr server.
  */
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	readlinkSync,
+	realpathSync,
+	writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
@@ -22,13 +32,13 @@ import {
 import {
 	DELEGATED_MARKER_RENEW_MS,
 	DelegatedMarkers,
+	herdrMarkerSessionReader,
 	herdrMarkerWriter,
+	type MarkerSessionReader,
 } from "../../maestro/runtime/delegated-marker.ts";
+import { linuxProcessProbe } from "../../maestro/adapters/pi/process-identity.ts";
 import {
-	linuxProcessProbe,
-	type PiProcessIdentity,
-} from "../../maestro/adapters/pi/process-identity.ts";
-import {
+	isFiniteNumber,
 	isRecord,
 	isString,
 	type JsonObject,
@@ -78,12 +88,40 @@ socket.on("data", () => {
 setInterval(() => {}, 1 << 30);
 `;
 
-const supported = HERDR_BIN !== "" && process.platform === "linux";
+/** A real Pi binary, not a version-manager shim the lab PATH cannot run. */
+const PI_BIN = (() => {
+	const found =
+		process.env.PI_BIN ??
+		execFileSync("sh", ["-c", "command -v pi || true"], {
+			encoding: "utf8",
+		}).trim();
+	try {
+		return found ? realpathSync(found) : "";
+	} catch {
+		return "";
+	}
+})();
+
+// The lab confirms server ownership through /proc before it signals anything.
+const supported =
+	HERDR_BIN !== "" && PI_BIN !== "" && process.platform === "linux";
 
 interface Occupant {
 	pid: number;
 	pane: string;
 }
+
+/** A real Pi child, pinned by its start time so cleanup never signals a reused PID. */
+interface PiChild {
+	pid: number;
+	startTime: string;
+	sessionFile: string;
+}
+
+/** Session evidence for marker tests that are not about sessions. */
+const reportsOwnSession =
+	(sessionFile: (pane: string) => string): MarkerSessionReader =>
+	async (pane) => ({ kind: "session", path: sessionFile(pane) });
 
 function field(value: JsonObject, key: string): JsonObject {
 	const child = value[key];
@@ -98,7 +136,7 @@ function text(value: JsonObject, key: string): string {
 }
 
 describe("sidebar plugin on isolated Herdr", {
-	skip: supported ? false : "needs Herdr and Linux /proc",
+	skip: supported ? false : "needs Herdr, Pi, and Linux /proc",
 	timeout: 240_000,
 }, () => {
 	let lab: HerdrLabRoot;
@@ -108,6 +146,7 @@ describe("sidebar plugin on isolated Herdr", {
 	let workspace = "";
 	const panes = new Map<string, string>();
 	const occupants: Occupant[] = [];
+	const children: PiChild[] = [];
 	let keepAlive: ReturnType<typeof setInterval>;
 	let rawSeq = 1;
 
@@ -146,14 +185,73 @@ describe("sidebar plugin on isolated Herdr", {
 		assert.equal(ownsOccupant(occupant.pid), false);
 	}
 
-	function identityOf(occupant: Occupant): PiProcessIdentity {
-		const stat = linuxProcessProbe.stat(occupant.pid);
+	/** The session Herdr stores for a pane, as the marker reads it. */
+	async function paneSession(pane: string): Promise<string | undefined> {
+		const info = field(await target.ok("pane.get", { pane_id: pane }), "pane");
+		const session = info.agent_session;
+		return isRecord(session) && isString(session.value)
+			? session.value
+			: undefined;
+	}
+
+	async function waitForSession(
+		pane: string,
+		expected: string | undefined,
+		timeoutMs = 15_000,
+	) {
+		const deadline = Date.now() + timeoutMs;
+		let actual = await paneSession(pane);
+		while (actual !== expected && Date.now() < deadline) {
+			await delay(100);
+			actual = await paneSession(pane);
+		}
+		assert.equal(actual, expected, `agent session on ${pane}`);
+	}
+
+	/** Starts a real Pi child and waits until Herdr reports its session. */
+	async function startPi(pane: string, name: string): Promise<PiChild> {
+		const sessionFile = join(lab.root, `${name}.jsonl`);
+		target.cli([
+			"pane",
+			"run",
+			pane,
+			`${shellQuote(PI_BIN)} --session ${shellQuote(sessionFile)}`,
+		]);
+		await waitForSession(pane, sessionFile);
+		const info = field(
+			await target.ok("pane.process_info", { pane_id: pane }),
+			"process_info",
+		);
+		const processes = info.foreground_processes;
+		const pi = Array.isArray(processes)
+			? processes.find((entry) => isRecord(entry) && entry.name === "pi")
+			: undefined;
+		assert.ok(isRecord(pi) && isFiniteNumber(pi.pid), "no Pi process");
+		const stat = linuxProcessProbe.stat(pi.pid);
 		assert.ok(stat);
-		return {
-			pid: occupant.pid,
-			startTime: stat.startTime,
-			...linuxProcessProbe.host(),
-		};
+		const child = { pid: pi.pid, startTime: stat.startTime, sessionFile };
+		children.push(child);
+		return child;
+	}
+
+	/** The same process, still running in the lab's directory. Pi rewrites its argv. */
+	function ownsPi(child: PiChild): boolean {
+		try {
+			const stat = linuxProcessProbe.stat(child.pid);
+			return (
+				stat?.startTime === child.startTime &&
+				stat.state !== "Z" &&
+				readlinkSync(`/proc/${child.pid}/cwd`) === realpathSync(lab.root)
+			);
+		} catch {
+			return false;
+		}
+	}
+
+	async function killPi(child: PiChild) {
+		if (ownsPi(child)) process.kill(child.pid, "SIGKILL");
+		for (let i = 0; i < 50 && ownsPi(child); i++) await delay(50);
+		assert.equal(ownsPi(child), false);
 	}
 
 	/** A token written by the fixture, not the extension; no expiry. */
@@ -243,6 +341,14 @@ describe("sidebar plugin on isolated Herdr", {
 		keepAlive = setInterval(() => {}, 1_000);
 		lab = createLabRoot(CONFIG);
 		writeFileSync(join(lab.root, "occupant.mjs"), OCCUPANT);
+		// Herdr's own Pi integration reports each Pi's session file for its pane.
+		mkdirSync(join(lab.home, ".pi", "agent", "extensions"), {
+			recursive: true,
+		});
+		execFileSync(HERDR_BIN, ["integration", "install", "pi"], {
+			env: lab.env,
+			encoding: "utf8",
+		});
 		target = await startLabServer(lab, "sidebar-target");
 		const created = await target.ok("workspace.create", {
 			cwd: lab.root,
@@ -304,6 +410,8 @@ describe("sidebar plugin on isolated Herdr", {
 		try {
 			for (const occupant of occupants)
 				if (ownsOccupant(occupant.pid)) process.kill(occupant.pid, "SIGTERM");
+			for (const child of children)
+				if (ownsPi(child)) process.kill(child.pid, "SIGKILL");
 			if (viewer) await stopLabServer(lab, viewer);
 			if (target) await stopLabServer(lab, target);
 			if (lab) removeLabRoot(lab);
@@ -336,14 +444,14 @@ describe("sidebar plugin on isolated Herdr", {
 
 	it("Focus hides only live-marked idle or working children, and All restores them", async () => {
 		const live = panes.get("child-live") ?? "";
+		// This test is about the projection; the real-Pi test below covers sessions.
 		const markers = new DelegatedMarkers({
 			write: herdrMarkerWriter(target.socket),
+			readSession: reportsOwnSession(() => "child-live.jsonl"),
 		});
-		const occupant = occupants.find((entry) => entry.pane === live);
-		assert.ok(occupant);
 		const marker = markers.attach({
 			surface: live,
-			processIdentityCapture: Promise.resolve(identityOf(occupant)),
+			sessionFile: "child-live.jsonl",
 		});
 		await waitForToken(live, "live");
 
@@ -402,27 +510,33 @@ describe("sidebar plugin on isolated Herdr", {
 		}
 	});
 
-	it("stops marking once the child exits, and a later occupant is never hidden", async () => {
+	it("stops marking once the child's Pi exits or is suspended, and a later occupant is never hidden", async () => {
 		const live = panes.get("child-live") ?? "";
+		const occupant = occupants.find((entry) => entry.pane === live);
+		assert.ok(occupant);
+		// Free the pane's shell for real Pi children.
+		await stopOccupant(occupant);
 		const clock = { now: Date.now() };
 		const markers = new DelegatedMarkers({
 			write: herdrMarkerWriter(target.socket),
+			readSession: herdrMarkerSessionReader(target.socket),
 			now: () => clock.now,
 		});
-		const occupant = occupants.find((entry) => entry.pane === live);
-		assert.ok(occupant);
+
+		const exiting = await startPi(live, "child-exits");
 		const marker = markers.attach({
 			surface: live,
-			processIdentityCapture: Promise.resolve(identityOf(occupant)),
+			sessionFile: exiting.sessionFile,
 		});
 		await waitForToken(live, "live");
 		assert.equal((await invoke("focus")).exit_code, 0);
 		await waitForRendered(
-			(lines) => header(lines) === "focus" && !shows(lines, "child-live"),
+			(lines) => header(lines) === "focus" && !shows(lines, "pi"),
 			"marked child hidden",
 		);
 
-		await stopOccupant(occupant);
+		await killPi(exiting);
+		await waitForSession(live, undefined);
 		clock.now += DELEGATED_MARKER_RENEW_MS;
 		marker.renew();
 		await marker.settled();
@@ -438,10 +552,23 @@ describe("sidebar plugin on isolated Herdr", {
 		});
 		assert.equal(await paneToken(live), undefined);
 
+		// A suspended child is still alive, but Herdr drops its session once the
+		// pane is back at its shell, so another agent there is never hidden.
+		const suspended = await startPi(live, "child-suspends");
+		const second = markers.attach({
+			surface: live,
+			sessionFile: suspended.sessionFile,
+		});
+		await waitForToken(live, "live");
+		target.cli(["pane", "send-keys", live, "ctrl+z"]);
+		await waitForSession(live, undefined);
 		await startOccupant(live, "child-reuse", "working");
 		clock.now += DELEGATED_MARKER_RENEW_MS;
 		marker.renew();
-		await marker.settled();
+		second.renew();
+		await second.settled();
+		assert.equal(second.kind, "retired");
+		assert.ok(ownsPi(suspended), "the suspended child is still alive");
 		await waitForRendered(
 			(lines) => header(lines) === "focus" && shows(lines, "child-reuse"),
 			"replacement occupant visible under Focus",
@@ -453,24 +580,22 @@ describe("sidebar plugin on isolated Herdr", {
 	it("keeps two parents' markers independent on one source", async () => {
 		const paneA = panes.get("parent-a") ?? "";
 		const paneB = panes.get("parent-b") ?? "";
-		const capture = (pane: string) => {
-			const occupant = occupants.find((entry) => entry.pane === pane);
-			assert.ok(occupant);
-			return Promise.resolve(identityOf(occupant));
-		};
+		const sessionOf = (pane: string) => `${pane}.jsonl`;
 		const parentA = new DelegatedMarkers({
 			write: herdrMarkerWriter(target.socket),
+			readSession: reportsOwnSession(sessionOf),
 		});
 		const parentB = new DelegatedMarkers({
 			write: herdrMarkerWriter(target.socket),
+			readSession: reportsOwnSession(sessionOf),
 		});
 		const markerA = parentA.attach({
 			surface: paneA,
-			processIdentityCapture: capture(paneA),
+			sessionFile: sessionOf(paneA),
 		});
 		const markerB = parentB.attach({
 			surface: paneB,
-			processIdentityCapture: capture(paneB),
+			sessionFile: sessionOf(paneB),
 		});
 		await waitForToken(paneA, "live");
 		await waitForToken(paneB, "live");

@@ -6,8 +6,16 @@ are evidence, not shipped contracts, when a later ADR supersedes them.
 
 ## Shipped contracts
 
-- [`../README.md`](../README.md) — installation, public tools, configuration,
-  lifecycle, and role authoring.
+- [`../README.md`](../README.md) — installation, everyday use, and safety.
+- [`tools.md`](tools.md) — public tools, commands, parameters, and run
+  lifecycle.
+- [`configuration.md`](configuration.md) — `config.json`, model preferences,
+  task-model init events, sidebar markers, supervision, and pane placement.
+- [`roles.md`](roles.md) — role discovery, authoring, tool access control, and
+  role packs.
+- [`troubleshooting.md`](troubleshooting.md) — completion delivery and other
+  common problems.
+- [`development.md`](development.md) — code map, CI, and local checks.
 - [`../CONTEXT.md`](../CONTEXT.md) — orchestration glossary.
 - [`worktree-subagents.md`](worktree-subagents.md) — worktree operation,
   review, recovery, and cleanup.
@@ -15,27 +23,21 @@ are evidence, not shipped contracts, when a later ADR supersedes them.
   optional Herdr sidebar plugin: installation, Focus and All, the delegated
   marker contract, and its staleness limits.
 
-The package is a pack-neutral execution host: it launches asynchronous Pi
-children in Herdr and supports managed worktrees for writing tasks, but ships no
-agent roles, planning or review workflows, or skills. Roles come from project or
-global definitions and installed role packs; workflows such as `/plan` and
-`/skill:orchestrate` belong to those packs
-([ADR-0013](adr/0013-pack-neutral-execution-host.md)). Role frontmatter tool
-allowlists are the available enforcement boundary; `read,bash` is not
-read-only. Automated package
-acceptance covers unit tests, lint, and `npm pack --dry-run`. Deterministic
-Herdr integration is a manual release gate run from inside Herdr. The manual
-supervision transport benchmark is `../test/bench/supervision-bench.mjs`; it
-uses an isolated Herdr server and writes uncommitted raw samples to
-`/tmp/issue29-bench/`.
+The package runs asynchronous Pi children in Herdr and supports managed
+worktrees for writing tasks. It ships the
+[`pi-herdr-agents` operating skill](../skills/pi-herdr-agents/SKILL.md), but no
+agent roles or planning and review workflows. Project definitions, global
+definitions, and installed role packs provide roles
+([ADR-0013](adr/0013-pack-neutral-execution-host.md)). A `read,bash` tool
+allowlist is not read-only because shell commands can change files.
+
+CI checks formatting, lint, unit tests, and package contents. Deterministic
+Herdr integration remains a local release gate.
 
 ## Architecture and code map
 
-[ADR-0012](adr/0012-adopt-maestro-seams-in-repo.md) records the accepted seams
-decision. The [migration design](superpowers/specs/2026-10-02-maestro-seams-design.md)
-is implemented in the feature branch, with local unit and deterministic
-integration gates passed and the implementation checkpoint signed. It is not
-yet a shipped contract.
+[ADR-0012](adr/0012-adopt-maestro-seams-in-repo.md) records the accepted
+architecture decision.
 
 - `../maestro/core/` — harness-neutral interfaces, domain rules, roles, and config.
 - `../maestro/adapters/pi/` — Pi harness and child protocol.
@@ -46,7 +48,7 @@ yet a shipped contract.
 - `../test/maestro/` — seam conformance and dependency-rule tests; real
   conformance runs in `../test/integration/`.
 
-See the [full code map](../README.md#code-map). Pi and Herdr remain the only
+See the [full code map](development.md#code-map). Pi and Herdr remain the only
 real implementations; in-memory fakes are conformance fixtures only.
 
 ## ADRs
@@ -68,12 +70,6 @@ real implementations; in-memory fakes are conformance fixtures only.
 | [`0013`](adr/0013-pack-neutral-execution-host.md) | Accepted | Ship a pack-neutral execution host; roles and workflows move to optional packs, and `/iterate` and `/btw` are removed. |
 | [`0014`](adr/0014-operator-cancel-terminal-intent.md) | Accepted | Operator cancel records terminal intent before owned termination: no fallback, one confirmed cancelled result, unconfirmed runs stay live. |
 | [`0015`](adr/0015-report-opened-primary-workspace.md) | Accepted | Report, and never automatically close, a primary workspace that worktree creation opened. |
-
-## Active design
-
-- `sidebar-plan.md` — local plan and audit record for the sidebar plugin and
-  its marker bridge. It is excluded from the npm package, so it has no link
-  here. It is not a shipped contract; the plugin README is.
 
 ## Historical material
 

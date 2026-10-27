@@ -6,11 +6,9 @@ The published version must be unique on npm.
 
 ## Public versioning
 
-`0.0.1` was a manual bootstrap publication that established the npm package. `0.0.2` is the first release published through the trusted GitHub Actions workflow; every later release uses trusted publishing.
-
-`3.0.0` is the pack-neutral baseline. It is a major release because it removes the bundled roles, `/plan`, `/skill:orchestrate`, `/iterate`, `/btw`, and `/btw-close`, and makes `roles.bundled` a deprecated no-op. Its hand-written breaking changes and migration notes are in the README [Release notes](README.md#release-notes) section, because `npm version` regenerates `CHANGELOG.md` and would discard hand edits there. Record later breaking-release notes in the same section.
-
-`3.1.0` is a compatible minor release. It adds the request-scoped task-model init events that let a loaded pack approve `/subagents-init` proposals; with no pack offering, the direct writer is unchanged. It was prepared from feature commit `1b6bacd0b5eecb6f83ffba1d5a5ee57a8b0fa944`. It is not published until the release workflow succeeds.
+Use semantic versioning. `CHANGELOG.md` is generated from Git history by
+`npm version`; do not put hand-written instructions there. Keep current usage
+and compatibility requirements in the README and the relevant reference guide.
 
 Do not design a release that creates a GitHub Release without a successful npm publish for a new version. The workflow publishes first, then tags and creates the GitHub Release.
 
@@ -21,7 +19,15 @@ You need:
 - Permission to manage this repository's GitHub Actions settings and npm package access for `pi-herdr-agents`
 - A clean local `main` branch
 
-Automated release gates (run by the workflow and required locally):
+The **CI** workflow (`.github/workflows/ci.yml`) runs on pushes and pull
+requests to `main`, and supports manual dispatch. Its **Checks** job runs the
+checks below plus `git diff --check`, with read-only repository permissions,
+no publishing, and cancellation of superseded CI runs. It uses the same pinned
+Node.js version as **Release**. Herdr integration remains a local gate.
+
+The separate **Release** workflow reruns the automated release gates before
+publishing; it does not depend on the CI workflow's result. These checks are
+also required locally:
 
 ```bash
 npm ci
@@ -37,7 +43,7 @@ Manual deterministic Herdr integration (required before you push a release commi
 npm run test:integration
 ```
 
-Run that suite from inside Herdr. It uses real Pi and Herdr processes with the local deterministic provider, so it needs no provider credentials or network access. `test/integration/sidebar.test.ts` also starts two disposable Herdr servers with their own HOME, configuration, sockets, and plugin registry under the system temporary directory, and removes them afterwards. It needs Linux and skips elsewhere.
+Run that suite from inside Herdr. It uses real Pi and Herdr processes with the local deterministic provider, so it needs no provider credentials or network access. `test/integration/sidebar.test.ts` also starts two disposable Herdr servers with their own HOME, configuration, sockets, and plugin registry under the system temporary directory, installs Herdr's Pi integration into that HOME, runs real `pi` processes there, and removes them afterwards. It needs Linux and a `pi` binary (`PI_BIN` overrides the one on `PATH`) and skips otherwise. `test/integration/sidebar-lifecycle.test.ts` installs the same integration into its isolated agent directory.
 
 The optional live-provider smoke test is not a release gate:
 
@@ -60,14 +66,10 @@ After the package exists on npm, steady-state releases use npm trusted publishin
    - Workflow filename: `publish.yml`
    - Allowed action: `npm publish`
 3. Confirm the release job has `permissions.id-token: write` and runs on a GitHub-hosted runner (already set in `.github/workflows/publish.yml`).
-4. Confirm the workflow uses the exactly pinned Node `26.3.0`, whose bundled npm supports trusted publishing.
+4. Confirm the workflow uses the exactly pinned Node `26.12.1`, whose bundled npm supports trusted publishing.
 5. Publish stays tokenless: `npm publish --access public --provenance`.
 
 When the repository secret `NPM_TOKEN` is absent, the publish step unsets `NODE_AUTH_TOKEN` and relies on OIDC. Once the package exists, the workflow fails if `NPM_TOKEN` is still configured, so steady-state releases cannot silently keep using the bootstrap credential. Manual dispatch runs only from `main`; other refs are rejected.
-
-### Bootstrap history
-
-The initial `0.0.1` publication established the npm package. Trusted publishing is now configured for `giuseppecrj/pi-herdr-agents` and `publish.yml`, so all later releases use OIDC only. Later version bumps use trusted publishing only. Do not add `NPM_TOKEN`: the workflow rejects it once the package exists.
 
 ## Publish a release
 

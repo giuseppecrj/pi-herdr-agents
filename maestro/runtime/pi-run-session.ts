@@ -68,8 +68,10 @@ import {
 import { loadPaneConfig, type PaneConfig } from "../core/config/pane-config.ts";
 import {
 	DelegatedMarkers,
+	herdrMarkerSessionReader,
 	herdrMarkerWriter,
 	type DelegatedMarker,
+	type MarkerSessionReader,
 	type MarkerWriter,
 } from "./delegated-marker.ts";
 import {
@@ -335,6 +337,8 @@ export interface PiRunSessionInfrastructure {
 	processProbe?: ProcessIdentityProbe;
 	/** Sidebar marker transport; defaults to this pane's Herdr socket. */
 	markerWriter?: MarkerWriter;
+	/** Sidebar marker session evidence; defaults to this pane's Herdr socket. */
+	markerSessionReader?: MarkerSessionReader;
 }
 // pi-herdr-agents extension
 export interface DefaultRunSessionOptions {
@@ -441,16 +445,21 @@ function temporarySurfaceRelease(
 
 function createDelegatedMarkers(
 	infrastructure: PiRunSessionInfrastructure | undefined,
-	probe: ProcessIdentityProbe | undefined,
 ): DelegatedMarkers | undefined {
 	// Injected infrastructure never falls back to the ambient Herdr socket.
 	if (infrastructure) {
 		const write = infrastructure.markerWriter;
-		return write ? new DelegatedMarkers({ write, probe }) : undefined;
+		const readSession = infrastructure.markerSessionReader;
+		return write && readSession
+			? new DelegatedMarkers({ write, readSession })
+			: undefined;
 	}
 	const socketPath = process.env.HERDR_SOCKET_PATH;
 	return socketPath
-		? new DelegatedMarkers({ write: herdrMarkerWriter(socketPath), probe })
+		? new DelegatedMarkers({
+				write: herdrMarkerWriter(socketPath),
+				readSession: herdrMarkerSessionReader(socketPath),
+			})
 		: undefined;
 }
 
@@ -711,10 +720,7 @@ export function createDefaultRunSession(
 	// reads this shared current binding, not the old facade's options.
 	if (adopted) resumePi = state.resumePi;
 	// Live markers and their sequence survive a reload with their runs.
-	state.markers ??= createDelegatedMarkers(
-		options.infrastructure,
-		state.infrastructure.processProbe,
-	);
+	state.markers ??= createDelegatedMarkers(options.infrastructure);
 	// Turning the setting off retires every marker now, pending ones included;
 	// a retired marker never writes live again, even if the setting returns.
 	if (!options.sidebarMarkers)
@@ -787,7 +793,6 @@ export function createDefaultRunSession(
 			parentRuntime: snapshot.parentRuntime,
 			supervision: state.infrastructure.supervision,
 			processProbe: state.infrastructure.processProbe,
-			recordProcessIdentity: enabledMarkers() !== undefined,
 			operations: launchOperations(snapshot),
 			onObservation(child, kind) {
 				const at = Date.now();

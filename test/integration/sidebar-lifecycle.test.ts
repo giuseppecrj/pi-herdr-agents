@@ -202,7 +202,7 @@ for (const backend of backends) {
 	describe(`sidebar markers [${backend}]`, {
 		skip:
 			process.platform !== "linux"
-				? "sidebar markers are Linux-only"
+				? "the fixture finds and cleans up its processes through Linux /proc"
 				: USE_TEST_PROVIDER
 					? false
 					: "needs the deterministic provider",
@@ -234,6 +234,15 @@ for (const backend of backends) {
 			canary = undefined;
 			resetProviderRequests();
 			writeSidebarSetting(true);
+			// Markers follow the sessions Herdr's own Pi integration reports, so
+			// the isolated agent home needs it like a user's does.
+			execFileSync("herdr", ["integration", "install", "pi"], {
+				env: {
+					...process.env,
+					PI_CODING_AGENT_DIR: join(env.dir, ".pi", "agent"),
+				},
+				encoding: "utf8",
+			});
 		});
 
 		afterEach(async () => {
@@ -413,7 +422,7 @@ for (const backend of backends) {
 					"the worktree child's pane",
 					30_000,
 				);
-				// Markers appear once each child's process identity is verified.
+				// Markers appear once Herdr reports each child's own session.
 				await waitFor(
 					() => {
 						const panes = listPanes();

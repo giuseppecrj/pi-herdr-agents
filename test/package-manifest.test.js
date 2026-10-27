@@ -18,6 +18,17 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const biomeConfig = JSON.parse(readFileSync(join(root, "biome.json"), "utf8"));
 const readme = readFileSync(join(root, "README.md"), "utf8");
+const guides = [
+	"docs/tools.md",
+	"docs/configuration.md",
+	"docs/roles.md",
+	"docs/troubleshooting.md",
+	"docs/development.md",
+];
+const readDoc = (path) => readFileSync(join(root, path), "utf8");
+const toolsDoc = readDoc("docs/tools.md");
+const configurationDoc = readDoc("docs/configuration.md");
+const rolesDoc = readDoc("docs/roles.md");
 const context = readFileSync(join(root, "CONTEXT.md"), "utf8");
 const normalized = (value) => value.replace(/\s+/g, " ").trim();
 const sectionBetween = (value, start, end) => {
@@ -100,6 +111,8 @@ describe("pack-neutral package contents", () => {
 			"pi-extension/subagents/index.ts",
 			"examples/role-pack/extension.ts",
 			"examples/role-pack/roles/example-reviewer.md",
+			"docs/worktree-subagents.md",
+			...guides,
 		]) {
 			assert.equal(
 				packageFiles.has(path),
@@ -213,27 +226,28 @@ describe("pack-neutral package contents", () => {
 				assert.doesNotMatch(path, /orchestrate|plan/);
 	});
 
-	it("locks fork override semantics in README", () => {
-		const readmeCompact = normalized(readme);
+	it("locks fork override semantics in the tools and roles references", () => {
 		assert.ok(
-			readmeCompact.includes(
+			normalized(toolsDoc).includes(
 				"`true` forces fork, `false` forces standalone. Omit to inherit",
 			),
-			"README fork parameter must document true/false/omit semantics",
+			"tools fork parameter must document true/false/omit semantics",
 		);
 		assert.ok(
-			readmeCompact.includes(
+			normalized(rolesDoc).includes(
 				"`fork: true` on the tool call forces `fork` mode; `fork: false` forces `standalone` mode. Omitting `fork` inherits the agent's frontmatter `session-mode`.",
 			),
-			"README session-mode section must document explicit false override",
+			"roles session-mode section must document explicit false override",
 		);
 	});
 
-	it("defines independent and ordinary review separately in README and CONTEXT", () => {
+	it("defines independent and ordinary review separately in README, guides, and CONTEXT", () => {
 		const independentClause =
 			"Cross-family independent review requires a reviewer from a different model family than the author.";
 		for (const [label, content] of [
 			["README", readme],
+			["docs/configuration.md", configurationDoc],
+			["docs/roles.md", rolesDoc],
 			["CONTEXT", context],
 		]) {
 			const compact = normalized(content);
@@ -244,32 +258,38 @@ describe("pack-neutral package contents", () => {
 			for (const clause of ordinaryReviewClauses)
 				assert.ok(compact.includes(clause), `${label} must include: ${clause}`);
 		}
-		assert.doesNotMatch(
-			readme,
-			/Independent reviewers should use/i,
-			"README must not weaken independent review to a suggestion",
-		);
-		assert.doesNotMatch(
-			readme,
-			/For review when the authoring family is known, choose an exact shortlist ID[^.]*task:review`; this is guidance/i,
-			"README must replace the unconditional task:review paragraph",
-		);
+		for (const [label, content] of [
+			["README", readme],
+			["docs/configuration.md", configurationDoc],
+			["docs/roles.md", rolesDoc],
+		]) {
+			assert.doesNotMatch(
+				content,
+				/Independent reviewers should use/i,
+				`${label} must not weaken independent review to a suggestion`,
+			);
+			assert.doesNotMatch(
+				content,
+				/For review when the authoring family is known, choose an exact shortlist ID[^.]*task:review`; this is guidance/i,
+				`${label} must replace the unconditional task:review paragraph`,
+			);
+		}
 	});
 
-	it("keeps all three README review passages aligned with the taxonomy", () => {
+	it("keeps all three reference review passages aligned with the taxonomy", () => {
 		const passages = [
 			sectionBetween(
-				readme,
+				rolesDoc,
 				"Roles use model defaults",
 				"Discovery loads definitions",
 			),
 			sectionBetween(
-				readme,
+				configurationDoc,
 				"`models.tasks` candidates are ordered exact authenticated IDs.",
 				"Run `/subagents-init",
 			),
 			sectionBetween(
-				readme,
+				configurationDoc,
 				"Shortlists do not enforce reviewer independence.",
 				"Set `persistent.maxAgents`",
 			),
@@ -278,7 +298,7 @@ describe("pack-neutral package contents", () => {
 			for (const clause of ordinaryReviewClauses)
 				assert.ok(
 					passage.includes(clause),
-					`README passage ${index + 1} must include: ${clause}`,
+					`reference passage ${index + 1} must include: ${clause}`,
 				);
 	});
 });

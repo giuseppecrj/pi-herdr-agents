@@ -93,10 +93,11 @@ describe("sidebar plugin contract", () => {
 		assert.match(manifest, /^name = "Pi Herdr Agents Sidebar"$/m);
 		assert.match(
 			manifest,
-			// Herdr rejects prerelease versions here; the tested preview reports 0.9.2.
-			/^min_herdr_version = "0\.9\.2"$/m,
+			// 0.9.0 is the first release with the agent view API the actions call.
+			/^min_herdr_version = "0\.9\.0"$/m,
 		);
-		assert.match(manifest, /^platforms = \["linux"\]$/m);
+		// Markers come from Herdr's pane sessions, not /proc; Windows is untested.
+		assert.match(manifest, /^platforms = \["linux", "macos"\]$/m);
 		assert.deepEqual(
 			[...manifest.matchAll(/^id = "([a-z]+)"$/gm)].map((match) => match[1]),
 			["focus", "all"],

@@ -131,6 +131,48 @@ export async function reportPaneToken(
 	return "failed";
 }
 
+/**
+ * The native session Herdr stores for a pane's agent. Herdr's agent
+ * integrations report it, and Herdr clears it when that agent releases the
+ * pane or exits, so it names the pane's current agent session.
+ */
+export type PaneAgentSessionRead =
+	/** `path` is absent when the agent reported a session id instead. */
+	| { kind: "session"; path?: string }
+	/** The pane exists but stores no native session reference. */
+	| { kind: "none" }
+	| { kind: "pane-missing" }
+	| { kind: "failed"; reason: string };
+
+/** One `pane.get`, reduced to the pane's stored agent session. */
+export async function readPaneAgentSession(
+	socketPath: string,
+	paneId: string,
+	options?: { timeoutMs?: number },
+): Promise<PaneAgentSessionRead> {
+	const reply = await requestHerdrSocket(
+		socketPath,
+		"pane.get",
+		{ pane_id: paneId },
+		options,
+	);
+	if (reply.kind === "failed") return reply;
+	if (reply.kind === "error")
+		return reply.code === "pane_not_found"
+			? { kind: "pane-missing" }
+			: { kind: "failed", reason: `${reply.code}: ${reply.message}` };
+	const pane = reply.result.pane;
+	if (!isRecord(pane) || pane.pane_id !== paneId)
+		return { kind: "failed", reason: `pane.get did not describe ${paneId}` };
+	const session = pane.agent_session;
+	if (session === undefined) return { kind: "none" };
+	if (!isRecord(session))
+		return { kind: "failed", reason: "pane.get agent_session is malformed" };
+	return session.kind === "path" && isNonEmptyString(session.value)
+		? { kind: "session", path: session.value }
+		: { kind: "session" };
+}
+
 /** Parses one reply line; a reply for another request id is never accepted. */
 export function parseHerdrSocketReply(
 	line: string,
