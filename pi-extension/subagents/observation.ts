@@ -98,6 +98,8 @@ type NoProgressAdvisoryEvent =
 			notify: boolean;
 	  };
 
+export type Observation = ReturnType<typeof createObservation>;
+
 /** Activity observation bound to one extension instance's runtime. */
 export function createObservation(runtime: SubagentRuntime) {
 	function observeRunningSubagent(
