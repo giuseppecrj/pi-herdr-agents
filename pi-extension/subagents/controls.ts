@@ -57,6 +57,8 @@ interface ControlDeps {
 	observeRunningSubagent: Observation["observeRunningSubagent"];
 }
 
+export type Controls = ReturnType<typeof createControls>;
+
 /** Interrupt and cancel controls bound to one extension instance. */
 export function createControls({
 	runtime,
