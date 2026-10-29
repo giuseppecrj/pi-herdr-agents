@@ -84,10 +84,13 @@ Create the version commit without a local tag:
 ```bash
 git fetch --tags --prune
 npm version patch --no-git-tag-version
-git add package.json package-lock.json CHANGELOG.md
+cp test/fixtures/tool-schema/current.json test/fixtures/tool-schema/released.json
+git add package.json package-lock.json CHANGELOG.md test/fixtures/tool-schema/released.json
 git commit -m "chore: release v$(node -p \"require('./package.json').version\")"
 git push origin main
 ```
+
+Copying `current.json` over `released.json` makes the released tool schemas the baseline the breaking-change test guards from the next release on. Run `npm run docs:tools:check` first so `current.json` matches the code.
 
 The `npm version` hook regenerates `CHANGELOG.md` with `auto-changelog`. Use `npm run changelog` to regenerate it without changing the version.
 

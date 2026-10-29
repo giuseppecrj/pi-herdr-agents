@@ -24,7 +24,7 @@ Read [`RELEASING.md`](../../../RELEASING.md) before you act. It is the canonical
 ## Create and push the release
 
 1. Run `npm version <increment> --no-git-tag-version`. This updates `package.json`, `package-lock.json`, and `CHANGELOG.md`. Do not create a local tag.
-2. Inspect the version and changelog diff. Stage only `package.json`, `package-lock.json`, and `CHANGELOG.md`.
+2. Inspect the version and changelog diff. Run `npm run docs:tools:check`, then copy `test/fixtures/tool-schema/current.json` to `test/fixtures/tool-schema/released.json`. Stage only `package.json`, `package-lock.json`, `CHANGELOG.md`, and `test/fixtures/tool-schema/released.json`.
 3. Commit with `chore: release v<version>`.
 4. Push with `git push origin main`.
 

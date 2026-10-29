@@ -39,6 +39,7 @@ Former bundled roles, `/plan`, its plan skill, and `/skill:orchestrate` now belo
 - `CONTEXT.md` — orchestration-domain glossary
 - `docs/adr/` — hard-to-reverse architectural decisions; [ADR-0012](docs/adr/0012-adopt-maestro-seams-in-repo.md) records the maestro seams decision
 - `docs/research/` — evidence and alternatives, never the shipped contract
+- `scripts/update-tool-docs.ts`, `scripts/tool-docs.ts` — regenerate `docs/tools.md` blocks and the tool-schema snapshot (`npm run docs:tools`); `test/maestro/tool-schema.test.ts` fails on a breaking change against `test/fixtures/tool-schema/released.json`
 - `test/test.ts` — unit tests for public subagent extension seams
 - `test/package-manifest.test.js` — package manifest and pack-neutral package-content contract test
 - `test/integration/` — real Herdr and Pi lifecycle tests using the deterministic provider by default; `test/integration/agents/` holds test-only role fixtures, including the multi-wave `test-coordinator`
@@ -74,7 +75,7 @@ Read [`docs/worktree-subagents.md`](docs/worktree-subagents.md) before changing 
 
 When behavior changes, update every affected surface in the same commit:
 
-- public tool parameters or lifecycle → `docs/tools.md`, plus the `README.md` summary when everyday use changes
+- public tool parameters or lifecycle → run `npm run docs:tools` to regenerate the marked blocks in `docs/tools.md` and `test/fixtures/tool-schema/current.json`, edit the prose by hand, plus the `README.md` summary when everyday use changes
 - configuration keys, model routing, or task-model init events → `docs/configuration.md`, plus the `README.md` summary when everyday use changes
 - role-pack protocol or role frontmatter → `docs/roles.md`
 - troubleshooting steps → `docs/troubleshooting.md`
@@ -96,6 +97,7 @@ For normal changes:
 
 ```bash
 npm test
+npm run docs:tools:check
 npm run format:check
 npm run lint
 npm pack --dry-run

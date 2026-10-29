@@ -48,9 +48,12 @@ Run local checks:
 npm ci
 npm run format:check
 npm test
+npm run docs:tools:check
 npm run lint
 npm pack --dry-run
 ```
+
+The public tool schemas are captured by loading the real extensions. After changing a tool name, description, or parameter, run `npm run docs:tools` to regenerate `test/fixtures/tool-schema/current.json` and the marked blocks in `docs/tools.md`, and commit the result. `test/maestro/tool-schema.test.ts` also compares the snapshot with `test/fixtures/tool-schema/released.json`, the last released contract, and fails on a change that would break an existing client: a removed or newly required property, a changed type, or a narrowed union or enum. Release copies `current.json` over `released.json`.
 
 `npm run lint` needs Node.js 22.18+ (or 22.6–22.17 with `NODE_OPTIONS=--experimental-strip-types`) because oxlint imports TypeScript directly: its configuration, `oxlint.config.ts`, and the JavaScript plugin it loads, `tools/oxlint/anti-slop/index.ts`. Without type stripping, oxlint fails before linting with `Unknown file extension ".ts"`. This is a contributor tooling requirement, not a runtime requirement for package users.
 
