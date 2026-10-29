@@ -79,6 +79,7 @@ Read [`docs/worktree-subagents.md`](docs/worktree-subagents.md) before changing 
 When behavior changes, update every affected surface in the same commit:
 
 - public tool parameters or lifecycle → run `npm run docs:tools` to regenerate the marked blocks in `docs/tools.md` and `test/fixtures/tool-schema/current.json`, edit the prose by hand, plus the `README.md` summary when everyday use changes
+- report envelope, host evidence, or tool-schema compatibility → `docs/delegation-outcome-contract.md`
 - configuration keys, model routing, or task-model init events → `docs/configuration.md`, plus the `README.md` summary when everyday use changes
 - role-pack protocol or role frontmatter → `docs/roles.md`
 - troubleshooting steps → `docs/troubleshooting.md`

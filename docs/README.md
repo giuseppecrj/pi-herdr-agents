@@ -9,6 +9,9 @@ are evidence, not shipped contracts, when a later ADR supersedes them.
 - [`../README.md`](../README.md) — installation, everyday use, and safety.
 - [`tools.md`](tools.md) — public tools, commands, parameters, and run
   lifecycle.
+- [`delegation-outcome-contract.md`](delegation-outcome-contract.md) — the
+  `delegation-outcome/v0` contract: report envelope, provenance, size bounds,
+  host evidence, tool-schema compatibility, and conformance tests.
 - [`configuration.md`](configuration.md) — `config.json`, model preferences,
   task-model init events, sidebar markers, supervision, and pane placement.
 - [`roles.md`](roles.md) — role discovery, authoring, tool access control, and
@@ -70,6 +73,7 @@ real implementations; in-memory fakes are conformance fixtures only.
 | [`0013`](adr/0013-pack-neutral-execution-host.md) | Accepted | Ship a pack-neutral execution host; roles and workflows move to optional packs, and `/iterate` and `/btw` are removed. |
 | [`0014`](adr/0014-operator-cancel-terminal-intent.md) | Accepted | Operator cancel records terminal intent before owned termination: no fallback, one confirmed cancelled result, unconfirmed runs stay live. |
 | [`0015`](adr/0015-report-opened-primary-workspace.md) | Accepted | Report, and never automatically close, a primary workspace that worktree creation opened. |
+| [`0016`](adr/0016-delegation-outcome-contract.md) | Accepted | Define a small, versioned delegation outcome contract with this package as its reference implementation. |
 
 ## Active design
 

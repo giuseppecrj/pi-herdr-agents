@@ -55,6 +55,16 @@ The parent-facing handoff of a child run's observed outcome and available
 evidence. Receiving it does not establish that the work is correct or accepted.
 _Avoid_: Wake-up signal, acceptance
 
+**Report envelope**:
+The `<subagent_report from="…" kind="…">` block that holds only child-authored
+text in a delivery. Host lines and host fallbacks stay outside it.
+_Avoid_: Instructions from the user, host summary
+
+**Delegation outcome contract**:
+The versioned rules (`delegation-outcome/v0`) for the report envelope, host
+evidence, and tool-schema compatibility that a host implements.
+_Avoid_: Acceptance verdict, orchestrator adapter
+
 **Operator cancel**:
 A parent's `subagent_cancel` of one ordinary managed run. Its terminal intent is
 recorded before any abort, kill, or await, so no fallback, retry, or recovery
