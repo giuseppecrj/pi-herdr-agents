@@ -84,6 +84,7 @@ import {
 
 export { shouldDeliverSubagentCompletion, selectCompletionApi };
 
+// Replace presentation timers left by a previous load (see state.ts).
 {
 	const prevInterval =
 		readGlobalSlot<ReturnType<typeof setInterval>>(WIDGET_INTERVAL_KEY);
