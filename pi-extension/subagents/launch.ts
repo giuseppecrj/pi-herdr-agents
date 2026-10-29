@@ -63,6 +63,8 @@ interface LaunchPlannerDeps {
 	paneConfig: PaneConfig;
 }
 
+export type LaunchPlanner = ReturnType<typeof createLaunchPlanner>;
+
 /** Launch snapshots and runtime plans bound to one extension instance. */
 export function createLaunchPlanner({
 	runtime,
