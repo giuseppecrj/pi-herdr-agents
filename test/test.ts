@@ -5,6 +5,7 @@ import {
 } from "../maestro/runtime/worktree-operations.ts";
 import { buildSubagentToolAllowlist } from "../maestro/adapters/pi/launch.ts";
 import "./isolated-agent-dir.ts";
+import { createMockExtensionApi } from "./helpers/mock-extension-api.ts";
 import { describe, it, before, after } from "node:test";
 import { cleanupFixture } from "./worktree-cleanup-fixture.ts";
 import assert from "node:assert/strict";
@@ -210,61 +211,6 @@ function withTempDir(run: (dir: string) => void) {
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
-}
-
-function createMockExtensionApi(extensionEvents = createEventBus()) {
-	const registeredTools: Array<any> = [];
-	const registeredCommands: Array<any> = [];
-	const registeredShortcuts: Array<any> = [];
-	const registeredMessageRenderers: Array<any> = [];
-	const eventHandlers = new Map<string, Array<Function>>();
-	const sentUserMessages: string[] = [];
-	const sentMessages: Array<any> = [];
-	return {
-		registeredTools,
-		registeredCommands,
-		registeredShortcuts,
-		registeredMessageRenderers,
-		eventHandlers,
-		sentUserMessages,
-		sentMessages,
-		// SAFETY: this fixture implements only the ExtensionAPI members these
-		// tests exercise; TypeScript cannot verify partial-mock compatibility
-		// without also declaring every unused SDK method.
-		api: {
-			events: extensionEvents,
-			on(event: string, handler: Function) {
-				const handlers = eventHandlers.get(event) ?? [];
-				handlers.push(handler);
-				eventHandlers.set(event, handlers);
-			},
-			registerTool(tool: any) {
-				registeredTools.push(tool);
-			},
-			registerCommand(name: string, command: any) {
-				registeredCommands.push({ name, ...command });
-			},
-			registerMessageRenderer(name: string, renderer: any) {
-				registeredMessageRenderers.push({ name, renderer });
-			},
-			registerShortcut(key: string, shortcut: any) {
-				registeredShortcuts.push({ key, ...shortcut });
-			},
-			sendUserMessage(message: string) {
-				sentUserMessages.push(message);
-			},
-			sendMessage(message: any, options?: any) {
-				sentMessages.push({ message, options });
-			},
-			getAllTools() {
-				return [];
-			},
-			// Pi activates registered tools by default.
-			getActiveTools() {
-				return registeredTools.map((tool) => tool.name);
-			},
-		} as any,
-	};
 }
 
 function restoreEnvVar(name: string, value: string | undefined) {
