@@ -71,6 +71,15 @@ real implementations; in-memory fakes are conformance fixtures only.
 | [`0014`](adr/0014-operator-cancel-terminal-intent.md) | Accepted | Operator cancel records terminal intent before owned termination: no fallback, one confirmed cancelled result, unconfirmed runs stay live. |
 | [`0015`](adr/0015-report-opened-primary-workspace.md) | Accepted | Report, and never automatically close, a primary workspace that worktree creation opened. |
 
+## Active design
+
+Proposed designs that are not shipped behavior. They become contracts only when
+the code and the shipped-contract documents above change.
+
+- [`accept-check-design.md`](accept-check-design.md) — a caller-supplied
+  acceptance check that the host enforces before delivery, with a closed set
+  of verdicts and an outcome ledger.
+
 ## Historical material
 
 - [`orchestrated-review-workflow-plan.md`](orchestrated-review-workflow-plan.md)
