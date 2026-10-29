@@ -1,0 +1,457 @@
+{
+	"tools": [
+		{
+			"name": "caller_ping",
+			"scopes": ["child"],
+			"description": "Send a help request to the parent agent and exit this session. The parent will be notified with your message and can resume this session with a response. Use when you're stuck, need clarification, or need the parent to take action.",
+			"parameters": {
+				"type": "object",
+				"required": ["message"],
+				"properties": {
+					"message": {
+						"description": "What you need help with",
+						"type": "string"
+					}
+				}
+			}
+		},
+		{
+			"name": "subagent",
+			"scopes": ["parent", "child"],
+			"description": "Spawn a sub-agent in a dedicated terminal herdr pane, or in an isolated Herdr-managed Git worktree when worktree is provided. Use ordinary panes for read-only tasks; a single or sequential writer can work in the parent checkout without a worktree. Reserve unique worktree branches for parallel independent writers starting from committed state — the worktree base is committed HEAD, so uncommitted parent changes are not copied. Worktree runs retain their workspace after completion for parent review; they are not pushed, merged, or removed automatically. To inspect a retained worktree result, spawn read-only agents in an ordinary pane with cwd set to that worktree path — do not create a new worktree for them. This is a fire-and-forget async tool: the call returns immediately with only an acknowledgement. When the sub-agent finishes, the harness AUTOMATICALLY delivers its result as a steer message that wakes you up and starts a new turn — you do not need to do anything to receive it. DO NOT write polling loops, sleep/wait commands, tail/watch scripts, or repeatedly read session/log files to detect completion. DO NOT call subagents_list or any other tool to 'check' status. All of that is wasted work — the harness handles delivery for you. DO NOT fabricate, assume, or summarize results after calling this tool. After spawning, either end your turn immediately, or work on other independent tasks (including spawning more subagents in parallel). The harness will wake you with the result when it is ready.",
+			"parameters": {
+				"type": "object",
+				"required": ["name", "task"],
+				"properties": {
+					"name": {
+						"description": "Short stable label for the subagent; for a new coordinated group use <task>-<role>[-n] (shown in the widget and pane title)",
+						"type": "string"
+					},
+					"task": {
+						"description": "Task/prompt for the sub-agent",
+						"type": "string"
+					},
+					"agent": {
+						"description": "Role definition name to load defaults from. Discovery precedence is project .pi/agents, global ~/.pi/agent/agents, then installed role packs; this extension ships no roles. A missing name fails before launch. Omit for a bare agent.",
+						"type": "string"
+					},
+					"systemPrompt": {
+						"description": "Role/system-prompt text for a bare spawn. Named agents keep their definition body.",
+						"type": "string"
+					},
+					"model": {
+						"description": "Explicitly pick an exact authenticated provider/model-id, an ordered comma-separated fallback list, or task:<category> as the entire value. task: categories are case-insensitive and expand configured authenticated candidates; worktrees use only the first. For ordinary review, prefer a different authenticated model family. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback. Omitting still inherits the parent model; do not omit for orchestrated children. Fallback lists cannot be used with worktrees.",
+						"type": "string"
+					},
+					"thinking": {
+						"description": "Pi thinking level. Pick the model tier first, then set thinking within that model's range: minimal/low for bounded mechanical work, medium for ordinary implementation or review, high+ for architecture, security, or hard diagnosis. Omitting still inherits the parent level; do not omit on orchestrated child work.",
+						"anyOf": [
+							{
+								"const": "off",
+								"type": "string"
+							},
+							{
+								"const": "minimal",
+								"type": "string"
+							},
+							{
+								"const": "low",
+								"type": "string"
+							},
+							{
+								"const": "medium",
+								"type": "string"
+							},
+							{
+								"const": "high",
+								"type": "string"
+							},
+							{
+								"const": "xhigh",
+								"type": "string"
+							},
+							{
+								"const": "max",
+								"type": "string"
+							}
+						]
+					},
+					"skills": {
+						"description": "Comma-separated skills (overrides agent default)",
+						"type": "string"
+					},
+					"tools": {
+						"description": "Comma-separated tools (overrides agent default)",
+						"type": "string"
+					},
+					"cwd": {
+						"description": "Working directory for the sub-agent. Without worktree, the agent starts in this folder. With worktree, this selects the source Git repository and the agent starts at the created worktree root.",
+						"type": "string"
+					},
+					"worktree": {
+						"description": "Optional isolated Herdr-managed Git worktree. Omit or pass null to use an ordinary pane in cwd.",
+						"anyOf": [
+							{
+								"type": "object",
+								"required": ["branch"],
+								"properties": {
+									"branch": {
+										"minLength": 1,
+										"description": "New branch name for an isolated Herdr-managed Git worktree",
+										"type": "string"
+									},
+									"base": {
+										"description": "Git revision to branch from. Defaults to the source checkout's committed HEAD.",
+										"type": "string"
+									}
+								}
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"fork": {
+						"description": "Override the child session mode for this spawn. `true` forces full-context fork; `false` forces standalone. Omit to inherit the agent frontmatter session-mode.",
+						"type": "boolean"
+					},
+					"persistent": {
+						"description": "Keep this stable specialist session alive between turn-based tasks. Persistent agents accept follow-up work only through subagent_send.",
+						"type": "boolean"
+					},
+					"interactive": {
+						"description": "Mark the subagent as interactive (long-running, user drives the conversation in its own pane). When true, the main session is not woken by status transitions (stalled/recovered) for this subagent. If omitted, falls back to the agent's `interactive` frontmatter, otherwise the inverse of `auto-exit` (agents that auto-exit are autonomous and get stall pings; agents that don't are interactive and stay quiet).",
+						"type": "boolean"
+					}
+				}
+			}
+		},
+		{
+			"name": "subagent_cancel",
+			"scopes": ["parent", "child"],
+			"description": "Cancel a running ordinary (non-persistent) Pi-backed subagent, including an interrupted one: records terminal intent first, terminates its owned process, and delivers exactly one cancelled result. No model fallback, retry, or recovery starts after a cancel. An ordinary pane is closed; a managed-worktree child stops only its Pi process and keeps the workspace, checkout, commits, and manifest. Returns confirmed, requested (launch still in flight), unconfirmed (the run stays live; call again to retry), or already-terminal. Persistent specialists are rejected; use subagent_stop. Do not poll: the cancelled result arrives automatically.",
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"description": "Exact running subagent id",
+						"type": "string"
+					},
+					"name": {
+						"description": "Exact unambiguous running subagent display name",
+						"type": "string"
+					}
+				}
+			}
+		},
+		{
+			"name": "subagent_done",
+			"scopes": ["child"],
+			"description": "Call this tool when you have completed your task. It will close this session and return your results to the main session. Your LAST assistant message before calling this becomes the summary returned to the caller.",
+			"parameters": {
+				"type": "object",
+				"properties": {}
+			}
+		},
+		{
+			"name": "subagent_interrupt",
+			"scopes": ["parent", "child"],
+			"description": "Send Escape to the active turn of a currently running Pi-backed subagent. The child pane, session, watcher, and running entry remain alive; this returns only a local acknowledgement and does not emit a subagent_result solely because of this request.",
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"description": "Exact running subagent id",
+						"type": "string"
+					},
+					"name": {
+						"description": "Exact running subagent display name",
+						"type": "string"
+					}
+				}
+			}
+		},
+		{
+			"name": "subagent_resume",
+			"scopes": ["parent", "child"],
+			"description": "Resume a previous Pi-backed sub-agent session in a new herdr pane. This does not reattach a retained managed worktree; continue worktree-bound follow-up in its existing workspace. This is a fire-and-forget async tool: the call returns immediately with only an acknowledgement. When the resumed sub-agent finishes, the harness AUTOMATICALLY delivers its result as a steer message that wakes you up and starts a new turn — you do not need to do anything to receive it. DO NOT write polling loops, sleep/wait commands, tail/watch scripts, or repeatedly read session/log files to detect completion. DO NOT poll for status. All of that is wasted work — the harness handles delivery for you. DO NOT fabricate or assume results. After resuming, either end your turn or work on other independent tasks; the harness will wake you when the result is ready. Use when a sub-agent was cancelled or needs follow-up work.",
+			"parameters": {
+				"type": "object",
+				"required": ["sessionPath"],
+				"properties": {
+					"sessionPath": {
+						"description": "Path to the session .jsonl file to resume",
+						"type": "string"
+					},
+					"name": {
+						"description": "Display name for the terminal tab. Default: 'Resume'",
+						"type": "string"
+					},
+					"message": {
+						"description": "Optional message to send after resuming (e.g. follow-up instructions)",
+						"type": "string"
+					},
+					"autoExit": {
+						"description": "Whether the resumed session should automatically exit after completing its response. Defaults to true for autonomous follow-up work; set false for interactive resumed sessions.",
+						"type": "boolean"
+					}
+				}
+			}
+		},
+		{
+			"name": "subagent_send",
+			"scopes": ["parent", "child"],
+			"description": "Deliver one follow-up task to an idle persistent specialist. Busy specialists reject tasks; no queue is kept.",
+			"parameters": {
+				"type": "object",
+				"required": ["message"],
+				"properties": {
+					"id": {
+						"description": "Exact persistent specialist logical ID",
+						"type": "string"
+					},
+					"name": {
+						"description": "Exact unambiguous persistent specialist name",
+						"type": "string"
+					},
+					"message": {
+						"description": "The next task",
+						"type": "string"
+					}
+				}
+			}
+		},
+		{
+			"name": "subagent_stop",
+			"scopes": ["parent", "child"],
+			"description": "Gracefully stop a persistent specialist after its active task settles. Exit is confirmed before the specialist is removed.",
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"description": "Exact persistent specialist logical ID",
+						"type": "string"
+					},
+					"name": {
+						"description": "Exact unambiguous persistent specialist name",
+						"type": "string"
+					}
+				}
+			}
+		},
+		{
+			"name": "subagents_list",
+			"scopes": ["parent", "child"],
+			"description": "List all available package, global, and project subagent definitions. Project agents override global definitions, which override package definitions.",
+			"parameters": {
+				"type": "object",
+				"properties": {}
+			}
+		},
+		{
+			"name": "subagents_write_task_models",
+			"scopes": ["parent"],
+			"description": "Validate and atomically replace models.tasks and models.tasksMeta in the durable Pi agent config, preserving unrelated settings. Supported categories: coding, review, recon, qa, architecture, docs. Partial nonempty categories are accepted; omitted categories are removed. Rejects duplicate exact refs within a category. Review the active authenticated registry and existing preferences first. Optional expectedConfigRevision makes the write conditional: it fails without replacing configuration when the config file no longer matches the revision the proposal was read from. Optional basis records what the ranking rests on; its kind must equal tasksMeta.method, and it is returned but not saved. Cooperating writes are serialized and fail on contention rather than waiting. Returns normalized saved preferences, missing categories, the configRevision of the written file, and any basis; reload required.",
+			"parameters": {
+				"type": "object",
+				"required": ["tasks", "tasksMeta"],
+				"properties": {
+					"tasks": {
+						"additionalProperties": false,
+						"minProperties": 1,
+						"type": "object",
+						"properties": {
+							"coding": {
+								"minItems": 1,
+								"description": "Implementation workers",
+								"type": "array",
+								"items": {
+									"minLength": 1,
+									"type": "string"
+								}
+							},
+							"review": {
+								"minItems": 1,
+								"description": "Code reviewers",
+								"type": "array",
+								"items": {
+									"minLength": 1,
+									"type": "string"
+								}
+							},
+							"recon": {
+								"minItems": 1,
+								"description": "Reconnaissance scouts",
+								"type": "array",
+								"items": {
+									"minLength": 1,
+									"type": "string"
+								}
+							},
+							"qa": {
+								"minItems": 1,
+								"description": "Software and test runners",
+								"type": "array",
+								"items": {
+									"minLength": 1,
+									"type": "string"
+								}
+							},
+							"architecture": {
+								"minItems": 1,
+								"description": "Planning and diagnosis",
+								"type": "array",
+								"items": {
+									"minLength": 1,
+									"type": "string"
+								}
+							},
+							"docs": {
+								"minItems": 1,
+								"description": "Documentation workers",
+								"type": "array",
+								"items": {
+									"minLength": 1,
+									"type": "string"
+								}
+							}
+						}
+					},
+					"tasksMeta": {
+						"type": "object",
+						"required": ["generatedAt", "method"],
+						"properties": {
+							"generatedAt": {
+								"type": "string"
+							},
+							"method": {
+								"anyOf": [
+									{
+										"const": "research",
+										"type": "string"
+									},
+									{
+										"const": "registry-only",
+										"type": "string"
+									}
+								]
+							}
+						}
+					},
+					"expectedConfigRevision": {
+						"description": "Revision of the config the proposal was read from: \"sha256:\" plus 64 lowercase hex digits of the exact file bytes, or \"missing\" when the file is absent. A mismatch fails without writing; re-read, re-propose, and re-approve. Omit for an unconditional write.",
+						"anyOf": [
+							{
+								"const": "missing",
+								"type": "string"
+							},
+							{
+								"pattern": "^sha256:[0-9a-f]{64}$",
+								"type": "string"
+							}
+						]
+					},
+					"basis": {
+						"description": "What the ranking rests on, as submitted by the proposer and not independently verified: {\"kind\":\"registry-only\"}, or {\"kind\":\"research\"} with the http(s) sources consulted in this run, how each informed the ranking, and the remaining uncertainty. kind must equal tasksMeta.method. Not saved. Omit for a legacy write.",
+						"anyOf": [
+							{
+								"additionalProperties": false,
+								"type": "object",
+								"required": ["kind"],
+								"properties": {
+									"kind": {
+										"const": "registry-only",
+										"type": "string"
+									}
+								}
+							},
+							{
+								"additionalProperties": false,
+								"type": "object",
+								"required": ["kind", "sources", "uncertainty"],
+								"properties": {
+									"kind": {
+										"const": "research",
+										"type": "string"
+									},
+									"sources": {
+										"minItems": 1,
+										"type": "array",
+										"items": {
+											"additionalProperties": false,
+											"type": "object",
+											"required": ["url", "influence"],
+											"properties": {
+												"url": {
+													"minLength": 1,
+													"type": "string"
+												},
+												"influence": {
+													"minLength": 1,
+													"type": "string"
+												}
+											}
+										}
+									},
+									"uncertainty": {
+										"minLength": 1,
+										"type": "string"
+									}
+								}
+							}
+						]
+					}
+				}
+			}
+		},
+		{
+			"name": "worktree_list",
+			"scopes": ["parent"],
+			"description": "Inspect managed worktrees, including cross-session orphans. Only source repositories inside cwd are eligible for explicit removal. This tool never removes anything.",
+			"parameters": {
+				"type": "object",
+				"properties": {}
+			}
+		},
+		{
+			"name": "worktree_remove",
+			"scopes": ["parent"],
+			"description": "Explicitly remove one managed worktree by exact path, branch, or workspace ID. Rechecks cwd containment, live children/leases, and Git state. Branches and commits are retained. Dirty work requires explicit preserve: true to make a WIP commit first.",
+			"parameters": {
+				"type": "object",
+				"required": ["target"],
+				"properties": {
+					"target": {
+						"minLength": 1,
+						"type": "string"
+					},
+					"preserve": {
+						"type": "boolean"
+					}
+				}
+			}
+		}
+	],
+	"commands": [
+		{
+			"name": "subagent",
+			"scopes": ["parent", "child"],
+			"description": "Spawn a subagent: /subagent <agent> <task>; list agents: /subagent list"
+		},
+		{
+			"name": "subagents-init",
+			"scopes": ["parent"],
+			"description": "Draft task-category model preferences from the live registry; optional arguments set ranking preferences"
+		},
+		{
+			"name": "worktree",
+			"scopes": ["child"],
+			"description": "Fork this session into a worktree; use /worktree list to inspect them"
+		},
+		{
+			"name": "worktree",
+			"scopes": ["parent"],
+			"description": "Fork into a worktree, list retained worktrees, or explicitly remove one"
+		}
+	]
+}
