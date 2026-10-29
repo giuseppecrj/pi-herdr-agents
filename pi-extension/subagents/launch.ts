@@ -167,11 +167,6 @@ export function createLaunchPlanner({
 		};
 	}
 
-	/**
-	 * Watch a launched subagent until it exits. Polls for completion, extracts
-	 * the summary from the session file. Temporary panes close only after parent
-	 * delivery; worktree workspaces remain retained for review.
-	 */
 	function resolveSubagentRuntimePlans(
 		params: typeof SubagentParams.static,
 		ctx: Parameters<typeof normalizePiAttempt>[1],
