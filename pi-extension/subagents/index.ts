@@ -34,7 +34,6 @@ import {
 	type PiSettlementIO,
 	type PiPersistentEvent,
 	type PiLedgerEntry,
-	type PiProgressEvidence,
 	type CancelReport,
 	type SummarySource,
 } from "../../maestro/runtime/index.ts";
@@ -92,13 +91,7 @@ import {
 	type PersistentConfig,
 } from "../../maestro/core/config/persistent-config.ts";
 import { loadPaneConfig } from "../../maestro/core/config/pane-config.ts";
-type NoProgressClassification = PiProgressEvidence["classification"];
-type NoProgressSessionTail = Pick<
-	PiProgressEvidence,
-	"classification" | "lastEntryKind"
->;
 import {
-	type SubagentStatusState,
 	capStatusLines,
 	formatElapsedDuration,
 	formatStatusAggregate,
@@ -132,28 +125,24 @@ import {
 	formatWorktreeInventory,
 	type WorktreeCleanupOperations,
 } from "../../maestro/core/worktree-cleanup.ts";
-import type {
-	WorktreeHandoff,
-	WorktreeLaunch,
-} from "../../maestro/core/worktree.ts";
+import type { WorktreeHandoff } from "../../maestro/core/worktree.ts";
+import {
+	readGlobalSlot,
+	writeGlobalSlot,
+	RUNTIME_KEY,
+	STATUS_INTERVAL_KEY,
+	WIDGET_INTERVAL_KEY,
+	shouldDeliverSubagentCompletion,
+	selectCompletionApi,
+	type ModelFailure,
+	type NoProgressClassification,
+	type NoProgressSessionTail,
+	type RunningSubagent,
+	type SubagentResult,
+	type SubagentRuntime,
+} from "./state.ts";
 
-// Survive /reload: replace presentation timers while keeping active completion
-// watchers and their registry alive. Old module closures continue watching the
-// children; the reloaded module adopts the shared registry for status/interrupts.
-const WIDGET_INTERVAL_KEY = Symbol.for("pi-subagents/widget-interval");
-const STATUS_INTERVAL_KEY = Symbol.for("pi-subagents/status-interval");
-const RUNTIME_KEY = Symbol.for("pi-subagents/runtime");
-
-function readGlobalSlot<T>(key: symbol): T | undefined {
-	// SAFETY: `globalThis` has no index signature for our extension-private
-	// symbol keys; only this module ever writes the values read back here.
-	return (globalThis as Record<symbol, T | undefined>)[key];
-}
-
-function writeGlobalSlot<T>(key: symbol, value: T): void {
-	// SAFETY: see readGlobalSlot above; this module is the sole writer.
-	(globalThis as Record<symbol, T | undefined>)[key] = value;
-}
+export { shouldDeliverSubagentCompletion, selectCompletionApi };
 
 function getFirstText(
 	content: readonly { type: string; text?: string }[],
@@ -728,11 +717,6 @@ function resolveUnexpectedErrorPresentation(
 	);
 }
 
-interface ModelFailure {
-	model: string;
-	error: string;
-}
-
 interface SubagentResultDetails {
 	name: string;
 	task?: string;
@@ -939,105 +923,10 @@ function resolveCancelledPresentation(
 	);
 }
 
-/**
- * Result from running a single subagent.
- */
-interface SubagentResult {
-	name: string;
-	task: string;
-	summary: string;
-	summarySource: SummarySource;
-	sessionFile?: string;
-	exitCode: number;
-	elapsed: number;
-	error?: string;
-	/** Settled provider/agent error text from the child, preserved verbatim. */
-	errorMessage?: string;
-	/** Ordered models launched for this run, including failed fallback attempts. */
-	fallbackAttempts?: string[];
-	/** Ordered raw errors associated with failed model attempts. */
-	fallbackFailures?: ModelFailure[];
-	ping?: { name: string; message: string };
-	worktree?: WorktreeHandoff;
-	runtimePlan?: ResolvedRuntimePlan;
-}
-
-/**
- * State for a launched (but not yet completed) subagent.
- */
-interface RunningSubagent {
-	id: string;
-	name: string;
-	task: string;
-	agent?: string;
-	surface: string;
-	startTime: number;
-	sessionFile: string;
-	launchScriptFile?: string;
-	activityFile?: string;
-	activity?: SubagentActivityState;
-	activityRead?: {
-		ok: boolean;
-		reason?: "missing" | "invalid" | "wrong-id";
-		error?: string;
-	};
-	abortController?: AbortController;
-	/**
-	 * Optional legacy status snapshot retained only for hydrating pre-lifecycle
-	 * runtime entries after /reload. Live observation uses `lifecycle` only.
-	 */
-	statusState?: SubagentStatusState;
-	lifecycle: SubagentLifecycle;
-	/** Last projected kind used to detect stalled/recovered transitions. */
-	lastProjectedKind?: LifecycleProjection["kind"];
-	/** One active no-progress warning episode, reset when durable progress resumes. */
-	noProgressEpisode?: {
-		active: true;
-		progressAt: number;
-		idleMs: number;
-		classification: NoProgressClassification;
-		lastEntryKind: NoProgressSessionTail["lastEntryKind"];
-	};
-	/**
-	 * When true, status transitions (stalled/recovered) do not wake the parent
-	 * session via a steer message. The widget still updates locally. Used for
-	 * long-running agents where the user drives the conversation in the
-	 * subagent's pane.
-	 */
-	interactive: boolean;
-	/** Parent-resolved model/thinking selection and provenance. */
-	runtimePlan: ResolvedRuntimePlan | undefined;
-	worktree?: WorktreeLaunch;
-	persistent?: boolean;
-	logicalId?: string;
-	generationId?: string;
-	policyHash?: string;
-	policyTools?: string[] | null;
-	policyDeniedTools?: string[];
-	tasksCompleted?: number;
-	taskId?: string;
-	inboxSequence?: number;
-	observedTaskEvents?: number;
-	stopState?: "requested" | "pending" | "failed";
-	stopFailure?: string;
-	stopTimeout?: ReturnType<typeof setTimeout>;
-	stopTimeoutMs?: number;
-	crashNotified?: boolean;
-	cancelState?: "requested" | "confirmed" | "unconfirmed";
-}
-
 const paneConfig = loadPaneConfig(
 	getSubagentsConfigDir(),
 	getSubagentsConfigExamplePath(),
 );
-
-interface SubagentRuntime {
-	runningSubagents: Map<string, RunningSubagent>;
-	session?: PiRunSession;
-	pi?: ExtensionAPI;
-	latestCtx?: ExtensionContext;
-	modelCatalog?: string;
-}
 
 /** Presentation rows share the adapter's records; only RunSession owns runs. */
 const runtime: SubagentRuntime = readGlobalSlot<SubagentRuntime>(
@@ -1072,18 +961,6 @@ export function cleanupSubagentsForShutdown(
 		agent.abortController?.abort();
 	}
 	agents.clear();
-}
-
-export function shouldDeliverSubagentCompletion(
-	running: Pick<RunningSubagent, "lifecycle">,
-): boolean {
-	// Authoritative gate: only pending deliveries may be sent.
-	// Missing lifecycle (pre-migration fixtures) defaults to pending/true.
-	return (running.lifecycle?.delivery ?? "pending") === "pending";
-}
-
-export function selectCompletionApi<T>(previous: T, current: T | undefined): T {
-	return current ?? previous;
 }
 
 // ── Widget management ──
