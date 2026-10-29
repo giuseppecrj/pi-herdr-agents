@@ -33,6 +33,7 @@ also required locally:
 npm ci
 npm run format:check
 npm run lint
+npm run typecheck
 npm test
 npm pack --dry-run
 ```
@@ -94,7 +95,7 @@ Copying `current.json` over `released.json` makes the released tool schemas the 
 
 The `npm version` hook regenerates `CHANGELOG.md` with `auto-changelog`. Use `npm run changelog` to regenerate it without changing the version.
 
-Replace `patch` with `minor` or `major` when appropriate. The push triggers the **Release** workflow, which installs dependencies, runs lint and unit tests, previews package contents, publishes to npm with provenance, creates and pushes the version tag, and creates the GitHub Release.
+Replace `patch` with `minor` or `major` when appropriate. The push triggers the **Release** workflow, which installs dependencies, runs lint, the type-check, and unit tests, previews package contents, publishes to npm with provenance, creates and pushes the version tag, and creates the GitHub Release.
 
 You can rerun a failed or incomplete release from **Actions → Release → Run workflow**. If npm already has `PACKAGE_NAME@VERSION`, the workflow reads that version's `gitHead` and continues only when it matches `GITHUB_SHA` (exact-commit retry). A foreign publish fails before tag or GitHub Release creation. Existing tags are verified to point at the release commit. The workflow does not create a GitHub Release for a version that still needs publish and failed to publish.
 

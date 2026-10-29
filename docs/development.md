@@ -50,7 +50,7 @@ provider; fakes are for conformance tests only.
 See [ADR-0012](adr/0012-adopt-maestro-seams-in-repo.md), the
 [glossary](../CONTEXT.md), and the [documentation map](README.md).
 
-The **CI** workflow runs formatting, lint, unit tests, and the package preview
+The **CI** workflow runs formatting, lint, type-check, unit tests, and the package preview
 on pushes and pull requests to `main`, or manually from GitHub Actions. It has
 read-only repository permissions and never publishes. Herdr integration tests
 remain a local gate; the separate **Release** workflow still validates each
@@ -64,6 +64,7 @@ npm run format:check
 npm test
 npm run docs:tools:check
 npm run lint
+npm run typecheck
 npm pack --dry-run
 ```
 

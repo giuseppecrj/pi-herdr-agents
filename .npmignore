@@ -19,3 +19,4 @@ oxlint.config.ts
 tools/
 *.tgz
 .pi-lens-probe-home/
+tsconfig.json

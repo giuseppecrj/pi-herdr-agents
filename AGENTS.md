@@ -103,13 +103,14 @@ npm test
 npm run docs:tools:check
 npm run format:check
 npm run lint
+npm run typecheck
 npm pack --dry-run
 git diff --check
 ```
 
 `npm run lint` needs Node.js 22.18+ (or 22.6–22.17 with `NODE_OPTIONS=--experimental-strip-types`) because oxlint imports `oxlint.config.ts` and its `tools/oxlint/anti-slop/index.ts` plugin as TypeScript.
 
-Run LSP diagnostics on every changed TypeScript file; lint and tests do not catch every TypeScript error.
+`npm run typecheck` type-checks production sources (`pi-extension/`, `maestro/`, `scripts/`) under `strict`; tests strip types and are not type-checked yet, so run LSP diagnostics on changed test files.
 
 For Herdr or lifecycle changes, run the deterministic suite from inside Herdr. Run only one integration suite at a time on a Herdr instance; concurrent suites compete for terminal focus and process capacity and can cause false timeouts or leaked test resources.
 

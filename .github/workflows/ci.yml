@@ -44,6 +44,9 @@ jobs:
       - name: Run lint
         run: npm run lint
 
+      - name: Type-check production sources
+        run: npm run typecheck
+
       - name: Run tests
         run: npm test
 

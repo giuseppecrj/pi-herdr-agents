@@ -273,6 +273,7 @@ test("CI runs the local gates with the release workflow's pinned tools", async (
 			"npm ci",
 			"npm run format:check",
 			"npm run lint",
+			"npm run typecheck",
 			"npm test",
 			"npm pack --dry-run",
 			"git diff --check",
@@ -317,6 +318,7 @@ test("release workflow uses package.json identity and trusted publishing", async
 	assert.match(workflow, /await fetch\(url/);
 	assert.match(workflow, /redirect: "error"/);
 	assert.match(workflow, /npm run lint/);
+	assert.match(workflow, /npm run typecheck/);
 	assert.match(workflow, /npm test/);
 	assert.match(workflow, /npm publish --access public --provenance/);
 	assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
