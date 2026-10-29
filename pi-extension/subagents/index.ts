@@ -350,12 +350,6 @@ function discoverAgentCatalog(pi?: Pick<ExtensionAPI, "events">): AgentCatalog {
 	});
 }
 
-function discoverAgentDefinitions(
-	pi?: Pick<ExtensionAPI, "events">,
-): ListedAgentDefinition[] {
-	return discoverAgentCatalog(pi).agents;
-}
-
 /**
  * Payload of TASK_MODEL_INIT_APPROVAL_EVENT. `context` is the live context of
  * the command that started init. It passes between trusted in-process
@@ -2083,14 +2077,12 @@ export const __test__ = {
 	borderLine,
 	renderSubagentWidgetLines,
 	loadAgentDefaults,
-	discoverAgentDefinitions,
 	discoverAgentCatalog,
 	resolveEffectiveSessionMode,
 	resolveLaunchBehavior,
 	resolveEffectiveAutoExit,
 	resolveEffectiveInteractive,
 	buildPiPromptArgs,
-	resolveEffectivePersistent,
 	observeRunningSubagent,
 	evaluateNoProgressAdvisory,
 	formatNoProgressAdvisoryLine,
@@ -2099,7 +2091,6 @@ export const __test__ = {
 	resolveInterruptTarget,
 	requestSubagentInterrupt,
 	handleSubagentInterrupt,
-	handleSubagentCancel,
 	handleSubagentSend,
 	handleSubagentStop,
 	persistentSpecialistState,
@@ -2116,7 +2107,6 @@ export const __test__ = {
 	shouldRetainSubagentSurface,
 	formatLivePersistentSpecialists,
 	runningSubagents,
-	formatElapsed,
 };
 
 function startWidgetRefresh() {
