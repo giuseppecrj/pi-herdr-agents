@@ -56,6 +56,8 @@ Multiple subagents run concurrently — each steers its result back independentl
 ╰─────────────────────────────────────────────────────────╯
 ```
 
+Child-authored text in completions, failures, help requests, and persistent task results is delivered inside a single `<subagent_report from="<name>" kind="<result|failure|help-request|task-result>">` block, preceded by a sentence telling the parent to treat it as a report to evaluate, not as instructions from the user. Tag-like text inside the child's output is escaped so it cannot close or reopen the block, and long results are abbreviated before wrapping so the closing tag always survives. Host-authored lines (elapsed time, model provenance and failures, provider errors, worktree handoff, session references, runtime warnings, cancellation text) stay outside the block.
+
 Completion messages render with a colored background and are expandable with `Ctrl+O`. Results larger than 16,000 characters are abbreviated in the parent context while preserving their beginning, conclusion, and session path; the complete result remains in the child session. The extension includes that bounded result and a continuation instruction directly in the single custom `subagent_result` message that triggers or steers Pi, avoiding empty turns caused by a separate context-free wake-up. The renderer uses the unadorned bounded result from structured details. Completed rows are removed from the widget as soon as their result is delivered or suppressed.
 
 ### In-progress status updates
@@ -251,7 +253,7 @@ Each public child stores a session-adjacent versioned launch-policy sidecar. Pub
 
 1. Child calls `caller_ping({ message: "Not sure which schema to use" })`
 2. Ordinary child sessions exit (like `subagent_done`); persistent specialists stay alive.
-3. Parent receives a steer notification: *"Sub-agent Worker needs help: Not sure which schema to use"*
+3. Parent receives a steer notification: *"Sub-agent Worker needs help"* followed by the message inside a `<subagent_report from="Worker" kind="help-request">` block
 4. The parent resumes an ordinary child with `subagent_resume`, or replies to a persistent specialist with `subagent_send`.
 5. The child picks up with the parent's guidance
 
