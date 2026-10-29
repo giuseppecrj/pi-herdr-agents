@@ -25,7 +25,10 @@ Former bundled roles, `/plan`, its plan skill, and `/skill:orchestrate` now belo
 
 ## Code map
 
-- `pi-extension/subagents/index.ts` — Pi composition root: public tools/commands, role-pack event bridge, host policy, widgets, and parent delivery
+- `pi-extension/subagents/index.ts` — Pi composition root: loads config, adopts the reload-surviving runtime, builds the per-load controllers, and registers session handlers, tools, commands, and renderers in order; also the `__test__` surface
+- `pi-extension/subagents/state.ts`, `catalog.ts`, `presentation.ts` — run-state types and reload slots; role catalog, `subagent` parameters, and launch policy; result text and the child-report envelope
+- `pi-extension/subagents/observation.ts`, `widgets.ts`, `controls.ts`, `persistent.ts`, `delivery.ts`, `launch.ts` — per-load controllers (`create*`) for activity observation, the widget and status refresh, interrupt/cancel, persistent specialists, parent delivery, and launch plans
+- `pi-extension/subagents/launch-tools.ts`, `control-tools.ts`, `worktree-tools.ts`, `task-models.ts`, `renderers.ts` — `register*` functions for the public tools, commands, and message renderers
 - `pi-extension/subagents/model-registry.ts`, `config-path.ts` — permanent host-local SDK capability glue and configuration-path conventions
 - `maestro/core/` — seam interfaces and types; activity/lifecycle/status projection, routing, wake-ups, and supervision
 - `plugins/sidebar/` — optional standalone Node companion Herdr plugin; it imports nothing from the extension

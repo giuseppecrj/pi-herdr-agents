@@ -8,8 +8,22 @@ The maestro seams remain inside one npm package with the same Pi extension
 entry point. Pi is the sole real harness and Herdr the sole real surface
 provider; fakes are for conformance tests only.
 
-- `pi-extension/subagents/index.ts` — Pi composition root: tools/commands,
-  role-pack event bridge, host policy, widgets, and parent delivery.
+- `pi-extension/subagents/index.ts` — Pi composition root: loads config,
+  adopts the reload-surviving runtime, builds the per-load controllers, and
+  registers session handlers, tools, commands, and renderers in order. It also
+  holds the `__test__` surface.
+- `pi-extension/subagents/state.ts`, `catalog.ts`, `presentation.ts` — run-state
+  types and reload slots; the role catalog, `subagent` parameters, and launch
+  policy; result text and the child-report envelope.
+- `pi-extension/subagents/observation.ts`, `widgets.ts`, `controls.ts`,
+  `persistent.ts`, `delivery.ts`, `launch.ts` — per-load controllers
+  (`create*`) for activity observation, the widget and status refresh,
+  interrupt/cancel, persistent specialists, parent delivery, and launch plans.
+  `index.ts` creates each once per module load, because tests and `/reload`
+  re-import it and its config and timers must not be shared.
+- `pi-extension/subagents/launch-tools.ts`, `control-tools.ts`,
+  `worktree-tools.ts`, `task-models.ts`, `renderers.ts` — `register*`
+  functions for the public tools, commands, and message renderers.
 - `pi-extension/subagents/model-registry.ts`, `config-path.ts` — permanent
   host-local SDK capability glue and configuration-path conventions.
 - `maestro/core/` — seam interfaces/types, activity and lifecycle projection,
