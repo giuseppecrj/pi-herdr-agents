@@ -186,13 +186,13 @@ describe("sidebar fixture pane quiescing", {
 		const dir = mkdtempSync(join(tmpdir(), "pi-sidebar-quiesce-"));
 		// A stand-in for an in-flight `herdr` CLI request: one second of work,
 		// beside a shell that forks back to back, bounded, so the race is real.
-		symlinkSync("/bin/sleep", join(dir, "herdr"));
+		symlinkSync(process.execPath, join(dir, "herdr"));
 		const pane = `quiesce-${process.pid}`;
 		const shell = spawn(
 			"/bin/bash",
 			[
 				"-c",
-				`"${dir}/herdr" 1 & for i in $(seq 2000); do sleep 30 & done; wait`,
+				`"${dir}/herdr" -e 'setTimeout(() => {}, 1000)' & for i in $(seq 2000); do sleep 30 & done; wait`,
 			],
 			{
 				detached: true,
