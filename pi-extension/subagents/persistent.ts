@@ -147,6 +147,8 @@ interface PersistentControlDeps {
 	resolveInterruptTarget: Controls["resolveInterruptTarget"];
 }
 
+export type PersistentControls = ReturnType<typeof createPersistentControls>;
+
 /** Persistent specialist controls bound to one extension instance. */
 export function createPersistentControls({
 	runtime,
