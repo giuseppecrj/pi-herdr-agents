@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import {
 	copyFileSync,
 	existsSync,
+	readdirSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
@@ -300,5 +301,15 @@ describe("pack-neutral package contents", () => {
 					passage.includes(clause),
 					`reference passage ${index + 1} must include: ${clause}`,
 				);
+	});
+});
+
+describe("test script coverage", () => {
+	it("lists every top-level test file in the npm test script", () => {
+		const script = manifest.scripts.test.split(/\s+/);
+		const unlisted = readdirSync(join(root, "test"))
+			.filter((name) => /\.test\.(ts|js)$/.test(name))
+			.filter((name) => !script.includes(`test/${name}`));
+		assert.deepEqual(unlisted, [], "add to the npm test script");
 	});
 });
