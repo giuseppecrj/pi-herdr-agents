@@ -43,3 +43,4 @@ export type {
 	PiRunSessionInfrastructure,
 	PiRunSession,
 } from "./pi-run-session.ts";
+export type { SummarySource } from "../adapters/pi/session.ts";

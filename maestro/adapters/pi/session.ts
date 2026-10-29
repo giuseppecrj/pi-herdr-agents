@@ -876,9 +876,17 @@ export function inspectFinalAssistantMessage(
 	return { text: null, contentLength: 0 };
 }
 
-export function findLastAssistantMessage(
+/** Who wrote a summary: the child's final assistant text, or the host's own fallback. */
+export type SummarySource = "child" | "host";
+
+export interface AttributedSummary {
+	summary: string;
+	summarySource: SummarySource;
+}
+
+export function findLastAssistantSummary(
 	entries: SessionEntry[],
-): string | null {
+): AttributedSummary | null {
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const entry = entries[i];
 		if (entry.type !== "message") continue;
@@ -893,7 +901,8 @@ export function findLastAssistantMessage(
 				: [],
 		);
 
-		if (texts.length > 0 && texts.join("").trim()) return texts.join("\n");
+		if (texts.length > 0 && texts.join("").trim())
+			return { summary: texts.join("\n"), summarySource: "child" };
 
 		const stopReason = msg.message.stopReason;
 		const errorMessage = msg.message.errorMessage;
@@ -902,10 +911,19 @@ export function findLastAssistantMessage(
 			isString(errorMessage) &&
 			errorMessage.trim() !== ""
 		) {
-			return `Subagent error: ${errorMessage.trim()}`;
+			return {
+				summary: `Subagent error: ${errorMessage.trim()}`,
+				summarySource: "host",
+			};
 		}
 	}
 	return null;
+}
+
+export function findLastAssistantMessage(
+	entries: SessionEntry[],
+): string | null {
+	return findLastAssistantSummary(entries)?.summary ?? null;
 }
 
 /**

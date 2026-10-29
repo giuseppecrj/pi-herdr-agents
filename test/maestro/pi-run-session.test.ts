@@ -793,6 +793,7 @@ for (const cancelled of [false, true])
 				"EISDIR: illegal operation on a directory, read",
 			);
 			assert.equal(metadata.summary, `Subagent error: ${metadata.error}`);
+			assert.equal(metadata.summarySource, "host");
 			assert.equal(metadata.sessionFile, undefined);
 			assert.equal(metadata.errorMessage, undefined);
 			assert.equal(metadata.runtimePlan, undefined);
@@ -926,6 +927,7 @@ test("resume settlement reader is scoped to its run, not shared with concurrent 
 			await persistentWait;
 			assert.deepEqual(resumeIO.readResumeResult!(), {
 				summary: "Resumed session exited without new output",
+				summarySource: "host",
 				sessionFile: path,
 			});
 			assert.equal(nonResumeIO.length, 2);
@@ -1458,6 +1460,7 @@ test("ordinary adapter transcript failure delivers Stage3 exit-one metadata with
 			"EISDIR: illegal operation on a directory, read",
 		);
 		assert.equal(metadata.summary, `Subagent error: ${metadata.error}`);
+		assert.equal(metadata.summarySource, "host");
 		assert.equal(metadata.sessionFile, undefined);
 		assert.equal(metadata.errorMessage, undefined);
 		assert.equal(metadata.runtimePlan, undefined);

@@ -36,6 +36,7 @@ import {
 	type PiLedgerEntry,
 	type PiProgressEvidence,
 	type CancelReport,
+	type SummarySource,
 } from "../../maestro/runtime/index.ts";
 import { loadSupervisionConfig } from "../../maestro/core/config/supervision-config.ts";
 import {
@@ -668,9 +669,15 @@ function boundChildDelivery(args: {
 	name: string;
 	kind: ChildReportKind;
 	body: string;
+	bodySource: SummarySource;
 	tail?: string;
 	sessionRef?: string;
 }): string {
+	if (args.bodySource === "host")
+		return boundResultPresentation(
+			`${args.head}\n\n${args.body}${args.tail ?? ""}`,
+			args.sessionRef ?? "",
+		);
 	const head = abbreviateMiddle(
 		args.head,
 		MAX_HEAD_CHARS,
@@ -835,6 +842,7 @@ function resolveResultPresentation(
 		| "exitCode"
 		| "elapsed"
 		| "summary"
+		| "summarySource"
 		| "sessionFile"
 		| "errorMessage"
 		| "fallbackAttempts"
@@ -899,6 +907,7 @@ function resolveResultPresentation(
 		name,
 		kind: result.exitCode === 0 ? "result" : "failure",
 		body,
+		bodySource: result.summarySource,
 		tail,
 		sessionRef: sessionRef + runtimeWarning,
 	});
@@ -934,6 +943,7 @@ interface SubagentResult {
 	name: string;
 	task: string;
 	summary: string;
+	summarySource: SummarySource;
 	sessionFile?: string;
 	exitCode: number;
 	elapsed: number;
@@ -2306,6 +2316,7 @@ function deliverPersistentTaskEvent(
 						name: running.name,
 						kind: "help-request",
 						body: event.message ?? "",
+						bodySource: "child",
 						tail: `\n\nReply with subagent_send to ${running.name}.`,
 					}),
 					display: true,
@@ -2332,7 +2343,7 @@ function deliverPersistentTaskEvent(
 	inFlightPersistentTaskDeliveries.add(deliveryKey);
 	try {
 		const completed = (running.tasksCompleted ?? 0) + 1;
-		const summary = io.readTaskSummary(asPiRecord(running));
+		const { summary, summarySource } = io.readTaskSummary(asPiRecord(running));
 		sendSubagentResult(
 			api,
 			boundChildDelivery({
@@ -2340,6 +2351,7 @@ function deliverPersistentTaskEvent(
 				name: running.name,
 				kind: "task-result",
 				body: summary,
+				bodySource: summarySource,
 			}),
 			{
 				name: running.name,
@@ -2496,6 +2508,7 @@ function deliverPiCompletion(
 					name: result.ping.name,
 					kind: "help-request",
 					body: result.ping.message,
+					bodySource: "child",
 					tail: worktreeRef,
 					sessionRef,
 				}),

@@ -40,9 +40,11 @@ import {
 	readPersistentTaskEvents,
 	writePersistentTaskInbox,
 	getNewEntries,
-	findLastAssistantMessage,
+	findLastAssistantSummary,
 	findObservedSessionRuntime,
 	inspectNoProgressSessionTail,
+	type AttributedSummary,
+	type SummarySource,
 } from "../adapters/pi/session.ts";
 import { HerdrSurfaceProvider } from "../surfaces/herdr/herdr-surface-provider.ts";
 import { readSubagentActivityFile } from "../adapters/pi/activity-file.ts";
@@ -222,6 +224,7 @@ export interface PiCompletedMetadata {
 	task: string;
 	agent?: string;
 	summary: string;
+	summarySource: SummarySource;
 	sessionFile?: string;
 	exitCode: number;
 	elapsed: number;
@@ -279,7 +282,7 @@ export interface PiPersistentIO {
 	/** Explicit lazy read, once per drain with eligible post-cursor events. */
 	readLedger(record: PiRunRecord): PiLedgerEntry[];
 	/** Transcript read only for an undelivered task-done, never help/quiet wakes. */
-	readTaskSummary(record: PiRunRecord): string;
+	readTaskSummary(record: PiRunRecord): AttributedSummary;
 	rejectBusy(record: PiRunRecord, task: string): void;
 	dispatch(record: PiRunRecord, task: string, text: string): string;
 	requestStop(record: PiRunRecord): void;
@@ -289,7 +292,7 @@ export interface PiPersistentIO {
 /** Run-scoped settlement I/O; only resumed acquisitions supply the late reader. */
 // pi-herdr-agents extension
 export interface PiSettlementIO extends PiPersistentIO {
-	readResumeResult?(): { summary: string; sessionFile: string };
+	readResumeResult?(): AttributedSummary & { sessionFile: string };
 }
 // pi-herdr-agents extension
 export interface PiPersistentHostOperations {
@@ -469,13 +472,14 @@ function resumeResultReader(
 	errorMessage: string | undefined,
 ): NonNullable<PiSettlementIO["readResumeResult"]> {
 	return () => ({
-		summary:
-			findLastAssistantMessage(getNewEntries(sessionFile, cursor)) ??
-			(errorMessage
+		...(findLastAssistantSummary(getNewEntries(sessionFile, cursor)) ?? {
+			summary: errorMessage
 				? `Subagent error: ${errorMessage}`
 				: exitCode === 0
 					? "Resumed session exited without new output"
-					: `Resumed session exited with code ${exitCode}`),
+					: `Resumed session exited with code ${exitCode}`,
+			summarySource: "host",
+		}),
 		sessionFile,
 	});
 }
@@ -652,6 +656,7 @@ export function createDefaultRunSession(
 						// A cancel can settle after a retryable attempt was finalized with
 						// its natural error; present the run's actual cancelled outcome.
 						completed.summary = "Subagent cancelled.";
+						completed.summarySource = "host";
 						completed.error = "cancelled";
 						completed.exitCode = 1;
 						completed.sessionFile = entry.record.sessionFile;
@@ -898,20 +903,26 @@ export function createDefaultRunSession(
 						plan.runtimeMismatch = `Resolved model ${plan.model} but child reported ${model}`;
 					child.runtimePlan = plan;
 				}
-				const summary = evidence
-					? (findLastAssistantMessage(
+				const { summary, summarySource }: AttributedSummary = evidence
+					? (findLastAssistantSummary(
 							cursor === undefined ? all : all.slice(cursor),
-						) ??
-						(evidence.errorMessage
-							? `Subagent error: ${evidence.errorMessage}`
-							: exitCode === 0
-								? cursor === undefined
-									? "Sub-agent exited without output"
-									: "Resumed session exited without new output"
-								: `${cursor === undefined ? "Sub-agent" : "Resumed session"} exited with code ${exitCode}`))
-					: result.outcome === "killed"
-						? "Subagent cancelled."
-						: `Subagent error: ${result.error}`;
+						) ?? {
+							summary: evidence.errorMessage
+								? `Subagent error: ${evidence.errorMessage}`
+								: exitCode === 0
+									? cursor === undefined
+										? "Sub-agent exited without output"
+										: "Resumed session exited without new output"
+									: `${cursor === undefined ? "Sub-agent" : "Resumed session"} exited with code ${exitCode}`,
+							summarySource: "host",
+						})
+					: {
+							summary:
+								result.outcome === "killed"
+									? "Subagent cancelled."
+									: `Subagent error: ${result.error}`,
+							summarySource: "host",
+						};
 				let worktree: PiWorktreeHandoff | undefined;
 				if (child.worktree) {
 					worktree = state.worktreeOperations.captureWorktreeHandoff(
@@ -954,6 +965,7 @@ export function createDefaultRunSession(
 					task: child.task,
 					agent: child.agent,
 					summary,
+					summarySource,
 					sessionFile:
 						evidence || result.outcome === "killed"
 							? child.sessionFile
@@ -1084,9 +1096,14 @@ export function createDefaultRunSession(
 		readLedger: (r) => readPersistentDeliveryLedger(r.sessionFile),
 		readTaskSummary: (r) =>
 			existsSync(r.sessionFile)
-				? (findLastAssistantMessage(getNewEntries(r.sessionFile, 0)) ??
-					"Persistent specialist completed without output.")
-				: "Persistent specialist session is unavailable.",
+				? (findLastAssistantSummary(getNewEntries(r.sessionFile, 0)) ?? {
+						summary: "Persistent specialist completed without output.",
+						summarySource: "host",
+					})
+				: {
+						summary: "Persistent specialist session is unavailable.",
+						summarySource: "host",
+					},
 		rejectBusy(r, task) {
 			ledger(r, task, "rejected-busy");
 		},
