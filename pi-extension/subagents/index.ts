@@ -14,9 +14,7 @@ import {
 	startTaskModelInit,
 	type TaskModelInitOutcome,
 	type PiRunSessionInfrastructure,
-	type PiLaunchSnapshot,
 	type PiLaunchInput,
-	type PiAttemptSnapshot,
 } from "../../maestro/runtime/index.ts";
 import { loadSupervisionConfig } from "../../maestro/core/config/supervision-config.ts";
 import {
@@ -24,10 +22,7 @@ import {
 	getAuthenticatedTaskPreferences,
 	parseExactModelRef,
 	resolveRuntimePlan,
-	resolveRuntimePlans,
 	isThinkingLevel,
-	type ResolvedRuntimePlan,
-	type ThinkingLevel,
 } from "../../maestro/core/routing.ts";
 import { wrapPiModelRegistry } from "./model-registry.ts";
 import {
@@ -35,7 +30,6 @@ import {
 	MISSING_CONFIG_REVISION,
 	parseRankingBasis,
 	readModelConfigSnapshot,
-	resolveModelDefault,
 	writeTaskModelConfig,
 } from "../../maestro/core/config/model-config.ts";
 import {
@@ -135,6 +129,7 @@ import {
 	createPersistentControls,
 } from "./persistent.ts";
 import { createDelivery } from "./delivery.ts";
+import { buildPiPromptArgs, createLaunchPlanner } from "./launch.ts";
 
 export { shouldDeliverSubagentCompletion, selectCompletionApi };
 
@@ -299,6 +294,8 @@ const {
 	notifyPersistentCrash,
 	deliverPiCompletion,
 } = createDelivery({ runtime, updateWidget, startPersistentStopTimeout });
+const { normalizePiAttempt, resolveSubagentRuntimePlans, launchSnapshot } =
+	createLaunchPlanner({ runtime, modelConfig, paneConfig });
 
 export function shouldPreserveSubagentsOnShutdown(
 	reason: SessionShutdownEvent["reason"] | undefined,
@@ -534,35 +531,6 @@ function updateWidget() {
 	);
 }
 
-/**
- * Build the positional prompt args for a Pi CLI subagent launch.
- *
- * In artifact-backed launches (lineage-only, standalone), Pi's buildInitialMessage()
- * concatenates @file content with messages[0] into one initial prompt. That breaks
- * /skill: expansion because the message no longer starts with "/skill:". Only
- * messages[1..] are sent as separate follow-up prompts where /skill: is recognized.
- *
- * When there are skill prompts AND artifact-backed delivery, we prepend an empty
- * first positional message so that /skill: args land in messages[1..] and arrive
- * as standalone prompts in the child session.
- */
-function buildPiPromptArgs(params: {
-	effectiveSkills?: string;
-	taskDelivery: "direct" | "artifact";
-	taskArg: string;
-}): string[] {
-	const skillPrompts = (params.effectiveSkills ?? "")
-		.split(",")
-		.map((s) => s.trim())
-		.filter(Boolean)
-		.map((skill) => `/skill:${skill}`);
-
-	const needsSeparator =
-		params.taskDelivery === "artifact" && skillPrompts.length > 0;
-
-	return [...(needsSeparator ? [""] : []), ...skillPrompts, params.taskArg];
-}
-
 function startStatusRefresh(pi: ExtensionAPI) {
 	if (!statusConfig.enabled || statusInterval) return;
 
@@ -689,168 +657,6 @@ function startWidgetRefresh() {
 		updateWidget();
 	}, 1000);
 	writeGlobalSlot(WIDGET_INTERVAL_KEY, widgetInterval);
-}
-
-function normalizePiAttempt(
-	params: typeof SubagentParams.static,
-	ctx: {
-		sessionManager: {
-			getSessionFile(): string | null | undefined;
-			getSessionId(): string;
-			getSessionDir(): string;
-		};
-		cwd: string;
-		model?: { provider: string; id: string };
-		modelRegistry: {
-			find(provider: string, modelId: string): any;
-			getAvailable?: () => any[];
-			getAll?: () => any[];
-			hasConfiguredAuth?: (model: any) => boolean;
-		};
-	},
-	parentThinking: ThinkingLevel,
-	options: {
-		id: string;
-		controlTaskId: string;
-		origin: Pick<PiLaunchSnapshot["parent"], "cwd" | "invocationCwd">;
-	},
-): PiAttemptSnapshot {
-	const agentDefs = params.agent
-		? loadAgentDefaults(params.agent, runtime.pi)
-		: null;
-	if (params.agent && !agentDefs) {
-		const diagnostic = discoverAgentCatalog(runtime.pi).diagnostics.find(
-			(candidate) => candidate.agentName === params.agent,
-		);
-		throw new Error(diagnostic?.message ?? missingRoleMessage(params.agent));
-	}
-	if (!ctx.model)
-		throw new Error("Subagent launch requires a resolved parent model");
-
-	const effectiveTools = params.tools ?? agentDefs?.tools;
-	const effectiveSkills = params.skills ?? agentDefs?.skills;
-	const persistent = resolveEffectivePersistent(params, agentDefs);
-	const effectiveAutoExit = resolveEffectiveAutoExit(params, agentDefs);
-	const effectiveInteractive = resolveEffectiveInteractive(params, agentDefs);
-	const logicalId = options.id;
-	const generationId = randomUUID();
-	const taskId = randomUUID();
-	const parentSessionFile = ctx.sessionManager.getSessionFile();
-	if (!parentSessionFile) throw new Error("No session file");
-	const snapshot = launchSnapshot(ctx, parentThinking);
-
-	return {
-		snapshot: {
-			...snapshot,
-			parent: { ...snapshot.parent, ...options.origin },
-		},
-		task: {
-			id: options.controlTaskId,
-			name: params.name,
-			prompt: params.task,
-			role: params.agent ?? "",
-			cwd: options.origin.cwd,
-			worktree: params.worktree ?? undefined,
-			session: { mode: resolveEffectiveSessionMode(params, agentDefs) },
-			behavior: {
-				skills: effectiveSkills
-					?.split(",")
-					.map((s) => s.trim())
-					.filter(Boolean),
-				denyTools: [...resolveDenyTools(agentDefs)],
-				autoExit: effectiveAutoExit,
-				interactive: effectiveInteractive,
-				persistent,
-				systemPromptMode: agentDefs?.systemPromptMode,
-			},
-			systemPrompt: params.agent ? undefined : params.systemPrompt,
-		},
-		role: agentDefs
-			? {
-					...agentDefs.role,
-					systemPrompt: agentDefs.body ?? params.systemPrompt ?? "",
-				}
-			: {
-					name: "",
-					version: "1",
-					description: "Pi host-resolved role",
-					systemPrompt: params.systemPrompt ?? "",
-					allowedTools: [],
-				},
-		resolved: {
-			agent: params.agent,
-			cwd: params.cwd,
-			roleCwd: agentDefs?.cwd,
-			tools: effectiveTools,
-		},
-		identity: { id: logicalId, logicalId, generationId, taskId },
-	};
-}
-
-/**
- * Watch a launched subagent until it exits. Polls for completion, extracts
- * the summary from the session file. Temporary panes close only after parent
- * delivery; worktree workspaces remain retained for review.
- */
-function resolveSubagentRuntimePlans(
-	params: typeof SubagentParams.static,
-	ctx: Parameters<typeof normalizePiAttempt>[1],
-	parentThinking: ThinkingLevel,
-): ResolvedRuntimePlan[] {
-	const agentDefs = params.agent
-		? loadAgentDefaults(params.agent, runtime.pi)
-		: null;
-	if (params.agent && !agentDefs) {
-		const diagnostic = discoverAgentCatalog(runtime.pi).diagnostics.find(
-			(candidate) => candidate.agentName === params.agent,
-		);
-		throw new Error(diagnostic?.message ?? missingRoleMessage(params.agent));
-	}
-	if (!ctx.model)
-		throw new Error("Subagent launch requires a resolved parent model");
-	const plans = resolveRuntimePlans(
-		{ model: params.model, thinking: params.thinking },
-		{
-			model: resolveModelDefault(params.agent, agentDefs?.model, modelConfig),
-			thinking: agentDefs?.thinking,
-		},
-		{
-			provider: ctx.model.provider,
-			modelId: ctx.model.id,
-			thinking: parentThinking,
-		},
-		wrapPiModelRegistry(ctx.modelRegistry),
-		modelConfig.tasks,
-		!!params.worktree,
-	);
-	if (params.worktree && plans.length > 1) {
-		throw new Error(
-			"Model fallbacks are not supported for worktree subagents.",
-		);
-	}
-	return plans;
-}
-
-function launchSnapshot(
-	ctx: Parameters<typeof normalizePiAttempt>[1],
-	thinking?: ThinkingLevel,
-): PiLaunchSnapshot {
-	return {
-		parent: {
-			cwd: ctx.cwd,
-			invocationCwd: process.cwd(),
-			sessionFile: ctx.sessionManager.getSessionFile() ?? "",
-			sessionId: ctx.sessionManager.getSessionId(),
-			sessionDir: ctx.sessionManager.getSessionDir(),
-			agentDir: getAgentConfigDir(),
-		},
-		parentRuntime:
-			ctx.model && thinking
-				? { provider: ctx.model.provider, modelId: ctx.model.id, thinking }
-				: undefined,
-		modelRegistry: wrapPiModelRegistry(ctx.modelRegistry),
-		paneConfig,
-	};
 }
 
 export function shouldAdvanceToFallback(
