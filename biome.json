@@ -5,6 +5,7 @@
       "test/**",
       "maestro/**",
       "plugins/**",
+      "scripts/**",
       "!**/*.md"
     ]
   },

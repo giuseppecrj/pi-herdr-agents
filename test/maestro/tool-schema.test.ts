@@ -7,6 +7,7 @@ import type {
 	JsonValue,
 	ToolSchemaSnapshot,
 } from "../helpers/tool-schema-capture.ts";
+import { renderToolDocs } from "../../scripts/tool-docs.ts";
 import { findBreakingChanges } from "../helpers/tool-schema-compat.ts";
 
 const fixture = (name: string): ToolSchemaSnapshot =>
@@ -47,6 +48,18 @@ describe("public tool schema snapshot", () => {
 			await captureToolSchemas(),
 			fixture("current"),
 			"The public tool schemas changed. Run `npm run docs:tools` to refresh test/fixtures/tool-schema/current.json and docs/tools.md, then review the diff.",
+		);
+	});
+
+	it("keeps the generated blocks in docs/tools.md up to date", () => {
+		const docs = readFileSync(
+			new URL("../../docs/tools.md", import.meta.url),
+			"utf8",
+		);
+		assert.equal(
+			docs,
+			renderToolDocs(docs, fixture("current")),
+			"docs/tools.md generated blocks are stale. Run `npm run docs:tools` and commit the result.",
 		);
 	});
 

@@ -4,6 +4,7 @@ docs/superpowers/
 docs/sidebar-plan.md
 .superpowers/
 test/
+scripts/
 docs/assets/
 .github/
 .gitignore

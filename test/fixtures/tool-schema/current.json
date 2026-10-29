@@ -46,34 +46,13 @@
 					"thinking": {
 						"description": "Pi thinking level. Pick the model tier first, then set thinking within that model's range: minimal/low for bounded mechanical work, medium for ordinary implementation or review, high+ for architecture, security, or hard diagnosis. Omitting still inherits the parent level; do not omit on orchestrated child work.",
 						"anyOf": [
-							{
-								"const": "off",
-								"type": "string"
-							},
-							{
-								"const": "minimal",
-								"type": "string"
-							},
-							{
-								"const": "low",
-								"type": "string"
-							},
-							{
-								"const": "medium",
-								"type": "string"
-							},
-							{
-								"const": "high",
-								"type": "string"
-							},
-							{
-								"const": "xhigh",
-								"type": "string"
-							},
-							{
-								"const": "max",
-								"type": "string"
-							}
+							{ "const": "off", "type": "string" },
+							{ "const": "minimal", "type": "string" },
+							{ "const": "low", "type": "string" },
+							{ "const": "medium", "type": "string" },
+							{ "const": "high", "type": "string" },
+							{ "const": "xhigh", "type": "string" },
+							{ "const": "max", "type": "string" }
 						]
 					},
 					"skills": {
@@ -106,9 +85,7 @@
 									}
 								}
 							},
-							{
-								"type": "null"
-							}
+							{ "type": "null" }
 						]
 					},
 					"fork": {
@@ -148,10 +125,7 @@
 			"name": "subagent_done",
 			"scopes": ["child"],
 			"description": "Call this tool when you have completed your task. It will close this session and return your results to the main session. Your LAST assistant message before calling this becomes the summary returned to the caller.",
-			"parameters": {
-				"type": "object",
-				"properties": {}
-			}
+			"parameters": { "type": "object", "properties": {} }
 		},
 		{
 			"name": "subagent_interrupt",
@@ -214,10 +188,7 @@
 						"description": "Exact unambiguous persistent specialist name",
 						"type": "string"
 					},
-					"message": {
-						"description": "The next task",
-						"type": "string"
-					}
+					"message": { "description": "The next task", "type": "string" }
 				}
 			}
 		},
@@ -243,10 +214,7 @@
 			"name": "subagents_list",
 			"scopes": ["parent", "child"],
 			"description": "List all available package, global, and project subagent definitions. Project agents override global definitions, which override package definitions.",
-			"parameters": {
-				"type": "object",
-				"properties": {}
-			}
+			"parameters": { "type": "object", "properties": {} }
 		},
 		{
 			"name": "subagents_write_task_models",
@@ -265,55 +233,37 @@
 								"minItems": 1,
 								"description": "Implementation workers",
 								"type": "array",
-								"items": {
-									"minLength": 1,
-									"type": "string"
-								}
+								"items": { "minLength": 1, "type": "string" }
 							},
 							"review": {
 								"minItems": 1,
 								"description": "Code reviewers",
 								"type": "array",
-								"items": {
-									"minLength": 1,
-									"type": "string"
-								}
+								"items": { "minLength": 1, "type": "string" }
 							},
 							"recon": {
 								"minItems": 1,
 								"description": "Reconnaissance scouts",
 								"type": "array",
-								"items": {
-									"minLength": 1,
-									"type": "string"
-								}
+								"items": { "minLength": 1, "type": "string" }
 							},
 							"qa": {
 								"minItems": 1,
 								"description": "Software and test runners",
 								"type": "array",
-								"items": {
-									"minLength": 1,
-									"type": "string"
-								}
+								"items": { "minLength": 1, "type": "string" }
 							},
 							"architecture": {
 								"minItems": 1,
 								"description": "Planning and diagnosis",
 								"type": "array",
-								"items": {
-									"minLength": 1,
-									"type": "string"
-								}
+								"items": { "minLength": 1, "type": "string" }
 							},
 							"docs": {
 								"minItems": 1,
 								"description": "Documentation workers",
 								"type": "array",
-								"items": {
-									"minLength": 1,
-									"type": "string"
-								}
+								"items": { "minLength": 1, "type": "string" }
 							}
 						}
 					},
@@ -321,19 +271,11 @@
 						"type": "object",
 						"required": ["generatedAt", "method"],
 						"properties": {
-							"generatedAt": {
-								"type": "string"
-							},
+							"generatedAt": { "type": "string" },
 							"method": {
 								"anyOf": [
-									{
-										"const": "research",
-										"type": "string"
-									},
-									{
-										"const": "registry-only",
-										"type": "string"
-									}
+									{ "const": "research", "type": "string" },
+									{ "const": "registry-only", "type": "string" }
 								]
 							}
 						}
@@ -341,14 +283,8 @@
 					"expectedConfigRevision": {
 						"description": "Revision of the config the proposal was read from: \"sha256:\" plus 64 lowercase hex digits of the exact file bytes, or \"missing\" when the file is absent. A mismatch fails without writing; re-read, re-propose, and re-approve. Omit for an unconditional write.",
 						"anyOf": [
-							{
-								"const": "missing",
-								"type": "string"
-							},
-							{
-								"pattern": "^sha256:[0-9a-f]{64}$",
-								"type": "string"
-							}
+							{ "const": "missing", "type": "string" },
+							{ "pattern": "^sha256:[0-9a-f]{64}$", "type": "string" }
 						]
 					},
 					"basis": {
@@ -359,10 +295,7 @@
 								"type": "object",
 								"required": ["kind"],
 								"properties": {
-									"kind": {
-										"const": "registry-only",
-										"type": "string"
-									}
+									"kind": { "const": "registry-only", "type": "string" }
 								}
 							},
 							{
@@ -370,10 +303,7 @@
 								"type": "object",
 								"required": ["kind", "sources", "uncertainty"],
 								"properties": {
-									"kind": {
-										"const": "research",
-										"type": "string"
-									},
+									"kind": { "const": "research", "type": "string" },
 									"sources": {
 										"minItems": 1,
 										"type": "array",
@@ -382,21 +312,12 @@
 											"type": "object",
 											"required": ["url", "influence"],
 											"properties": {
-												"url": {
-													"minLength": 1,
-													"type": "string"
-												},
-												"influence": {
-													"minLength": 1,
-													"type": "string"
-												}
+												"url": { "minLength": 1, "type": "string" },
+												"influence": { "minLength": 1, "type": "string" }
 											}
 										}
 									},
-									"uncertainty": {
-										"minLength": 1,
-										"type": "string"
-									}
+									"uncertainty": { "minLength": 1, "type": "string" }
 								}
 							}
 						]
@@ -408,10 +329,7 @@
 			"name": "worktree_list",
 			"scopes": ["parent"],
 			"description": "Inspect managed worktrees, including cross-session orphans. Only source repositories inside cwd are eligible for explicit removal. This tool never removes anything.",
-			"parameters": {
-				"type": "object",
-				"properties": {}
-			}
+			"parameters": { "type": "object", "properties": {} }
 		},
 		{
 			"name": "worktree_remove",
@@ -421,13 +339,8 @@
 				"type": "object",
 				"required": ["target"],
 				"properties": {
-					"target": {
-						"minLength": 1,
-						"type": "string"
-					},
-					"preserve": {
-						"type": "boolean"
-					}
+					"target": { "minLength": 1, "type": "string" },
+					"preserve": { "type": "boolean" }
 				}
 			}
 		}
