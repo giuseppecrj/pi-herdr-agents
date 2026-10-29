@@ -7,7 +7,7 @@ import type {
 	JsonValue,
 	ToolSchemaSnapshot,
 } from "../helpers/tool-schema-capture.ts";
-import { renderToolDocs } from "../../scripts/tool-docs.ts";
+import { COMMAND_USAGE, renderToolDocs } from "../../scripts/tool-docs.ts";
 import { findBreakingChanges } from "../helpers/tool-schema-compat.ts";
 
 const fixture = (name: string): ToolSchemaSnapshot =>
@@ -270,3 +270,92 @@ describe("tool schema compatibility rules", () => {
 		);
 	});
 });
+
+describe("generated tool docs", () => {
+	const docs = () =>
+		renderToolDocs(
+			["tools", "child-tools", "commands", "subagent-params", "tool-reference"]
+				.map(
+					(name) =>
+						`<!-- generated:${name}:start -->\n<!-- generated:${name}:end -->`,
+				)
+				.join("\n"),
+			fixture("current"),
+		);
+
+	it("marks exactly the parent-only tools as parent only", () => {
+		const snapshot = fixture("current");
+		const parentTools = snapshot.tools.filter((tool) =>
+			tool.scopes.includes("parent"),
+		);
+		const parentOnly = new Set(
+			parentTools
+				.filter((tool) => tool.scopes.length === 1)
+				.map((tool) => tool.name),
+		);
+		assert.ok(parentOnly.size > 0 && parentOnly.size < parentTools.length);
+		const rows = docs()
+			.split("\n")
+			.filter((line) =>
+				/^\| `[a-z_]+` \| (parent only|parent, child) \|/.test(line),
+			);
+		assert.equal(rows.length, parentTools.length);
+		for (const tool of parentTools) {
+			const row = rows.find((line) => line.startsWith(`| \`${tool.name}\` |`));
+			assert.ok(row, `${tool.name} has a row`);
+			assert.equal(
+				row.includes("| parent only |"),
+				parentOnly.has(tool.name),
+				tool.name,
+			);
+		}
+	});
+
+	it("lists every registered command with its usage", () => {
+		const snapshot = fixture("current");
+		const output = docs();
+		for (const command of snapshot.commands) {
+			assert.ok(output.includes(`| \`/${command.name}\` |`), command.name);
+			for (const form of COMMAND_USAGE[command.name])
+				assert.ok(output.includes(`\`${form}\``), form);
+		}
+		assert.ok(output.includes("`/worktree <name> [task]`"));
+	});
+
+	it("fails when a command has no usage entry or usage names an unknown command", () => {
+		const snapshot = fixture("current");
+		const extra: ToolSchemaSnapshot["commands"][number] = {
+			name: "extra",
+			scopes: ["parent"],
+			description: "x",
+		};
+		const withExtra: ToolSchemaSnapshot = {
+			...snapshot,
+			commands: [...snapshot.commands, extra],
+		};
+		assert.throws(() => renderToolDocs(docsSkeleton(), withExtra), /\/extra/);
+		const missing = {
+			...snapshot,
+			commands: snapshot.commands.slice(1),
+		};
+		assert.throws(
+			() => renderToolDocs(docsSkeleton(), missing),
+			/not a registered command/,
+		);
+	});
+});
+
+function docsSkeleton(): string {
+	return [
+		"tools",
+		"child-tools",
+		"commands",
+		"subagent-params",
+		"tool-reference",
+	]
+		.map(
+			(name) =>
+				`<!-- generated:${name}:start -->\n<!-- generated:${name}:end -->`,
+		)
+		.join("\n");
+}

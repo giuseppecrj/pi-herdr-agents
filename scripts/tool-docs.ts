@@ -72,6 +72,54 @@ const toolTable = (tools: CapturedTool[]) =>
 		tools.map((tool) => [`\`${tool.name}\``, firstSentence(tool.description)]),
 	);
 
+/** True for tools registered only in parent sessions. */
+const isParentOnly = (tool: CapturedTool) =>
+	tool.scopes.length === 1 && tool.scopes[0] === "parent";
+
+const parentToolTable = (tools: CapturedTool[]) =>
+	table(
+		["Tool", "Sessions", "Description"],
+		tools.map((tool) => [
+			`\`${tool.name}\``,
+			isParentOnly(tool) ? "parent only" : "parent, child",
+			firstSentence(tool.description),
+		]),
+	);
+
+/**
+ * Usage forms per command. Registered commands carry no argument grammar, so
+ * this table is the source for the docs. `commandUsage` throws when it drifts
+ * from the registered commands.
+ */
+export const COMMAND_USAGE = {
+	subagent: ["/subagent <agent> <task>", "/subagent list"],
+	"subagents-init": ["/subagents-init [preferences]"],
+	worktree: [
+		"/worktree <name> [task]",
+		"/worktree list",
+		"/worktree remove <target>",
+	],
+} as const satisfies Record<string, readonly string[]>;
+
+function commandUsage(commands: ToolSchemaSnapshot["commands"]) {
+	const registered = new Set(commands.map((command) => command.name));
+	const usageByName = new Map(Object.entries(COMMAND_USAGE));
+	for (const name of registered)
+		if (!usageByName.has(name))
+			throw new Error(
+				`Command /${name} has no usage entry in COMMAND_USAGE (scripts/tool-docs.ts)`,
+			);
+	for (const name of Object.keys(COMMAND_USAGE))
+		if (!registered.has(name))
+			throw new Error(
+				`COMMAND_USAGE names /${name}, which is not a registered command`,
+			);
+	return (name: string) =>
+		(usageByName.get(name) ?? [])
+			.map((form) => `\`${form.replace(/\|/g, "\\|")}\``)
+			.join("<br>");
+}
+
 function findTool(snapshot: ToolSchemaSnapshot, name: string): CapturedTool {
 	const tool = snapshot.tools.find((candidate) => candidate.name === name);
 	if (!tool) throw new Error(`Tool ${name} is not registered`);
@@ -96,18 +144,21 @@ function renderBlock(
 			return [
 				`**Subagents** — ${parentTools.length} parent-session tools + ${parentCommands.length} commands, plus ${childOnly.length} child-only tools:`,
 				"",
-				toolTable(parentTools),
+				parentToolTable(parentTools),
 			].join("\n");
 		case "child-tools":
 			return toolTable(childOnly).replace("| Tool |", "| Pi child-only tool |");
-		case "commands":
+		case "commands": {
+			const usage = commandUsage(snapshot.commands);
 			return table(
-				["Command", "Description"],
+				["Command", "Usage", "Description"],
 				parentCommands.map((command) => [
 					`\`/${command.name}\``,
+					usage(command.name),
 					cell(command.description),
 				]),
 			);
+		}
 		case "subagent-params":
 			return parameterTable(findTool(snapshot, "subagent"));
 		case "tool-reference":
