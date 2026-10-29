@@ -292,13 +292,13 @@ const paneConfig = loadPaneConfig(
 );
 
 /** Presentation rows share the adapter's records; only RunSession owns runs. */
-export const runtime: SubagentRuntime = readGlobalSlot<SubagentRuntime>(
+const runtime: SubagentRuntime = readGlobalSlot<SubagentRuntime>(
 	RUNTIME_KEY,
 ) ?? {
 	runningSubagents: new Map<string, RunningSubagent>(),
 };
 writeGlobalSlot(RUNTIME_KEY, runtime);
-export const runningSubagents = runtime.runningSubagents;
+const runningSubagents = runtime.runningSubagents;
 const { observeRunningSubagent, evaluateNoProgressAdvisory } =
 	createObservation(runtime);
 const {
@@ -508,7 +508,7 @@ function renderSubagentWidgetLines(
 	return lines;
 }
 
-export function updateWidget() {
+function updateWidget() {
 	const latestCtx = runtime.latestCtx;
 	if (!latestCtx?.hasUI) return;
 
