@@ -920,12 +920,6 @@ export function findLastAssistantSummary(
 	return null;
 }
 
-export function findLastAssistantMessage(
-	entries: SessionEntry[],
-): string | null {
-	return findLastAssistantSummary(entries)?.summary ?? null;
-}
-
 /**
  * Append a branch_summary entry to the session file.
  * Returns the new entry's id.

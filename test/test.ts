@@ -54,7 +54,7 @@ import {
 import {
 	getLeafId,
 	getNewEntries,
-	findLastAssistantMessage,
+	findLastAssistantSummary,
 	inspectFinalAssistantMessage,
 	inspectNoProgressSessionTail,
 	findObservedSessionRuntime,
@@ -2543,32 +2543,38 @@ describe("session.ts", () => {
 		});
 	});
 
-	describe("findLastAssistantMessage", () => {
+	describe("findLastAssistantSummary", () => {
 		it("finds last assistant text", () => {
 			const entries = [USER_MSG, ASSISTANT_MSG, ASSISTANT_MSG_2];
-			const text = findLastAssistantMessage(entries);
-			assert.equal(text, "Updated plan with details.");
+			assert.deepEqual(findLastAssistantSummary(entries), {
+				summary: "Updated plan with details.",
+				summarySource: "child",
+			});
 		});
 
 		it("skips thinking blocks, gets text only", () => {
 			const entries = [ASSISTANT_MSG_2];
-			const text = findLastAssistantMessage(entries);
-			assert.equal(text, "Updated plan with details.");
+			assert.deepEqual(findLastAssistantSummary(entries), {
+				summary: "Updated plan with details.",
+				summarySource: "child",
+			});
 		});
 
 		it("skips tool results", () => {
 			const entries = [ASSISTANT_MSG, TOOL_RESULT];
-			const text = findLastAssistantMessage(entries);
-			assert.equal(text, "Here is my plan...");
+			assert.deepEqual(findLastAssistantSummary(entries), {
+				summary: "Here is my plan...",
+				summarySource: "child",
+			});
 		});
 
 		it("returns null when no assistant messages", () => {
 			const entries = [USER_MSG];
-			assert.equal(findLastAssistantMessage(entries), null);
+			assert.equal(findLastAssistantSummary(entries), null);
 		});
 
 		it("returns null for empty array", () => {
-			assert.equal(findLastAssistantMessage([]), null);
+			assert.equal(findLastAssistantSummary([]), null);
 		});
 
 		it("reports an empty final completion instead of reusing an earlier assistant message", () => {
@@ -2590,7 +2596,10 @@ describe("session.ts", () => {
 				},
 			};
 			const entries = [realMsg, emptyMsg];
-			assert.equal(findLastAssistantMessage(entries), "Real summary content.");
+			assert.deepEqual(findLastAssistantSummary(entries), {
+				summary: "Real summary content.",
+				summarySource: "child",
+			});
 			assert.deepEqual(inspectFinalAssistantMessage(entries), {
 				text: null,
 				contentLength: 0,
@@ -2622,10 +2631,10 @@ describe("session.ts", () => {
 				},
 			};
 			const entries = [earlierGood, overloadError];
-			assert.equal(
-				findLastAssistantMessage(entries),
-				"Subagent error: Anthropic 529 Overloaded after 3 retries",
-			);
+			assert.deepEqual(findLastAssistantSummary(entries), {
+				summary: "Subagent error: Anthropic 529 Overloaded after 3 retries",
+				summarySource: "host",
+			});
 		});
 
 		it("prefers text content even when an error stopReason is set", () => {
@@ -2641,7 +2650,10 @@ describe("session.ts", () => {
 					errorMessage: "stream interrupted",
 				},
 			};
-			assert.equal(findLastAssistantMessage([msg]), "Here is partial output.");
+			assert.deepEqual(findLastAssistantSummary([msg]), {
+				summary: "Here is partial output.",
+				summarySource: "child",
+			});
 		});
 
 		it("does not invent a summary for a stop=error message with no errorMessage", () => {
@@ -2654,7 +2666,7 @@ describe("session.ts", () => {
 					stopReason: "error",
 				},
 			};
-			assert.equal(findLastAssistantMessage([msg]), null);
+			assert.equal(findLastAssistantSummary([msg]), null);
 		});
 
 		it("preserves an assistant record that starts exactly at the bounded tail", () => {
