@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
-import {
+import fs, {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -365,6 +365,214 @@ test("a name containing ../ or an absolute path resolves to nothing", () =>
 
 		assert.deepEqual(resolution.skills, []);
 		assert.equal(resolution.missing.length, 4);
+	}));
+
+/** Count the bytes read from `file` through node:fs while `run` executes. */
+async function bytesReadFrom(
+	file: string,
+	run: () => Promise<void> | void,
+): Promise<number> {
+	const original = {
+		readFileSync: fs.readFileSync,
+		openSync: fs.openSync,
+		readSync: fs.readSync,
+	};
+	const watched = new Set<number>();
+	let bytes = 0;
+	Object.assign(fs, {
+		readFileSync(path: fs.PathOrFileDescriptor, ...rest: unknown[]) {
+			// SAFETY: forwards the caller's own arguments unchanged.
+			const value = (original.readFileSync as any).call(fs, path, ...rest);
+			if (String(path) === file) bytes += Buffer.byteLength(value);
+			return value;
+		},
+		openSync(path: fs.PathLike, ...rest: unknown[]) {
+			// SAFETY: forwards the caller's own arguments unchanged.
+			const fd = (original.openSync as any).call(fs, path, ...rest);
+			if (String(path) === file) watched.add(fd);
+			return fd;
+		},
+		readSync(fd: number, ...rest: unknown[]) {
+			// SAFETY: forwards the caller's own arguments unchanged.
+			const read = (original.readSync as any).call(fs, fd, ...rest);
+			if (watched.has(fd)) bytes += read;
+			return read;
+		},
+	});
+	syncBuiltinESMExports();
+	try {
+		await run();
+	} finally {
+		Object.assign(fs, original);
+		syncBuiltinESMExports();
+	}
+	return bytes;
+}
+
+test("REGRESSION: an oversize skill file is never read whole, declared or not", () =>
+	withLayout(async (layout) => {
+		const skills = join(layout.agentDir, "skills");
+		const big = writeSkill(skills, "big", "x".repeat(1024 * 1024));
+		writeSkill(skills, "small", "Small body.");
+
+		let resolution:
+			| Awaited<ReturnType<typeof resolveDeclaredSkills>>
+			| undefined;
+		const unrelated = await bytesReadFrom(big, async () => {
+			resolution = await resolveDeclaredSkills(["small"], options(layout));
+		});
+		assert.deepEqual(
+			resolution?.skills.map((skill) => skill.content),
+			["Small body."],
+		);
+		assert.ok(
+			unrelated < SKILL_FILE_MAX_BYTES,
+			`read ${unrelated} bytes of an unrelated oversize skill`,
+		);
+
+		const declared = await bytesReadFrom(big, () =>
+			assert.rejects(
+				async () => resolveDeclaredSkills(["big"], options(layout)),
+				/Skill "big" .* is 1024\.0 KiB, over the 64 KiB per-skill limit/,
+			),
+		);
+		assert.ok(
+			declared < SKILL_FILE_MAX_BYTES,
+			`read ${declared} bytes of a declared oversize skill before refusing it`,
+		);
+	}));
+
+/** A local package whose manifest lists `./skills` holding two skills. */
+function writePackage(layout: Layout, manifestSkills: string[] = ["./skills"]) {
+	const pack = join(layout.root, "pack");
+	const allowed = writeSkill(join(pack, "skills"), "allowed", "Allowed.");
+	writeSkill(join(pack, "skills"), "excluded", "EXCLUDED CONTENT");
+	writeFileSync(
+		join(pack, "package.json"),
+		JSON.stringify({ pi: { skills: manifestSkills } }),
+	);
+	return { pack, allowed };
+}
+
+interface UserSettings {
+	skills?: string[];
+	packages?: (string | PackageSettingsEntry)[];
+}
+
+interface PackageSettingsEntry {
+	source: string;
+	skills?: string[];
+	autoload?: boolean;
+}
+
+function writeUserSettings(layout: Layout, settings: UserSettings) {
+	writeFileSync(
+		join(layout.agentDir, "settings.json"),
+		JSON.stringify(settings),
+	);
+}
+
+test("REGRESSION: a package's skill allowlist excludes the skills it does not list", () =>
+	withLayout(async (layout) => {
+		const { pack, allowed } = writePackage(layout);
+		for (const filter of [
+			"skills/allowed/SKILL.md",
+			"skills/allowed",
+			"allowed",
+		]) {
+			writeUserSettings(layout, {
+				packages: [{ source: pack, skills: [filter] }],
+			});
+			const resolution = await resolveDeclaredSkills(
+				["allowed", "excluded"],
+				options(layout),
+			);
+			assert.deepEqual(
+				resolution.skills.map((skill) => skill.filePath),
+				[allowed],
+				filter,
+			);
+			assert.deepEqual(resolution.missing, ["excluded"], filter);
+		}
+
+		// A glob the host cannot evaluate without Pi's matcher fails closed.
+		writeUserSettings(layout, {
+			packages: [{ source: pack, skills: ["skills/allow*"] }],
+		});
+		const glob = await resolveDeclaredSkills(
+			["allowed", "excluded"],
+			options(layout),
+		);
+		assert.deepEqual(glob.missing, ["allowed", "excluded"]);
+	}));
+
+test("REGRESSION: an autoload-disabled package contributes no skills", () =>
+	withLayout(async (layout) => {
+		const { pack } = writePackage(layout);
+		for (const entry of [
+			{ source: pack, autoload: false },
+			{ source: pack, autoload: false, skills: ["allowed"] },
+		]) {
+			writeUserSettings(layout, { packages: [entry] });
+			const resolution = await resolveDeclaredSkills(
+				["allowed", "excluded"],
+				options(layout),
+			);
+			assert.deepEqual(resolution.skills, [], JSON.stringify(entry));
+			assert.deepEqual(resolution.missing, ["allowed", "excluded"]);
+		}
+	}));
+
+test("a project package filter replaces the user's entry for the same package", () =>
+	withLayout(async (layout) => {
+		trustProject(layout);
+		const { pack, allowed } = writePackage(layout);
+		writeUserSettings(layout, { packages: [pack] });
+		mkdirSync(join(layout.project, ".pi"), { recursive: true });
+		writeFileSync(
+			join(layout.project, ".pi", "settings.json"),
+			JSON.stringify({ packages: [{ source: pack, skills: ["allowed"] }] }),
+		);
+		const resolution = await resolveDeclaredSkills(
+			["allowed", "excluded"],
+			options(layout),
+		);
+		assert.deepEqual(
+			resolution.skills.map((skill) => skill.filePath),
+			[allowed],
+		);
+		assert.deepEqual(resolution.missing, ["excluded"]);
+	}));
+
+test("manifest and settings exclusions keep a skill from being delivered", () =>
+	withLayout(async (layout) => {
+		const { pack, allowed } = writePackage(layout, [
+			"./skills",
+			"!skills/excluded",
+		]);
+		writeUserSettings(layout, { packages: [pack] });
+		const manifest = await resolveDeclaredSkills(
+			["allowed", "excluded"],
+			options(layout),
+		);
+		assert.deepEqual(
+			manifest.skills.map((skill) => skill.filePath),
+			[allowed],
+		);
+
+		const skills = join(layout.agentDir, "skills");
+		const kept = writeSkill(skills, "kept", "Kept.");
+		writeSkill(skills, "dropped", "Dropped.");
+		writeUserSettings(layout, { skills: ["!dropped"] });
+		const settings = await resolveDeclaredSkills(
+			["kept", "dropped"],
+			options(layout),
+		);
+		assert.deepEqual(
+			settings.skills.map((skill) => skill.filePath),
+			[kept],
+		);
+		assert.deepEqual(settings.missing, ["dropped"]);
 	}));
 
 test("an empty declaration resolves nothing without reading settings", async () => {

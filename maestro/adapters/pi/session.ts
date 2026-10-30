@@ -1,4 +1,8 @@
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import {
+	buildSessionContext,
+	SessionManager,
+	type SessionEntry as PiSessionEntry,
+} from "@earendil-works/pi-coding-agent";
 import {
 	appendFileSync,
 	closeSync,
@@ -844,39 +848,40 @@ export function findObservedSessionRuntime(
 }
 
 /**
- * The model Pi restores when this session is resumed without `--model`: the
- * latest `model_change` on the active branch (leaf = last entry, followed
- * through `parentId`), else the latest assistant response's model.
+ * The model Pi restores when this session is resumed without `--model`, as
+ * Pi's own `buildSessionContext()` projects it: the active branch (leaf = last
+ * entry, followed through `parentId`) read in order, where each `model_change`
+ * and each assistant response sets the model, so the latest one wins.
+ * Undefined when the branch records no model or cannot be projected.
  */
 export function findStoredSessionModel(
 	entries: SessionEntry[],
 ): { provider: string; modelId: string } | undefined {
-	const byId = new Map(entries.map((entry) => [entry.id, entry]));
-	const branch: SessionEntry[] = [];
-	const seen = new Set<string>();
-	for (
-		let entry: SessionEntry | undefined = entries.at(-1);
-		entry && !seen.has(entry.id);
-		entry = entry.parentId ? byId.get(entry.parentId) : undefined
-	) {
-		seen.add(entry.id);
-		branch.unshift(entry);
+	let model: { provider?: string; modelId?: string } | null;
+	try {
+		// The session file's parsed JSONL entries are the input Pi itself
+		// projects; a malformed entry throws and is caught below.
+		const piEntries: PiSessionEntry[] = [];
+		for (const entry of entries)
+			if (isPiSessionEntry(entry)) piEntries.push(entry);
+		model = buildSessionContext(piEntries).model;
+	} catch {
+		return undefined;
 	}
-	const observed = findObservedSessionRuntime(branch);
-	if (observed.provider && observed.modelId)
-		return { provider: observed.provider, modelId: observed.modelId };
-	for (let index = branch.length - 1; index >= 0; index--) {
-		const message = branch[index].message;
-		if (
-			branch[index].type === "message" &&
-			isRecord(message) &&
-			message.role === "assistant" &&
-			isString(message.provider) &&
-			isString(message.model)
-		)
-			return { provider: message.provider, modelId: message.model };
-	}
-	return undefined;
+	return model && isString(model.provider) && isString(model.modelId)
+		? { provider: model.provider, modelId: model.modelId }
+		: undefined;
+}
+
+/** Pi's projection reads an entry's `type`, `id` and `parentId`, and the
+ * `message` of a message entry; it skips every other entry type it reads. */
+function isPiSessionEntry(entry: any): entry is PiSessionEntry {
+	return (
+		isRecord(entry) &&
+		isString(entry.type) &&
+		isString(entry.id) &&
+		(entry.type !== "message" || isRecord(entry.message))
+	);
 }
 
 export interface FinalAssistantMessage {

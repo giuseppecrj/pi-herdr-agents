@@ -5,7 +5,10 @@ import {
 } from "@earendil-works/pi-ai";
 import {
 	createModelRegistryAdapter,
+	MODEL_SCOPE_ENV,
+	modelScopeOf,
 	scopeModelRegistryAdapter,
+	sessionModelScope,
 	type ModelRegistryAdapter,
 	type RoutingModel,
 	type RoutingRegistrySource,
@@ -22,20 +25,41 @@ export function wrapPiModelRegistry(
 	});
 }
 
+interface SessionModelContext {
+	modelRegistry: RoutingRegistrySource;
+	scopedModels?: readonly { model: RoutingModel }[];
+}
+
 // Scoped sessions (--models / enabledModels) resolve every model selection —
 // task shortlists, exact refs, fallback alternatives — against the session's
-// scoped set: out-of-scope models are invisible to spawn-time resolution.
-export function sessionModelRegistry(ctx: {
-	modelRegistry: RoutingRegistrySource;
-	scopedModels?: readonly { model: { provider: string; id: string } }[];
-}): ModelRegistryAdapter {
+// scoped set: out-of-scope models are invisible to spawn-time resolution. A
+// child also narrows its scope to the exact allowlist its parent exported, and
+// stays scoped to it when its own --models resolved to nothing.
+export function sessionModelRegistry(
+	ctx: SessionModelContext,
+	env: NodeJS.ProcessEnv = process.env,
+): ModelRegistryAdapter {
 	const registry = wrapPiModelRegistry(ctx.modelRegistry);
-	const scopedModels = (ctx.scopedModels ?? []).map((entry) => entry.model);
-	if (scopedModels.length === 0) return registry;
-	return scopeModelRegistryAdapter(
-		registry,
-		new Set(scopedModels.map((model) => `${model.provider}/${model.id}`)),
+	const ownScope = (ctx.scopedModels ?? []).map(
+		({ model }) => `${model.provider}/${model.id}`,
 	);
+	const scope = sessionModelScope(ownScope, env[MODEL_SCOPE_ENV]);
+	return scope ? scopeModelRegistryAdapter(registry, new Set(scope)) : registry;
+}
+
+/** The models a scoped session's catalog lists, or undefined when unscoped. */
+export function sessionScopedModels(
+	ctx: SessionModelContext,
+	registry: ModelRegistryAdapter,
+): RoutingModel[] | undefined {
+	const scope = modelScopeOf(registry);
+	if (!scope) return undefined;
+	const inScope = new Set(scope);
+	const own = (ctx.scopedModels ?? [])
+		.map(({ model }) => model)
+		.filter((model) => inScope.has(`${model.provider}/${model.id}`));
+	// Only an inherited allowlist applies: list what the registry resolves.
+	return own.length > 0 ? own : registry.available();
 }
 
 function asPiModel(model: RoutingModel): Model<any> {
