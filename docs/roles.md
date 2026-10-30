@@ -147,8 +147,8 @@ worktree child sees its checkout's skills.
 A declared skill that Pi did not load does not stop the child. The message
 ends with a host note, `declared skills not loaded by Pi: <names>`. Reads are
 bounded: the child checks each file's size first. A `SKILL.md` over 64 KiB,
-or a skill that would push the total past 256 KiB, is skipped and named in the
-note, because the launch is already running. To fix it, shorten the skill
+or a skill that would push the total read or injected past 256 KiB, is
+skipped and named in the note, because the launch is already running. To fix it, shorten the skill
 (move detail into files it references) or declare fewer skills. Later turns
 inject nothing. A resumed session already holds its skills and gets
 `PI_SUBAGENT_SKILLS=[]`.

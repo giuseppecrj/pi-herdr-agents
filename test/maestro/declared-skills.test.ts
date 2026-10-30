@@ -223,6 +223,24 @@ describe("child declared-skill injection", () => {
 			assert.match(content, /s-5 .*256 KiB total limit/);
 		}));
 
+	it("never reads more than the total limit across all declared skills", () =>
+		withDir((dir) => {
+			const skills = Array.from({ length: 6 }, (_, i) =>
+				writeSkill(dir, `big-${i}`, "x".repeat(60 * 1024)),
+			);
+			const { io, bytesRead } = countingFs();
+			const result = createDeclaredSkillsInjector(
+				skills.map((skill) => skill.name),
+				io,
+			)(event(skills));
+			const read = [...bytesRead.values()].reduce((sum, n) => sum + n, 0);
+			assert.ok(
+				read <= SKILLS_TOTAL_MAX_BYTES + skills.length,
+				`read ${read} bytes, over the ${SKILLS_TOTAL_MAX_BYTES}-byte total budget`,
+			);
+			assert.match(String(result?.message.content), /total limit/);
+		}));
+
 	it("fires once: a later run injects nothing", () =>
 		withDir((dir) => {
 			const tdd = writeSkill(dir, "tdd", "TDD body.");

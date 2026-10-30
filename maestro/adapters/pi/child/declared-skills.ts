@@ -19,7 +19,7 @@ import {
 
 /** Largest SKILL.md injected. */
 export const SKILL_FILE_MAX_BYTES = 64 * 1024;
-/** Largest combined size of all injected skill blocks. */
+/** Largest combined size of all skill files read, and of all injected blocks. */
 export const SKILLS_TOTAL_MAX_BYTES = 256 * 1024;
 
 const MESSAGE_TYPE = "pi-herdr-agents:declared-skills";
@@ -51,21 +51,36 @@ export interface SkillFileSystem {
 
 const kib = (bytes: number) => `${Math.ceil(bytes / 1024)} KiB`;
 
+type SkillRead =
+	| { text: string; bytesRead: number }
+	| { skipped: string; bytesRead: number };
+
+const overTotal = (bytesRead: number): SkillRead => ({
+	skipped: `would pass the ${kib(SKILLS_TOTAL_MAX_BYTES)} total limit`,
+	bytesRead,
+});
+
 /**
  * The file's text, or why it was skipped. Stats first and never reads more
- * than the per-skill limit plus one byte, even if the file grows.
+ * than the smaller of the per-skill limit and the remaining total budget, plus
+ * one byte, even if the file grows.
  */
 function readSkillFile(
 	filePath: string,
 	fs: SkillFileSystem,
-): { text: string } | { skipped: string } {
+	budget: number,
+): SkillRead {
 	const stats = fs.statSync(filePath);
-	if (!stats.isFile()) return { skipped: "is not a regular file" };
-	const overLimit = (bytes: number) => ({
+	if (!stats.isFile())
+		return { skipped: "is not a regular file", bytesRead: 0 };
+	const overLimit = (bytes: number, bytesRead: number): SkillRead => ({
 		skipped: `(${kib(bytes)}) is over the ${kib(SKILL_FILE_MAX_BYTES)} per-skill limit`,
+		bytesRead,
 	});
-	if (stats.size > SKILL_FILE_MAX_BYTES) return overLimit(stats.size);
-	const buffer = Buffer.alloc(SKILL_FILE_MAX_BYTES + 1);
+	if (stats.size > SKILL_FILE_MAX_BYTES) return overLimit(stats.size, 0);
+	if (stats.size > budget) return overTotal(0);
+	const cap = Math.min(SKILL_FILE_MAX_BYTES, budget);
+	const buffer = Buffer.alloc(cap + 1);
 	const fd = fs.openSync(filePath, "r");
 	let length = 0;
 	try {
@@ -76,8 +91,11 @@ function readSkillFile(
 	} finally {
 		fs.closeSync(fd);
 	}
-	if (length > SKILL_FILE_MAX_BYTES) return overLimit(length);
-	return { text: buffer.toString("utf8", 0, length) };
+	if (length > cap)
+		return cap === SKILL_FILE_MAX_BYTES
+			? overLimit(length, length)
+			: overTotal(length);
+	return { text: buffer.toString("utf8", 0, length), bytesRead: length };
 }
 
 /**
@@ -98,20 +116,23 @@ export function createDeclaredSkillsInjector(
 		const notLoaded: string[] = [];
 		const skipped: string[] = [];
 		let total = 0;
+		let readBudget = SKILLS_TOTAL_MAX_BYTES;
 		for (const name of names) {
 			const skill = loaded.find((candidate) => candidate.name === name);
 			if (!skill) {
 				notLoaded.push(name);
 				continue;
 			}
-			let read: { text: string } | { skipped: string };
+			let read: SkillRead;
 			try {
-				read = readSkillFile(skill.filePath, fs);
+				read = readSkillFile(skill.filePath, fs, readBudget);
 			} catch (error) {
 				read = {
 					skipped: `could not be read (${error instanceof Error ? error.message : String(error)})`,
+					bytesRead: 0,
 				};
 			}
+			readBudget -= read.bytesRead;
 			if ("skipped" in read) {
 				skipped.push(`${name} ${read.skipped}`);
 				continue;
