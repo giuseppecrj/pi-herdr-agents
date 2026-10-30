@@ -73,7 +73,10 @@ export function createLaunchPlanner({
 			const diagnostic = discoverAgentCatalog(runtime.pi).diagnostics.find(
 				(candidate) => candidate.agentName === params.agent,
 			);
-			throw new Error(diagnostic?.message ?? missingRoleMessage(params.agent));
+			// Raw here: the public tool boundary and the delivery serializer encode.
+			throw new Error(
+				diagnostic ? diagnostic.message : missingRoleMessage(params.agent),
+			);
 		}
 		if (!ctx.model)
 			throw new Error("Subagent launch requires a resolved parent model");
@@ -150,7 +153,10 @@ export function createLaunchPlanner({
 			const diagnostic = discoverAgentCatalog(runtime.pi).diagnostics.find(
 				(candidate) => candidate.agentName === params.agent,
 			);
-			throw new Error(diagnostic?.message ?? missingRoleMessage(params.agent));
+			// Raw here: the public tool boundary and the delivery serializer encode.
+			throw new Error(
+				diagnostic ? diagnostic.message : missingRoleMessage(params.agent),
+			);
 		}
 		if (!ctx.model)
 			throw new Error("Subagent launch requires a resolved parent model");

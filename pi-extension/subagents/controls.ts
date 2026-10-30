@@ -6,6 +6,11 @@ import type {
 import { markInterruptRequested } from "../../maestro/core/lifecycle.ts";
 import type { RunningSubagent, SubagentRuntime } from "./state.ts";
 import { ensureLifecycle, type Observation } from "./observation.ts";
+import {
+	encodeHostValue,
+	HOST_ERROR_CHARS,
+	jsonArgument,
+} from "../../maestro/core/host-text.ts";
 
 interface SubagentInterruptDetails {
 	error?: string;
@@ -32,10 +37,11 @@ export interface SubagentCancelDetails {
 }
 
 function cancelStatusText(
-	name: string,
+	displayName: string,
 	report: CancelReport,
 	worktree: boolean,
 ): string {
+	const name = encodeHostValue(displayName);
 	const noRetry = "No model fallback, retry, or recovery will start.";
 	switch (report.status) {
 		case "confirmed":
@@ -45,7 +51,7 @@ function cancelStatusText(
 		case "requested":
 			return `Cancel recorded for subagent "${name}"; its in-flight launch is terminated as soon as it is acquired. ${noRetry} One cancelled result will be delivered after termination is confirmed.`;
 		case "unconfirmed":
-			return `Cancel recorded for subagent "${name}", but termination is unconfirmed: ${report.error ?? "unknown error"}. The run stays live and owned. ${noRetry} Call subagent_cancel again to retry termination.`;
+			return `Cancel recorded for subagent "${name}", but termination is unconfirmed: ${encodeHostValue(report.error ?? "unknown error", HOST_ERROR_CHARS)}. The run stays live and owned. ${noRetry} Call subagent_cancel again to retry termination.`;
 		case "already-terminal":
 			return `Subagent "${name}" already reached a terminal result; nothing was cancelled.`;
 	}
@@ -76,7 +82,9 @@ export function createControls({
 			const running = runningSubagents.get(requestedId);
 			return running
 				? { running }
-				: { error: `No running subagent with id "${requestedId}".` };
+				: {
+						error: `No running subagent with id "${encodeHostValue(requestedId)}".`,
+					};
 		}
 
 		const requestedName = params.name?.trim();
@@ -89,14 +97,19 @@ export function createControls({
 		);
 		if (matches.length === 1) return { running: matches[0] };
 		if (matches.length === 0) {
-			return { error: `No running subagent named "${requestedName}".` };
+			return {
+				error: `No running subagent named "${encodeHostValue(requestedName)}".`,
+			};
 		}
 
 		const candidates = matches
-			.map((running) => `${running.name} [${running.id}]`)
+			.map(
+				(running) =>
+					`${encodeHostValue(running.name)} [${encodeHostValue(running.id)}]`,
+			)
 			.join(", ");
 		return {
-			error: `Ambiguous subagent name "${requestedName}". Matches: ${candidates}`,
+			error: `Ambiguous subagent name "${encodeHostValue(requestedName)}". Matches: ${candidates}`,
 		};
 	}
 
@@ -113,8 +126,8 @@ export function createControls({
 		} catch (error: any) {
 			return {
 				error:
-					`Failed to send Escape to subagent "${running.name}" via herdr: ` +
-					`${error?.message ?? String(error)}`,
+					`Failed to send Escape to subagent "${encodeHostValue(running.name)}" via herdr: ` +
+					encodeHostValue(error?.message ?? String(error), HOST_ERROR_CHARS),
 			};
 		}
 	}
@@ -157,7 +170,7 @@ export function createControls({
 			content: [
 				{
 					type: "text" as const,
-					text: `Interrupt requested for subagent "${running.name}".`,
+					text: `Interrupt requested for subagent "${encodeHostValue(running.name)}".`,
 				},
 			],
 			details: {
@@ -198,15 +211,16 @@ export function createControls({
 		}
 		const running = resolved.running;
 		const target = { id: running.id, name: running.name };
+		const shownName = encodeHostValue(running.name);
 		if (running.persistent)
 			return fail(
-				`Subagent "${running.name}" is a persistent specialist; subagent_cancel does not stop it. Use subagent_stop({ id: "${running.id}" }) for the graceful v1 stop.`,
+				`Subagent "${shownName}" is a persistent specialist; subagent_cancel does not stop it. Use subagent_stop({ id: ${jsonArgument(running.id)} }) for the graceful v1 stop.`,
 				target,
 			);
 		const control = session.getControlTaskId(running.id);
 		if (!control)
 			return fail(
-				`Subagent "${running.name}" has no live owner in this session; nothing was cancelled.`,
+				`Subagent "${shownName}" has no live owner in this session; nothing was cancelled.`,
 				target,
 			);
 		let report: CancelReport;
@@ -214,7 +228,10 @@ export function createControls({
 			report = await session.cancel(control);
 		} catch (error) {
 			return fail(
-				error instanceof Error ? error.message : String(error),
+				encodeHostValue(
+					error instanceof Error ? error.message : String(error),
+					HOST_ERROR_CHARS,
+				),
 				target,
 			);
 		} finally {

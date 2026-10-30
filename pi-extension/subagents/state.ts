@@ -126,6 +126,10 @@ export interface RunningSubagent {
 	policyDeniedTools?: string[];
 	tasksCompleted?: number;
 	taskId?: string;
+	/** Task IDs this parent dispatched; the child-writable ledger never decides. */
+	issuedTaskIds?: string[];
+	/** Events for tasks the parent never issued, ignored after one notice. */
+	ignoredTaskEvents?: number;
 	inboxSequence?: number;
 	observedTaskEvents?: number;
 	stopState?: "requested" | "pending" | "failed";

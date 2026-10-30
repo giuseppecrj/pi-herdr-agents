@@ -174,6 +174,8 @@ export interface PiRunningChild {
 	policyDeniedTools?: string[];
 	tasksCompleted?: number;
 	taskId?: string;
+	/** Task IDs this parent dispatched; the child-writable ledger never decides. */
+	issuedTaskIds?: string[];
 	inboxSequence?: number;
 	observedTaskEvents?: number;
 	stopState?: "requested" | "pending" | "failed";

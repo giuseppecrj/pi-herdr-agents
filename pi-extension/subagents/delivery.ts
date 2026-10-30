@@ -9,6 +9,7 @@ import type {
 	PiLedgerEntry,
 } from "../../maestro/runtime/index.ts";
 import { markDelivery } from "../../maestro/core/lifecycle.ts";
+import { encodeHostValue } from "../../maestro/core/host-text.ts";
 import type { WorktreeHandoff } from "../../maestro/core/worktree.ts";
 import {
 	type RunningSubagent,
@@ -19,18 +20,22 @@ import {
 } from "./state.ts";
 import {
 	formatElapsed,
-	boundChildDelivery,
+	hostLine,
+	hostText,
 	type SubagentResultDetails,
 	type SubagentPingDetails,
+	sendParentMessage,
 	sendSubagentResult,
-	formatWorktreeHandoff,
+	sessionFields,
+	summaryMessage,
+	worktreeHandoffFields,
 	resolveResultPresentation,
 	resolveCancelledPresentation,
 } from "./presentation.ts";
 import {
 	asPiRecord,
 	persistentSpecialistFacts,
-	formatPersistentSpecialistFacts,
+	persistentFactsFields,
 	type PersistentControls,
 } from "./persistent.ts";
 
@@ -50,6 +55,45 @@ export function createDelivery({
 
 	const inFlightPersistentTaskDeliveries = new Set<string>();
 
+	/**
+	 * Issuance lives in parent memory: the record's current task and the IDs
+	 * the host dispatched. The ledger is child-writable, so it never decides.
+	 */
+	function isIssuedTask(running: RunningSubagent, task: string): boolean {
+		return (
+			task === running.taskId || running.issuedTaskIds?.includes(task) === true
+		);
+	}
+
+	/**
+	 * An event for a task the parent never issued changes nothing: no ledger
+	 * row, no completion count, no idle claim. The first one per specialist is
+	 * one encoded notice that does not start a turn, so a child can neither
+	 * wake nor flood the parent; later ones are only counted.
+	 */
+	function ignoreUnrecognizedTaskEvent(
+		running: RunningSubagent,
+		event: PiPersistentEvent,
+		api: Pick<ExtensionAPI, "sendMessage">,
+	): void {
+		running.ignoredTaskEvents = (running.ignoredTaskEvents ?? 0) + 1;
+		if (running.ignoredTaskEvents > 1) return;
+		const line = hostLine`Persistent specialist "${running.name}" reported a ${event.type} event for task ${event.task}, which the parent did not issue. The event was ignored; the specialist's state and completion count are unchanged, and later unrecognized events are ignored without a notice.`;
+		sendParentMessage(
+			api,
+			"subagent_status",
+			{ head: [[line]] },
+			{
+				lines: [
+					`${encodeHostValue(running.name)}: ignored an event for a task the parent did not issue.`,
+				],
+				overflow: 0,
+				ignoredEvent: { type: event.type, task: event.task },
+			},
+			{ triggerTurn: false },
+		);
+	}
+
 	function deliverPersistentTaskEvent(
 		running: RunningSubagent,
 		event: PiPersistentEvent,
@@ -65,6 +109,8 @@ export function createDelivery({
 			return;
 		const deliveryKey = `${running.id}:${event.type}:${event.task}`;
 		if (inFlightPersistentTaskDeliveries.has(deliveryKey)) return;
+		if (!isIssuedTask(running, event.task))
+			return ignoreUnrecognizedTaskEvent(running, event, api);
 		const ledger = ledgerSnapshot ?? io.readLedger(asPiRecord(running));
 		if (event.type === "help-request") {
 			if (
@@ -76,25 +122,30 @@ export function createDelivery({
 				return;
 			inFlightPersistentTaskDeliveries.add(deliveryKey);
 			try {
-				api.sendMessage(
+				sendParentMessage(
+					api,
+					"subagent_ping",
 					{
-						customType: "subagent_ping",
-						content: boundChildDelivery({
-							head: `Persistent specialist "${running.name}" requests help for task ${event.task}:`,
+						head: [
+							[
+								hostLine`Persistent specialist "${running.name}" requests help for task ${event.task}:`,
+							],
+						],
+						report: {
 							name: running.name,
 							kind: "help-request",
 							body: event.message ?? "",
-							bodySource: "child",
-							tail: `\n\nReply with subagent_send to ${running.name}.`,
-						}),
-						display: true,
-						details: {
-							name: running.name,
-							task: event.task,
-							sessionFile: running.sessionFile,
 						},
+						evidence: [
+							[hostLine`Reply with subagent_send to ${running.name}.`],
+						],
 					},
-					{ triggerTurn: true, deliverAs: "steer" },
+					{
+						name: running.name,
+						task: event.task,
+						message: event.message ?? "",
+						sessionFile: running.sessionFile,
+					},
 				);
 				ledger.push(io.acknowledge(asPiRecord(running), event));
 			} finally {
@@ -111,18 +162,22 @@ export function createDelivery({
 		inFlightPersistentTaskDeliveries.add(deliveryKey);
 		try {
 			const completed = (running.tasksCompleted ?? 0) + 1;
-			const { summary, summarySource } = io.readTaskSummary(
-				asPiRecord(running),
+			const summary = summaryMessage(
+				io.readTaskSummary(asPiRecord(running)),
+				running.name,
+				"task-result",
 			);
 			sendSubagentResult(
 				api,
-				boundChildDelivery({
-					head: `Persistent specialist "${running.name}" completed task ${event.task} (${completed} tasks completed) and is idle and accepting subagent_send.`,
-					name: running.name,
-					kind: "task-result",
-					body: summary,
-					bodySource: summarySource,
-				}),
+				{
+					head: [
+						[
+							hostLine`Persistent specialist "${running.name}" completed task ${event.task} (${String(completed)} tasks completed) and is idle and accepting subagent_send.`,
+						],
+						...summary.head,
+					],
+					report: summary.report,
+				},
 				{
 					name: running.name,
 					task: event.task,
@@ -180,14 +235,20 @@ export function createDelivery({
 		if (running.crashNotified) return;
 		running.crashNotified = true;
 		const facts = persistentSpecialistFacts(running, io, worktree);
-		api.sendMessage(
+		sendParentMessage(
+			api,
+			"subagent_result",
 			{
-				customType: "subagent_result",
-				content: `Persistent specialist crashed. Evidence is retained. Persistent sessions cannot be resumed in v1; spawn a new specialist.\n\n${formatPersistentSpecialistFacts(facts)}`,
-				display: true,
-				details: { error: "persistent-crash", facts },
+				head: [
+					[
+						hostText(
+							"Persistent specialist crashed. Evidence is retained. Persistent sessions cannot be resumed in v1; spawn a new specialist.",
+						),
+					],
+				],
+				evidence: [persistentFactsFields(facts)],
 			},
-			{ triggerTurn: true, deliverAs: "steer" },
+			{ error: "persistent-crash", facts },
 		);
 	}
 
@@ -239,14 +300,14 @@ export function createDelivery({
 			) {
 				io.recordStopped(record);
 				const facts = persistentSpecialistFacts(running, io, result.worktree);
-				api.sendMessage(
+				sendParentMessage(
+					api,
+					"subagent_stop",
 					{
-						customType: "subagent_stop",
-						content: `Persistent specialist stopped.\n\n${formatPersistentSpecialistFacts(facts)}`,
-						display: true,
-						details: { status: "stopped", facts },
+						head: [[hostText("Persistent specialist stopped.")]],
+						evidence: [persistentFactsFields(facts)],
 					},
-					{ triggerTurn: true, deliverAs: "steer" },
+					{ status: "stopped", facts },
 				);
 			} else if (running.stopState !== "failed")
 				notifyPersistentCrash(running, api, io, result.worktree);
@@ -284,33 +345,36 @@ export function createDelivery({
 			return "delivered";
 		}
 		if (result.ping) {
-			const worktreeRef = result.worktree
-				? `\n\n${formatWorktreeHandoff(result.worktree)}`
-				: "";
-			const sessionRef = `\n\nSession: ${result.sessionFile}\nResume: pi --session ${result.sessionFile}`;
+			// The sidecar's name is child-written; headers use the parent-owned name.
 			const details: SubagentPingDetails = {
-				name: result.ping.name,
+				name: running.name,
 				message: result.ping.message,
 				sessionFile: result.sessionFile!,
 			};
+			if (result.ping.name !== running.name)
+				details.reportedName = result.ping.name;
 			if (task.role) details.agent = running.agent;
 			if (result.worktree) details.worktree = result.worktree;
-			api.sendMessage(
+			sendParentMessage(
+				api,
+				"subagent_ping",
 				{
-					customType: "subagent_ping",
-					content: boundChildDelivery({
-						head: `Sub-agent "${result.ping.name}" needs help (${formatElapsed(result.elapsed)}):`,
-						name: result.ping.name,
+					head: [
+						[
+							hostLine`Sub-agent "${running.name}" needs help (${formatElapsed(result.elapsed)}):`,
+						],
+					],
+					report: {
+						name: running.name,
 						kind: "help-request",
 						body: result.ping.message,
-						bodySource: "child",
-						tail: worktreeRef,
-						sessionRef,
-					}),
-					display: true,
-					details,
+					},
+					evidence: [
+						result.worktree ? worktreeHandoffFields(result.worktree) : [],
+						sessionFields(result.sessionFile),
+					],
 				},
-				{ triggerTurn: true, deliverAs: "steer" },
+				details,
 			);
 		} else {
 			// Resume's second read belongs after the absorbing delivery mark/map delete

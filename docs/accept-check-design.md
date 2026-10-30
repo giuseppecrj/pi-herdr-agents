@@ -93,19 +93,17 @@ not `rejected`, because the command never answered.
 
 ### Delivery text
 
-`resolveResultPresentation` (`pi-extension/subagents/index.ts:832-905`) splits
-a delivery into three parts. The `head` is the host's status line
-(`index.ts:871-877`). The `body` is the child's text, which
-`boundChildDelivery` (`index.ts:666-701`) wraps in a `subagent_report`
-envelope and cuts in the middle to fit 16,000 characters (`index.ts:577`). The
-`tail` holds host lines such as `Model used:` and the worktree handoff
-(`index.ts:879-891`).
+`resolveResultPresentation` (`pi-extension/subagents/presentation.ts`) builds
+one `ParentMessage` with three parts. The `head` holds the host's status line.
+The `report` is the child's text, which `renderParentMessage` wraps in a
+`subagent_report` envelope and cuts only inside it to fit 16,000 characters.
+The `evidence` holds host lines such as `Model used:` and the worktree handoff.
+See [the delegation outcome contract](delegation-outcome-contract.md#size-bounds).
 
-The check lines are host-authored, so they never go inside the envelope. The
-`head` is capped at 1,000 characters and the `tail` at 3,000
-(`index.ts:624-625`). The verdict line goes in the `head`, directly under the
-status line. The two lines together stay far below the `head` cap, so no cut
-reaches the verdict. The check output goes first in the `tail`:
+The check lines are host-authored `HostField`s, so they never go inside the
+envelope. The verdict line goes in the `head`, directly under the status line;
+head fields are never dropped. The check output goes first in the `evidence`,
+with its own field bound:
 
 ```text
 Sub-agent "fix-parser" completed (4m 12s).

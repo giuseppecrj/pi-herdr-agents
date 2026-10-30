@@ -1,3 +1,7 @@
+import {
+	encodeHostValue,
+	HOST_ERROR_CHARS,
+} from "../../maestro/core/host-text.ts";
 import type {
 	ExtensionAPI,
 	ExtensionCommandContext,
@@ -238,7 +242,7 @@ export function registerTaskModelInit(pi: ExtensionAPI): void {
 				const outcome = runTaskModelInit(ctx, args);
 				if (outcome.kind === "not-started")
 					ctx.ui.notify(
-						`Task-model init not started: ${outcome.reason}. Nothing was written.`,
+						`Task-model init not started: ${encodeHostValue(outcome.reason, HOST_ERROR_CHARS)}. Nothing was written.`,
 						"warning",
 					);
 			},

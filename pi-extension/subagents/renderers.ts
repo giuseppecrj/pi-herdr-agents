@@ -5,7 +5,87 @@ import {
 	isFiniteNumber,
 	isString,
 } from "../../maestro/core/config/type-guards.ts";
-import { formatElapsed, unwrapChildReport } from "./presentation.ts";
+import { displayLines, encodeHostValue } from "../../maestro/core/host-text.ts";
+import {
+	formatElapsed,
+	resumeCommandLine,
+	splitChildReport,
+} from "./presentation.ts";
+
+/**
+ * The human view of a delivered message: host lines unprefixed, the child's
+ * report fenced by labelled rules with every child line prefixed. Child text
+ * is split on every line separator and its terminal controls are shown as
+ * escapes before the prefix, so no child line can pass for host evidence.
+ * With `sessionFromDetails`, session lines are dropped because the renderer
+ * shows them from details.
+ */
+function deliveredViewLines(
+	rawContent: string,
+	headPrefixes: RegExp[],
+	sessionFromDetails: boolean,
+): string[] {
+	const { before, report, after } = splitChildReport(rawContent);
+	let head = before;
+	for (const prefix of headPrefixes) {
+		const match = prefix.exec(head);
+		if (match) {
+			head = head.slice(match[0].length);
+			break;
+		}
+	}
+	const hostLines = (text: string) =>
+		displayLines(text.trim()).filter(
+			(line) =>
+				!sessionFromDetails ||
+				(!line.startsWith("Session: ") && !line.startsWith("Resume: ")),
+		);
+	const lines: string[] = [];
+	if (head.trim()) lines.push(...hostLines(head));
+	if (report) {
+		lines.push(
+			`┌ Child report from ${displayLines(report.from).join(" ")} (${report.kind})`,
+		);
+		for (const line of displayLines(report.body)) lines.push(`│ ${line}`);
+		lines.push("└ end of child report");
+	}
+	const evidence = hostLines(after);
+	if (evidence.length) lines.push(...evidence);
+	while (lines.at(-1) === "") lines.pop();
+	return lines;
+}
+
+function resultViewLines(
+	rawContent: string,
+	name: string,
+	elapsed: string,
+	exitCode: number,
+	sessionFromDetails: boolean,
+): string[] {
+	const lead = `^Sub-agent "${escapeRegExp(encodeHostValue(name))}" `;
+	const at = escapeRegExp(elapsed);
+	return deliveredViewLines(
+		rawContent,
+		[
+			new RegExp(`${lead}completed \\(${at}\\)\\.\\n\\n`),
+			new RegExp(`${lead}was cancelled by the parent after ${at}\\. `),
+			new RegExp(`${lead}failed \\(exit code ${exitCode}\\)\\.\\n\\n`),
+			new RegExp(
+				`${lead}failed after ${at} \\(provider/agent error\\)\\.\\n\\n`,
+			),
+		],
+		sessionFromDetails,
+	);
+}
+
+function escapeRegExp(text: string): string {
+	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** A host-owned detail shown in a header: always one display line. */
+function displayValue(text: string): string {
+	return displayLines(text).join(" ");
+}
 
 export function registerMessageRenderers(pi: ExtensionAPI): void {
 	// ── subagent_result message renderer ──
@@ -19,7 +99,8 @@ export function registerMessageRenderers(pi: ExtensionAPI): void {
 		return {
 			invalidate() {},
 			render(width: number): string[] {
-				const name = details.name ?? "subagent";
+				const rawName = String(details.name ?? "subagent");
+				const name = displayValue(rawName);
 				const exitCode = details.exitCode ?? 0;
 				const errorMessage = isString(details.errorMessage)
 					? details.errorMessage
@@ -44,7 +125,7 @@ export function registerMessageRenderers(pi: ExtensionAPI): void {
 							? `failed (exit ${exitCode})`
 							: "completed";
 				const agentTag = details.agent
-					? theme.fg("dim", ` (${details.agent})`)
+					? theme.fg("dim", ` (${displayValue(String(details.agent))})`)
 					: "";
 
 				const header = `${icon} ${theme.fg("toolTitle", theme.bold(name))}${agentTag} ${theme.fg("dim", "—")} ${status} ${theme.fg("dim", `(${elapsed})`)}`;
@@ -54,57 +135,46 @@ export function registerMessageRenderers(pi: ExtensionAPI): void {
 						? message.content
 						: "";
 
-				// Clean summary (remove session ref and leading label for display)
-				const summary = unwrapChildReport(rawContent)
-					.replace(/\n\nSession: .+\nResume: .+$/, "")
-					.replace(`Sub-agent "${name}" completed (${elapsed}).\n\n`, "")
-					.replace(
-						`Sub-agent "${name}" was cancelled by the parent after ${elapsed}. `,
-						"",
-					)
-					.replace(
-						`Sub-agent "${name}" failed (exit code ${exitCode}).\n\n`,
-						"",
-					)
-					.replace(
-						new RegExp(
-							`^Sub-agent "${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}" failed after ${elapsed} \\(provider/agent error\\)\\.\\n\\n`,
-						),
-						"",
-					);
+				// Host lines, then the fenced child report, then host evidence; the
+				// session reference is rendered from details below.
+				const summaryLines = resultViewLines(
+					rawContent,
+					rawName,
+					elapsed,
+					exitCode,
+					!!details.sessionFile,
+				);
 
 				// Build content for the box
 				const contentLines = [header];
 
 				if (options.expanded) {
 					// Full view: complete summary + session info
-					if (summary) {
-						for (const line of summary.split("\n")) {
-							contentLines.push(line.slice(0, width - 6));
-						}
+					for (const line of summaryLines) {
+						contentLines.push(line.slice(0, width - 6));
 					}
 					if (details.sessionFile) {
 						contentLines.push("");
 						contentLines.push(
-							theme.fg("dim", `Session: ${details.sessionFile}`),
+							theme.fg(
+								"dim",
+								`Session: ${displayValue(String(details.sessionFile))}`,
+							),
 						);
+						// The serialized command the model sees: shell-quoted, or omitted.
 						contentLines.push(
-							theme.fg("dim", `Resume:  pi --session ${details.sessionFile}`),
+							theme.fg("dim", resumeCommandLine(String(details.sessionFile))),
 						);
 					}
 				} else {
 					// Collapsed: preview + expand hint
-					if (summary) {
-						const previewLines = summary.split("\n").slice(0, 5);
-						for (const line of previewLines) {
-							contentLines.push(theme.fg("dim", line.slice(0, width - 6)));
-						}
-						const totalLines = summary.split("\n").length;
-						if (totalLines > 5) {
-							contentLines.push(
-								theme.fg("muted", `… ${totalLines - 5} more lines`),
-							);
-						}
+					for (const line of summaryLines.slice(0, 5)) {
+						contentLines.push(theme.fg("dim", line.slice(0, width - 6)));
+					}
+					if (summaryLines.length > 5) {
+						contentLines.push(
+							theme.fg("muted", `… ${summaryLines.length - 5} more lines`),
+						);
 					}
 					contentLines.push(
 						theme.fg("muted", keyHint("app.tools.expand", "to expand")),
@@ -169,9 +239,10 @@ export function registerMessageRenderers(pi: ExtensionAPI): void {
 		return {
 			invalidate() {},
 			render(width: number): string[] {
-				const name = details.name ?? "subagent";
+				const rawName = String(details.name ?? "subagent");
+				const name = displayValue(rawName);
 				const agentTag = details.agent
-					? theme.fg("dim", ` (${details.agent})`)
+					? theme.fg("dim", ` (${displayValue(String(details.agent))})`)
 					: "";
 				const bgFn = (text: string) => theme.bg("toolSuccessBg", text);
 
@@ -180,20 +251,39 @@ export function registerMessageRenderers(pi: ExtensionAPI): void {
 
 				const contentLines = [header];
 
+				// The bounded, enveloped content, never the raw sidecar message.
+				const content = isString(message.content) ? message.content : "";
+				const viewLines = deliveredViewLines(
+					content,
+					[
+						new RegExp(
+							`^Sub-agent "${escapeRegExp(encodeHostValue(rawName))}" needs help \\([^)\\n]*\\):\\n\\n`,
+						),
+					],
+					!!details.sessionFile,
+				);
 				if (options.expanded) {
 					contentLines.push("");
-					contentLines.push(details.message ?? "");
+					for (const line of viewLines)
+						contentLines.push(line.slice(0, Math.max(0, width - 6)));
 					if (details.sessionFile) {
 						contentLines.push("");
 						contentLines.push(
-							theme.fg("dim", `Session: ${details.sessionFile}`),
+							theme.fg(
+								"dim",
+								`Session: ${displayValue(String(details.sessionFile))}`,
+							),
 						);
 					}
 				} else {
-					const preview = (details.message ?? "")
-						.split("\n")[0]
-						.slice(0, width - 10);
-					contentLines.push(theme.fg("dim", preview));
+					for (const line of viewLines.slice(0, 5))
+						contentLines.push(
+							theme.fg("dim", line.slice(0, Math.max(0, width - 6))),
+						);
+					if (viewLines.length > 5)
+						contentLines.push(
+							theme.fg("muted", `… ${viewLines.length - 5} more lines`),
+						);
 					contentLines.push(
 						theme.fg("muted", keyHint("app.tools.expand", "to expand")),
 					);

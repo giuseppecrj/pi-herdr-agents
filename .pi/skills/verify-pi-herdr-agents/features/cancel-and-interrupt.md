@@ -20,11 +20,11 @@ Preconditions:
 
 - `$L up` printed `LAB_READY`. Covered by `test/integration/subagent-cancel.test.ts`: "(a) cancels a slow ordinary child: one cancelled result, pane closed, no fallback", "(d) rejects cancel of a persistent specialist and points to subagent_stop" and "(e) double cancel is idempotent: one result, no error, no fallback".
 
-- **Launch a slow child.** Run `$L prompt cancel c1`. The parent launches `Cancel-c1`, whose bash step writes `/tmp/verify-piha-c1-start.txt` and then sleeps about 91 s.
-- **Prove it is running.** Wait for `/tmp/verify-piha-c1-start.txt` to contain `START_c1`, and for the pane timeline to show the child pane.
-- **Cancel.** Open the gate with `touch /tmp/verify-piha-c1-gate.txt`. The scripted parent then calls `subagent_cancel({ name: "Cancel-c1" })`.
-- **Proof.** Wait for one `subagent_result` entry, then run `$L evidence cancel`. `verdict.json` must show `error: "cancelled"` for `Cancel-c1` and `panesOtherThanParent: 0`. `/tmp/verify-piha-c1-start.txt.done` must not exist, and `provider-requests.json` must have no `fallback-secondary` model.
-- **Clean.** `rm -f /tmp/verify-piha-c1-*`. These marker files live outside the lab root.
+- **Launch a slow child.** Run `$L prompt cancel c1`. The parent launches `Cancel-c1`, whose bash step writes `start.txt` in the marker dir and then sleeps about 91 s. The helper prints `MARKER_DIR <dir>`: a fresh 0700 directory under the private lab root. Call it `$M` below. Reusing an id in one run is refused.
+- **Prove it is running.** Wait for `$M/start.txt` to contain `START_c1`, and for the pane timeline to show the child pane.
+- **Cancel.** Open the gate with `touch "$M/gate.txt"`. The scripted parent then calls `subagent_cancel({ name: "Cancel-c1" })`.
+- **Proof.** Wait for one `subagent_result` entry, then run `$L evidence cancel`. `verdict.json` must show `error: "cancelled"` for `Cancel-c1` and `panesOtherThanParent: 0`. `$M/start.txt.done` must not exist, and `provider-requests.json` must have no `fallback-secondary` model.
+- **Clean.** Nothing to do: the marker dir lives inside the lab root, and `$L down` removes it. Never use predictable `/tmp` marker paths; another user's symlink or a leftover gate would break the proof.
 
 ## Gotchas
 

@@ -11,6 +11,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import * as subagentsModule from "../../pi-extension/subagents/index.ts";
+import { hostText } from "../../pi-extension/subagents/presentation.ts";
 import {
 	mkdtempSync,
 	mkdirSync,
@@ -167,7 +168,7 @@ describe("event-driven supervision integration", { timeout: 30_000 }, () => {
 				assert.equal((await completion).reason, "done");
 				subagentsModule.__test__.sendSubagentResult(
 					deliveryApi,
-					"Subagent completed.",
+					{ head: [[hostText("Subagent completed.")]] },
 					{ name: "child" },
 				);
 

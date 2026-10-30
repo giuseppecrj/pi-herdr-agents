@@ -11,6 +11,7 @@ import type {
 	SubagentLifecycle,
 	RunResult,
 	ActivityReadResult,
+	CompletionEvidence,
 } from "../core/types.ts";
 import type {
 	SurfaceProvider,
@@ -199,6 +200,8 @@ export interface PiRunRecord {
 	policyDeniedTools?: string[];
 	tasksCompleted?: number;
 	taskId?: string;
+	/** Task IDs this parent dispatched; the child-writable ledger never decides. */
+	issuedTaskIds?: string[];
 	inboxSequence?: number;
 	observedTaskEvents?: number;
 	stopState?: "requested" | "pending" | "failed";
@@ -470,12 +473,20 @@ function createDelegatedMarkers(
 		: undefined;
 }
 
+/** Host diagnostics stay host; only text the child wrote is child-error. */
+function errorProvenance(
+	source: CompletionEvidence["errorSource"],
+): "child-error" | "host" {
+	return source === "child" ? "child-error" : "host";
+}
+
 // Capture only resume presentation scalars, not the child or its owning registry.
 function resumeResultReader(
 	sessionFile: string,
 	cursor: number,
 	exitCode: number,
 	errorMessage: string | undefined,
+	errorSource: CompletionEvidence["errorSource"],
 ): NonNullable<PiSettlementIO["readResumeResult"]> {
 	return () => ({
 		...(findLastAssistantSummary(getNewEntries(sessionFile, cursor)) ?? {
@@ -484,7 +495,7 @@ function resumeResultReader(
 				: exitCode === 0
 					? "Resumed session exited without new output"
 					: `Resumed session exited with code ${exitCode}`,
-			summarySource: "host",
+			summarySource: errorProvenance(errorSource),
 		}),
 		sessionFile,
 	});
@@ -920,7 +931,10 @@ export function createDefaultRunSession(
 										? "Sub-agent exited without output"
 										: "Resumed session exited without new output"
 									: `${cursor === undefined ? "Sub-agent" : "Resumed session"} exited with code ${exitCode}`,
-							summarySource: "host",
+							// Only a child-written sidecar error is child provenance.
+							summarySource: evidence.errorMessage
+								? errorProvenance(evidence.errorSource)
+								: "host",
 						})
 					: {
 							summary:
@@ -999,6 +1013,7 @@ export function createDefaultRunSession(
 						cursor,
 						exitCode,
 						evidence?.errorMessage,
+						evidence?.errorSource,
 					);
 				if (cursor === undefined) {
 					entry.completed.fallbackAttempts = attempts;
@@ -1124,6 +1139,7 @@ export function createDefaultRunSession(
 				{ task, message: text },
 			);
 			r.taskId = task;
+			(r.issuedTaskIds ??= []).push(task);
 			ledger(r, task, "dispatched");
 			return inbox;
 		},

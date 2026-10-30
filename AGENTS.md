@@ -26,7 +26,8 @@ Former bundled roles, `/plan`, its plan skill, and `/skill:orchestrate` now belo
 ## Code map
 
 - `pi-extension/subagents/index.ts` — Pi composition root: loads config, adopts the reload-surviving runtime, builds the per-load controllers, and registers session handlers, tools, commands, and renderers in order; also the `__test__` surface
-- `pi-extension/subagents/state.ts`, `catalog.ts`, `presentation.ts` — run-state types and reload slots; role catalog, `subagent` parameters, and launch policy; result text and the child-report envelope
+- `pi-extension/subagents/state.ts`, `catalog.ts`, `presentation.ts` — run-state types and reload slots; role catalog, `subagent` parameters, and launch policy; the parent message model, its one serializer, and the child-report envelope
+- `pi-extension/subagents/tool-boundary.ts` — the one registration boundary that encodes errors thrown by any host tool or command
 - `pi-extension/subagents/observation.ts`, `widgets.ts`, `controls.ts`, `persistent.ts`, `delivery.ts`, `launch.ts` — per-load controllers (`create*`) for activity observation, the widget and status refresh, interrupt/cancel, persistent specialists, parent delivery, and launch plans
 - `pi-extension/subagents/launch-tools.ts`, `control-tools.ts`, `worktree-tools.ts`, `task-models.ts`, `renderers.ts` — `register*` functions for the public tools, commands, and message renderers
 - `pi-extension/subagents/model-registry.ts`, `config-path.ts` — permanent host-local SDK capability glue and configuration-path conventions
@@ -34,6 +35,7 @@ Former bundled roles, `/plan`, its plan skill, and `/skill:orchestrate` now belo
 - `plugins/sidebar/` — optional standalone Node companion Herdr plugin; it imports nothing from the extension
 - `maestro/core/roles/discovery.ts`, `maestro/core/config/` — role parsing/discovery, injected-directory config loaders, and task-model init prompt construction
 - `maestro/core/worktree.ts`, `worktree-cleanup.ts` — manifest schema/state, handoff types, and cleanup eligibility/formatting
+- `maestro/core/host-text.ts` — the one encoding for variable values in parent-facing host lines, lossless command-argument serializers, and display normalization for child text
 - `maestro/adapters/pi/` — `PiHarnessAdapter`, launch transactions, completion evidence, session I/O, activity files, SDK model glue, and task-model registry projection
 - `maestro/core/declared-skills.ts`, `maestro/adapters/pi/child/declared-skills.ts` — declared skill names (validated by the parent, passed in `PI_SUBAGENT_SKILLS`) and the child's first-run injection of the skills its own Pi loaded, with bounded reads
 - `maestro/adapters/pi/child/subagent-done.ts` — child protocol: `caller_ping`, `subagent_done`, and activity recording

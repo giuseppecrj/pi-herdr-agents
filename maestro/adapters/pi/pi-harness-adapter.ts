@@ -257,6 +257,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 				policyDeniedTools: policy.deniedTools,
 				tasksCompleted: 0,
 				taskId,
+				issuedTaskIds: [taskId],
 				inboxSequence: 0,
 				observedTaskEvents: 0,
 			});
@@ -517,6 +518,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 			{ task, message: text },
 		);
 		child.taskId = task;
+		(child.issuedTaskIds ??= []).push(task);
 		appendPersistentDeliveryLedger(child.sessionFile, {
 			...facts,
 			outcome: "dispatched",
