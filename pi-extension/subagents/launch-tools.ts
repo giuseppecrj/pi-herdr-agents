@@ -8,7 +8,11 @@ import {
 	isPlainObject,
 	isString,
 } from "../../maestro/core/config/type-guards.ts";
-import { bindLiveApi, type SubagentRuntime } from "./state.ts";
+import {
+	awaitLiveContext,
+	bindLiveApi,
+	type SubagentRuntime,
+} from "./state.ts";
 import {
 	SubagentParams,
 	discoverAgentCatalog,
@@ -244,8 +248,9 @@ export function registerSubagentTool(
 					...first,
 					plans: [plan, ...fallbacks],
 					// Fallbacks outlive this tool call; session replacement invalidates ctx.
-					prepareAttempt: () => {
-						const live = runtime.latestCtx;
+					// In a reload gap, wait for the replacement's context; never fail a candidate.
+					prepareAttempt: async () => {
+						const live = await awaitLiveContext(runtime, id);
 						if (!live)
 							throw new Error("No live parent context for the fallback launch");
 						return normalizePiAttempt(params, live, parentThinking, attempt);

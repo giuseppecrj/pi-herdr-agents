@@ -448,9 +448,11 @@ export default function subagentsExtension(
 		stopRefresh();
 		// Pi invalidates this context and API once shutdown returns. Watchers that
 		// survive a reload must neither read the context nor send through the API;
-		// completions that settle before the next session_start are held.
+		// completions that settle, and fallbacks that prepare, before the next
+		// session_start are held. A quit ends the gap: nothing will bind again.
 		runtime.latestCtx = undefined;
 		runtime.liveApi = undefined;
+		runtime.reloadGap = shouldPreserveSubagentsOnShutdown(event.reason);
 
 		const session = runtime.session;
 		const shutdown = session?.shutdown(event.reason);
@@ -460,7 +462,8 @@ export default function subagentsExtension(
 			// Also gate/abort legacy rows retained from a pre-composition reload.
 			// Do not infer ownership or reconstruct their watchers.
 			cleanupSubagentsForShutdown(event.reason, runningSubagents);
-			// No replacement session will start: held completions are suppressed.
+			// No replacement session will start: held completions are suppressed and
+			// waiting fallback preparations end without launching.
 			releaseHeldDeliveries(runtime, undefined);
 			// The coordinator is already closed synchronously. Clear only this owner
 			// before the shutdown await so another in-process host cannot adopt it.
