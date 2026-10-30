@@ -887,9 +887,10 @@ writeFileSync(${JSON.stringify(report)}, JSON.stringify(result));
 				assert.ok(child.worktree);
 				assert.equal(child.worktree.branch, branch);
 				assert.notEqual(child.worktree.path, linked);
+				const childSurface = child.surface;
 				assert.equal(
 					panes(child.worktree.workspaceId).find(
-						(pane) => pane.pane_id === child.surface,
+						(pane) => pane.pane_id === childSurface,
 					)?.cwd,
 					realpathSync(child.worktree.path),
 				);

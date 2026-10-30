@@ -161,6 +161,9 @@ import {
 	readSubagentActivityFile,
 } from "../maestro/adapters/pi/activity-file.ts";
 import type { SubagentActivityState } from "../maestro/core/types.ts";
+import type { TaskPreferences } from "../maestro/core/config/task-model-types.ts";
+import type { WorktreeHandoff } from "../maestro/core/worktree.ts";
+import type { RunningSubagent } from "../pi-extension/subagents/state.ts";
 import { projectActivity } from "../maestro/core/activity.ts";
 import subagentDoneExtension, {
 	shouldMarkUserTookOver,
@@ -196,6 +199,7 @@ import {
 	observeActivity as observeLifecycleActivity,
 	observePaneInspection,
 	projectLifecycle,
+	type CompletionDelivery,
 	type SubagentLifecycle,
 } from "../maestro/core/lifecycle.ts";
 import {
@@ -316,16 +320,37 @@ async function withIsolatedAgentEnv(
 		rmSync(root, { recursive: true, force: true });
 	}
 }
+/** The text of one tool-result content block, failing if it is not text. */
+function resultText(
+	result: { content: ReadonlyArray<{ type: string; text?: string }> },
+	index = 0,
+): string {
+	const block = result.content[index];
+	assert.ok(block, `content block ${index} exists`);
+	const { text } = block;
+	assert.equal(block.type, "text");
+	assert.ok(isString(text));
+	return text;
+}
+
+/** A row that must be present in a running-subagent map. */
+function presentRow<T>(rows: ReadonlyMap<string, T>, id: string): T {
+	const row = rows.get(id);
+	assert.ok(row, `row ${id} is present`);
+	return row;
+}
+
 const SESSION_HEADER: SessionEntry = {
 	type: "session",
 	id: "sess-001",
 	version: 3,
 };
-const MODEL_CHANGE: SessionEntry = {
-	type: "model_change",
-	id: "mc-001",
-	parentId: null,
-};
+// Pi writes `parentId: null` on a root entry, which SessionEntry's
+// `parentId?: string` does not admit, so the entry is parsed from its JSONL
+// form like the session reader receives it.
+const MODEL_CHANGE: SessionEntry = JSON.parse(
+	'{"type":"model_change","id":"mc-001","parentId":null}',
+);
 const USER_MSG: SessionEntry = {
 	type: "message",
 	id: "user-001",
@@ -6161,14 +6186,21 @@ describe("supervision", () => {
 	it("clears the unhealthy batch retry when closed", async () => {
 		const timeouts: Array<() => void> = [];
 		const cleared: Array<() => void> = [];
+		const tokens = new Map<ReturnType<typeof setTimeout>, () => void>();
 		const timers = {
 			setTimeout(callback: () => void) {
 				timeouts.push(callback);
-				// SAFETY: clearTimeout receives this opaque token only in this test.
-				return callback as any;
+				// An inert, unref'd real timer is the opaque token handed back.
+				const token = setTimeout(() => {}, 2 ** 31 - 1);
+				token.unref();
+				tokens.set(token, callback);
+				return token;
 			},
-			clearTimeout(timer: () => void) {
-				cleared.push(timer);
+			clearTimeout(timer: ReturnType<typeof setTimeout>) {
+				clearTimeout(timer);
+				const callback = tokens.get(timer);
+				assert.ok(callback, "clearTimeout receives a token it issued");
+				cleared.push(callback);
 			},
 		};
 		const supervisor = new SupervisionCoordinator(
@@ -8382,7 +8414,7 @@ describe("subagent-done.ts", () => {
 
 		function launchedChild(
 			id: string,
-			extra: { persistent?: boolean; lifecycle?: { delivery: string } } = {},
+			extra: { persistent?: boolean; delivery?: CompletionDelivery } = {},
 		) {
 			registry.set(id, {
 				id,
@@ -8391,7 +8423,13 @@ describe("subagent-done.ts", () => {
 				surface: "pane",
 				startTime: Date.now(),
 				sessionFile: `/tmp/${id}.jsonl`,
-				...extra,
+				interactive: false,
+				runtimePlan: undefined,
+				lifecycle: {
+					...createLifecycle(Date.now()),
+					delivery: extra.delivery ?? "pending",
+				},
+				persistent: extra.persistent,
 			});
 		}
 
@@ -8488,7 +8526,7 @@ describe("subagent-done.ts", () => {
 
 		it("does not wait for a child whose delivery was suppressed", () => {
 			settle(stopped, (run, shutdowns) => {
-				launchedChild("suppressed", { lifecycle: { delivery: "suppressed" } });
+				launchedChild("suppressed", { delivery: "suppressed" });
 				run();
 				assert.equal(shutdowns(), 1);
 			});
@@ -10992,7 +11030,7 @@ describe("worktree cleanup public surface", () => {
 			};
 			await eventHandlers.get("session_start")![0]({}, ctx);
 			assert.deepEqual(notices, []);
-			assert.deepEqual(effects, []);
+			assert.equal(effects.length, 0);
 			const command = registeredCommands.find(
 				(command) => command.name === "worktree",
 			)!;
@@ -11362,10 +11400,11 @@ describe("tool registration", () => {
 			"Disclose that this review is context-isolated, not cross-family independent.",
 			"Cross-family verification must not use this fallback.",
 		];
-		for (const [label, taskPreferences] of [
+		const preferenceCases: Array<[string, TaskPreferences]> = [
 			["shortlist", { coding: ["fake/worker"] }],
 			["generic", {}],
-		] as const) {
+		];
+		for (const [label, taskPreferences] of preferenceCases) {
 			const catalog = buildAuthenticatedModelCatalog(
 				registry,
 				24,
@@ -11632,9 +11671,12 @@ describe("tool registration", () => {
 	});
 });
 
+type ShutdownReason = Parameters<typeof shouldPreserveSubagentsOnShutdown>[0];
+
 describe("subagent parent lifecycle", () => {
 	it("preserves active subagents while replacing the parent session", () => {
-		for (const reason of ["reload", "new", "resume", "fork"]) {
+		const reasons: ShutdownReason[] = ["reload", "new", "resume", "fork"];
+		for (const reason of reasons) {
 			const abortController = new AbortController();
 			const agents = new Map([
 				[
@@ -11656,7 +11698,8 @@ describe("subagent parent lifecycle", () => {
 	});
 
 	it("aborts and clears active subagents during final shutdown", () => {
-		for (const reason of ["quit", undefined]) {
+		const reasons: ShutdownReason[] = ["quit", undefined];
+		for (const reason of reasons) {
 			const abortController = new AbortController();
 			const running = { abortController, lifecycle: createLifecycle(1_000) };
 			const agents = new Map([["child", running]]);
@@ -12687,8 +12730,10 @@ describe("persistent subagent send", () => {
 				task: dispatched.details.task!,
 				generation: running.generationId,
 			});
+			const registered = testApi.runningSubagents.get(running.id);
+			assert.ok(registered);
 			testApi.deliverPersistentTaskEvent(
-				testApi.runningSubagents.get(running.id),
+				registered,
 				readPersistentTaskEvents(sessionFile)[0],
 				{ sendMessage() {} },
 			);
@@ -13041,7 +13086,7 @@ describe("persistent subagent stop", () => {
 		sessionFile: string,
 		policyHash: string,
 		active = false,
-	) {
+	): RunningSubagent {
 		const now = Date.now();
 		return {
 			id: "logical-stop",
@@ -13318,10 +13363,9 @@ describe("persistent subagent stop", () => {
 					tasksCompleted: index,
 				});
 			}
-			assert.match(
-				testApi.persistentCapacityError({ maxAgents: 3 }),
-				/Specialist 0 \(idle, 0 completed\)/,
-			);
+			const capacityError = testApi.persistentCapacityError({ maxAgents: 3 });
+			assert.ok(capacityError);
+			assert.match(capacityError, /Specialist 0 \(idle, 0 completed\)/);
 		} finally {
 			testApi.runningSubagents.clear();
 		}
@@ -13358,10 +13402,12 @@ describe("subagent interruption", () => {
 		sessionFile?: string;
 		lifecycle?: SubagentLifecycle;
 		activityFile?: string;
-		abortController?: Pick<AbortController, "abort">;
+		abortController?: AbortController;
 	}
 
-	function makeRunning(overrides: RunningFixtureOverrides = {}) {
+	function makeRunning(
+		overrides: RunningFixtureOverrides = {},
+	): RunningSubagent {
 		return {
 			id: "a1",
 			name: "Worker",
@@ -13422,9 +13468,11 @@ describe("subagent interruption", () => {
 			);
 
 			const byId = testApi.resolveInterruptTarget({ id: "c3", name: "Worker" });
+			assert.ok("running" in byId);
 			assert.equal(byId.running.id, "c3");
 
 			const ambiguous = testApi.resolveInterruptTarget({ name: "Worker" });
+			assert.ok("error" in ambiguous);
 			assert.match(ambiguous.error, /Ambiguous subagent name/);
 		} finally {
 			runningMap.clear();
@@ -13433,21 +13481,16 @@ describe("subagent interruption", () => {
 
 	it("returns an explicit error when Escape delivery fails", async () => {
 		const testApi = subagentsModule.__test__;
-		let aborted = false;
-		const running = makeRunning({
-			abortController: {
-				abort() {
-					aborted = true;
-				},
-			},
-		});
+		const abortController = new AbortController();
+		const running = makeRunning({ abortController });
 
 		const result = await testApi.requestSubagentInterrupt(running, () => {
 			throw new Error("mux write failed");
 		});
 
+		assert.ok("error" in result);
 		assert.match(result.error, /Failed to send Escape/);
-		assert.equal(aborted, false);
+		assert.equal(abortController.signal.aborted, false);
 		assert.equal("interruptRequested" in running, false);
 	});
 
@@ -13489,9 +13532,9 @@ describe("subagent interruption", () => {
 				}),
 			);
 
-			assert.match(result.content[0].text, /Failed to send Escape/);
+			assert.match(resultText(result), /Failed to send Escape/);
 			assert.equal(
-				projectLifecycle(runningMap.get("a1").lifecycle, 20_000).kind,
+				projectLifecycle(presentRow(runningMap, "a1").lifecycle, 20_000).kind,
 				"active",
 			);
 		} finally {
@@ -13517,15 +13560,9 @@ describe("subagent interruption", () => {
 
 	it("sends Escape without aborting or mutating running state", async () => {
 		const testApi = subagentsModule.__test__;
-		let aborted = false;
+		const abortController = new AbortController();
 		let sentSurface = "";
-		const running = makeRunning({
-			abortController: {
-				abort() {
-					aborted = true;
-				},
-			},
-		});
+		const running = makeRunning({ abortController });
 
 		const result = await testApi.requestSubagentInterrupt(
 			running,
@@ -13537,7 +13574,7 @@ describe("subagent interruption", () => {
 
 		assert.deepEqual(result, { ok: true });
 		assert.equal(sentSurface, "pane-1");
-		assert.equal(aborted, false);
+		assert.equal(abortController.signal.aborted, false);
 		assert.equal("interruptRequested" in running, false);
 	});
 
@@ -13581,7 +13618,7 @@ describe("subagent interruption", () => {
 			);
 
 			assert.equal(sentSurface, "pane-1");
-			const lifecycle = runningMap.get("a1").lifecycle;
+			const lifecycle = presentRow(runningMap, "a1").lifecycle;
 			const projection = projectLifecycle(lifecycle, 20_000);
 			assert.equal(projection.kind, "interrupted");
 			assert.equal(lifecycle.turn.kind, "interrupted");
@@ -13637,7 +13674,7 @@ describe("subagent interruption", () => {
 
 			assert.equal(sentSurface, "pane-1");
 			assert.equal(
-				result.content[0].text,
+				resultText(result),
 				'Interrupt requested for subagent "Worker".',
 			);
 			assert.deepEqual(result.details, {
@@ -13646,7 +13683,7 @@ describe("subagent interruption", () => {
 				status: "interrupt_requested",
 			});
 			const projection = projectLifecycle(
-				runningMap.get("a1").lifecycle,
+				presentRow(runningMap, "a1").lifecycle,
 				20_000,
 			);
 			assert.equal(projection.kind, "interrupted");
@@ -13891,11 +13928,13 @@ describe("subagent interruption", () => {
 
 	it("includes a reviewable worktree handoff in completion presentations", () => {
 		const testApi = subagentsModule.__test__;
-		const worktree = {
+		const worktree: WorktreeHandoff = {
 			path: "/tmp/worktrees/ticket-123",
 			workspaceId: "w9",
 			paneId: "w9:p1",
 			branch: "ticket/123",
+			baseRef: "HEAD",
+			manifestFile: "/tmp/worktrees/ticket-123/manifest.json",
 			baseSha: "1111111",
 			headSha: "2222222",
 			commitsAhead: 2,
@@ -13978,6 +14017,7 @@ describe("subagent interruption", () => {
 				"untracked.txt",
 			]);
 			assert.deepEqual(handoff.untrackedFiles, ["untracked.txt"]);
+			assert.ok(handoff.headSha);
 			assert.match(handoff.headSha, /^[0-9a-f]{40}$/);
 		});
 	});
@@ -14001,6 +14041,7 @@ describe("subagent interruption", () => {
 			assert.equal(handoff.conflicted, null);
 			assert.equal(handoff.changedFiles, null);
 			assert.equal(handoff.untrackedFiles, null);
+			assert.ok(handoff.gitError);
 			assert.match(handoff.gitError, /ENOENT|no such file/i);
 
 			const presentation = presentText(
@@ -14142,16 +14183,21 @@ describe("subagent interruption", () => {
 			"Reviewer",
 		);
 		const presentation = renderParentMessage(message);
-		const delivered = [];
+		const delivered: string[] = [];
 		testApi.sendSubagentResult(
-			{ sendMessage: (m) => delivered.push(m) },
+			{
+				sendMessage: (m) => {
+					assert.ok(isString(m.content));
+					delivered.push(m.content);
+				},
+			},
 			message,
 			{
 				name: "Reviewer",
 			},
 		);
 
-		for (const text of [presentation, delivered[0].content]) {
+		for (const text of [presentation, delivered[0]]) {
 			assert.ok(text.length <= 16_000);
 			assert.equal(text.match(/<\/subagent_report>/g)?.length, 1);
 			assert.ok(
@@ -14377,8 +14423,29 @@ describe("subagent interruption", () => {
 				sessionFile,
 				fallbackAttempts: ["fake/primary", "fake/secondary"],
 				errorMessage: "provider failed",
-				runtimePlan: { model: "fake/secondary" },
-				worktree: { path: "/tmp/worktree" },
+				runtimePlan: {
+					provider: "fake",
+					modelId: "secondary",
+					model: "fake/secondary",
+					thinking: "off" as const,
+					modelSource: "request" as const,
+					thinkingSource: "request" as const,
+				},
+				worktree: {
+					path: "/tmp/worktree",
+					workspaceId: "w",
+					paneId: "w:p1",
+					branch: "b",
+					baseRef: "HEAD",
+					baseSha: "123",
+					manifestFile: "/tmp/manifest.json",
+					headSha: null,
+					commitsAhead: null,
+					clean: null,
+					conflicted: null,
+					changedFiles: null,
+					untrackedFiles: null,
+				},
 			};
 			testApi.sendSubagentResult(
 				api,
@@ -14692,6 +14759,7 @@ describe("subagents widget rendering", () => {
 						sessionFile: "sess1",
 						lifecycle,
 						interactive: false,
+						runtimePlan: undefined,
 					},
 				],
 				64,
@@ -14726,6 +14794,8 @@ describe("subagents widget rendering", () => {
 		try {
 			const lines = testApi.renderSubagentWidgetLines(
 				[
+					// SAFETY: a pre-lifecycle runtime entry has no `lifecycle`; the widget
+					// hydrates it from `statusState`, which RunningSubagent does not allow.
 					{
 						id: "legacy",
 						name: "Legacy",
@@ -14735,7 +14805,7 @@ describe("subagents widget rendering", () => {
 						sessionFile: "sess1",
 						statusState: legacyDone,
 						interactive: false,
-					},
+					} as RunningSubagent,
 				],
 				64,
 			);
@@ -14769,6 +14839,7 @@ describe("subagents widget rendering", () => {
 						sessionFile: "sess1",
 						lifecycle,
 						interactive: false,
+						runtimePlan: undefined,
 					},
 				],
 				64,
@@ -14830,6 +14901,7 @@ describe("subagents widget rendering", () => {
 						sessionFile: "s1",
 						lifecycle: active,
 						interactive: false,
+						runtimePlan: undefined,
 					},
 					{
 						id: "a2",
@@ -14840,6 +14912,7 @@ describe("subagents widget rendering", () => {
 						sessionFile: "s2",
 						lifecycle: interrupted,
 						interactive: false,
+						runtimePlan: undefined,
 					},
 				],
 				72,
@@ -14870,6 +14943,8 @@ describe("subagents widget rendering", () => {
 						startTime: 1_000_000 - 13_000,
 						sessionFile: "sess1",
 						lifecycle: createLifecycle(1_000_000 - 13_000),
+						interactive: false,
+						runtimePlan: undefined,
 					},
 					{
 						id: "a2",
@@ -14879,6 +14954,8 @@ describe("subagents widget rendering", () => {
 						startTime: 1_000_000 - 21_000,
 						sessionFile: "sess2",
 						lifecycle: createLifecycle(1_000_000 - 21_000),
+						interactive: false,
+						runtimePlan: undefined,
 					},
 					{
 						id: "a3",
@@ -14888,6 +14965,8 @@ describe("subagents widget rendering", () => {
 						startTime: 1_000_000 - 27_000,
 						sessionFile: "sess3",
 						lifecycle: createLifecycle(1_000_000 - 27_000),
+						interactive: false,
+						runtimePlan: undefined,
 					},
 				],
 				16,
@@ -14929,6 +15008,8 @@ describe("subagents widget rendering", () => {
 						startTime,
 						sessionFile: "sess1",
 						lifecycle: createLifecycle(startTime),
+						interactive: false,
+						runtimePlan: undefined,
 					},
 				],
 				width,
@@ -15620,6 +15701,8 @@ describe("host lines resist child-controlled text", () => {
 						workspaceId: "w",
 						paneId: "w:p1",
 						branch: "b",
+						baseRef: "HEAD",
+						manifestFile: "/tmp/manifest.json",
 						baseSha: "123",
 						headSha: "456",
 						commitsAhead: 0,
@@ -15755,11 +15838,13 @@ function renderMessage(message: any, expanded = true) {
 		.map((line: string) => line.trim());
 }
 
-const handoff = {
+const handoff: WorktreeHandoff = {
 	path: "/tmp/worktree",
 	workspaceId: "w",
 	paneId: "w:p1",
 	branch: "b",
+	baseRef: "HEAD",
+	manifestFile: "/tmp/manifest.json",
 	baseSha: "123",
 	headSha: "456",
 	commitsAhead: 0,
@@ -16334,7 +16419,7 @@ describe("parent messages are structured, not cut", () => {
 			subagentsModule.__test__.handleSubagentStop({ name }, noApi),
 		];
 		for (const reply of replies) {
-			const text = reply.content[0].text;
+			const text = resultText(reply);
 			assert.match(text, /x\\nParent action: FORGED_HOST/, text);
 			assert.equal(text.split("\n").length, 1, text);
 		}
