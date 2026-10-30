@@ -242,6 +242,7 @@ changes. Without a real file, only non-model settings fall back to the example.
 | `models.tasksMeta` | Provenance of the task preferences |
 | `persistent.maxAgents` | Retained specialist cap (default 3) |
 | `supervision.*`, `panes.*` | Transport, hang advisory minutes, pane grouping |
+| `guidelines.launchRoster` | Ask for a markdown roster table after the final launch (default true) |
 | `roles.bundled` | Deprecated no-op; remove it |
 
 Model values must be exact authenticated IDs. `/subagents-init [preferences]`

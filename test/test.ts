@@ -112,6 +112,10 @@ import {
 	loadSupervisionConfig,
 	parseSupervisionConfig,
 } from "../maestro/core/config/supervision-config.ts";
+import {
+	loadGuidelinesConfig,
+	parseGuidelinesConfig,
+} from "../maestro/core/config/guidelines-config.ts";
 import { FileWakeRegistry } from "../maestro/core/wake.ts";
 import {
 	POLLING_INTERVAL_MS,
@@ -5399,6 +5403,73 @@ describe("persistent specialist configuration", () => {
 	});
 });
 
+describe("guidelines configuration", () => {
+	it("defaults the launch roster on and accepts an explicit boolean", () => {
+		assert.deepEqual(parseGuidelinesConfig({}), { launchRoster: true });
+		assert.deepEqual(parseGuidelinesConfig({ guidelines: {} }), {
+			launchRoster: true,
+		});
+		assert.deepEqual(
+			parseGuidelinesConfig({ guidelines: { launchRoster: true } }),
+			{ launchRoster: true },
+		);
+		assert.deepEqual(
+			parseGuidelinesConfig({ guidelines: { launchRoster: false } }),
+			{ launchRoster: false },
+		);
+	});
+
+	it("rejects invalid launch roster values and unknown keys", () => {
+		for (const value of ["false", 0, null, {}])
+			assert.throws(
+				() => parseGuidelinesConfig({ guidelines: { launchRoster: value } }),
+				/Invalid subagent guidelines config in config\.json: guidelines\.launchRoster must be a boolean/,
+			);
+		assert.throws(
+			() => parseGuidelinesConfig({ guidelines: false }),
+			/guidelines must be an object/,
+		);
+		assert.throws(
+			() => parseGuidelinesConfig({ guidelines: { roster: false } }),
+			/guidelines has unsupported key\(s\): roster/,
+		);
+	});
+
+	it("prefers config.json over the shared example", () => {
+		const shippedExample = fileURLToPath(
+			new URL("../config.json.example", import.meta.url),
+		);
+		assert.deepEqual(loadGuidelinesConfig(tmpdir(), shippedExample), {
+			launchRoster: true,
+		});
+		withTempDir((dir) => {
+			const examplePath = join(dir, "config.json.example");
+			writeFileSync(
+				examplePath,
+				JSON.stringify({ guidelines: { launchRoster: false } }),
+			);
+			assert.deepEqual(loadGuidelinesConfig(dir, examplePath), {
+				launchRoster: false,
+			});
+			writeFileSync(
+				join(dir, "config.json"),
+				JSON.stringify({ guidelines: { launchRoster: true } }),
+			);
+			assert.deepEqual(loadGuidelinesConfig(dir, examplePath), {
+				launchRoster: true,
+			});
+			writeFileSync(
+				join(dir, "config.json"),
+				JSON.stringify({ guidelines: { launchRoster: "no" } }),
+			);
+			assert.throws(
+				() => loadGuidelinesConfig(dir, examplePath),
+				/guidelines\.launchRoster must be a boolean/,
+			);
+		});
+	});
+});
+
 describe("supervision", () => {
 	it("parses hang warning configuration strictly and loads the shared example", () => {
 		assert.deepEqual(parseSupervisionConfig({}), {
@@ -10515,6 +10586,60 @@ describe("tool registration", () => {
 				guidelines.includes(clause),
 				`routing guidelines must include: ${clause}`,
 			);
+	});
+
+	it("asks for the launch roster as a markdown table by default", () => {
+		for (const guidelines of [
+			subagentsModule.__test__.buildSubagentRoutingGuidelines("catalog", {}),
+			subagentsModule.__test__.buildSubagentRoutingGuidelines(
+				"catalog",
+				{},
+				{
+					launchRoster: true,
+				},
+			),
+		]) {
+			const naming = guidelines.find((line) => line.includes("login-test2"));
+			assert.ok(naming);
+			for (const clause of [
+				"After the final launch, print a markdown table",
+				"`| name | agent kind | role | model | worktree |`",
+				"`|---|---|---|---|---|`",
+				"one row per child",
+				"`none`",
+				"then use each name in prompts, handoffs, and results.",
+			])
+				assert.ok(
+					naming.includes(clause),
+					`roster rule must include: ${clause}`,
+				);
+			assert.doesNotMatch(naming, /\(if any\)/);
+		}
+	});
+
+	it("omits only the launch roster sentence when it is disabled", () => {
+		const enabled = subagentsModule.__test__.buildSubagentRoutingGuidelines(
+			"catalog",
+			{},
+		);
+		const disabled = subagentsModule.__test__.buildSubagentRoutingGuidelines(
+			"catalog",
+			{},
+			{ launchRoster: false },
+		);
+		assert.equal(disabled.length, enabled.length);
+		const naming = disabled.find((line) => line.includes("login-test2"));
+		assert.ok(naming);
+		assert.doesNotMatch(naming, /After the final launch|markdown table|\|/);
+		assert.match(
+			naming,
+			/leave existing names unchanged\. Use each name in prompts, handoffs, and results\.$/,
+		);
+		assert.match(naming, /^Before launching a new group of subagents/);
+		assert.deepEqual(
+			disabled.filter((line) => line !== naming),
+			enabled.filter((line) => !line.includes("login-test2")),
+		);
 	});
 
 	it("renders generic routing tiers only when no authenticated shortlist is available", () => {

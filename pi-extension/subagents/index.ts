@@ -25,6 +25,7 @@ import {
 import { loadRoleConfig } from "../../maestro/core/config/role-config.ts";
 import { loadPersistentConfig } from "../../maestro/core/config/persistent-config.ts";
 import { loadPaneConfig } from "../../maestro/core/config/pane-config.ts";
+import { loadGuidelinesConfig } from "../../maestro/core/config/guidelines-config.ts";
 import { loadStatusConfig } from "../../maestro/core/status.ts";
 import { markDelivery } from "../../maestro/core/lifecycle.ts";
 import type { WorktreeCleanupOperations } from "../../maestro/core/worktree-cleanup.ts";
@@ -114,8 +115,6 @@ export {
 	}
 }
 
-const subagentRoutingGuidelines = buildSubagentRoutingGuidelines();
-
 function shouldRetainSubagentSurface(
 	running: Pick<RunningSubagent, "worktree"> | { worktree?: unknown },
 ): boolean {
@@ -143,6 +142,16 @@ const supervisionConfig = loadSupervisionConfig(
 const paneConfig = loadPaneConfig(
 	getSubagentsConfigDir(),
 	getSubagentsConfigExamplePath(),
+);
+const guidelinesConfig = loadGuidelinesConfig(
+	getSubagentsConfigDir(),
+	getSubagentsConfigExamplePath(),
+);
+
+const subagentRoutingGuidelines = buildSubagentRoutingGuidelines(
+	undefined,
+	undefined,
+	guidelinesConfig,
 );
 
 /** Presentation rows share the adapter's records; only RunSession owns runs. */
@@ -396,6 +405,7 @@ export default function subagentsExtension(
 		const refreshedGuidelines = buildSubagentRoutingGuidelines(
 			runtime.modelCatalog,
 			authenticatedTaskPreferences,
+			guidelinesConfig,
 		);
 		subagentRoutingGuidelines.splice(
 			0,
