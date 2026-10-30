@@ -17,6 +17,7 @@ import {
 } from "./state.ts";
 import { ensureLifecycle } from "./observation.ts";
 import type { Controls } from "./controls.ts";
+import { encodeHostValue } from "./presentation.ts";
 
 export function asPiRecord(running: RunningSubagent): PiRunRecord {
 	// SAFETY: live rows are the adapter's actual records. Legacy presentation
@@ -102,7 +103,8 @@ export function formatPersistentSpecialistFacts(
 		`Logical ID: ${facts.logicalId}`,
 		`Generation ID: ${facts.generationId}`,
 		`Policy hash: ${facts.policyHash}`,
-		`Task outcomes: ${facts.tasks.map((task) => `${task.task}=${task.outcome}`).join(", ") || "none"}`,
+		// Ledger task strings can originate in child-written events.
+		`Task outcomes: ${facts.tasks.map((task) => `${encodeHostValue(task.task)}=${task.outcome}`).join(", ") || "none"}`,
 		`Session: ${facts.sessionFile}`,
 		`Last observed phase: ${facts.lastObservedPhase}`,
 	];

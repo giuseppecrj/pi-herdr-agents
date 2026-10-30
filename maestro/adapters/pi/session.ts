@@ -917,8 +917,14 @@ export function inspectFinalAssistantMessage(
 	return { text: null, contentLength: 0 };
 }
 
-/** Who wrote a summary: the child's final assistant text, or the host's own fallback. */
-export type SummarySource = "child" | "host";
+/**
+ * Who wrote a summary: `child` is the child's final assistant text, delivered
+ * inside the report envelope; `host` is a host fallback; `child-error` is a
+ * host label followed by error text the child process wrote or relayed (the
+ * transcript or `.exit` sidecar errorMessage). Host and child-error summaries
+ * are delivered as one encoded host line, never as host-authored prose.
+ */
+export type SummarySource = "child" | "host" | "child-error";
 
 export interface AttributedSummary {
 	summary: string;
@@ -954,7 +960,7 @@ export function findLastAssistantSummary(
 		) {
 			return {
 				summary: `Subagent error: ${errorMessage.trim()}`,
-				summarySource: "host",
+				summarySource: "child-error",
 			};
 		}
 	}

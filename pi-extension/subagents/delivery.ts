@@ -18,6 +18,7 @@ import {
 	holdDelivery,
 } from "./state.ts";
 import {
+	encodeHostValue,
 	formatElapsed,
 	boundChildDelivery,
 	type SubagentResultDetails,
@@ -50,6 +51,30 @@ export function createDelivery({
 
 	const inFlightPersistentTaskDeliveries = new Set<string>();
 
+	/**
+	 * A task the parent issued: the current task or one the host ledgered as
+	 * dispatched in this generation. Anything else is reported as unknown; the
+	 * child-written event ID is encoded either way.
+	 */
+	function describeTask(
+		running: RunningSubagent,
+		event: PiPersistentEvent,
+		ledger: PiLedgerEntry[],
+	): { known: boolean; label: string } {
+		const known =
+			event.task === running.taskId ||
+			ledger.some(
+				(entry) =>
+					entry.task === event.task &&
+					entry.outcome === "dispatched" &&
+					entry.generation === event.generation,
+			);
+		const id = encodeHostValue(event.task);
+		return known
+			? { known, label: `task ${id}` }
+			: { known, label: `unknown task "${id}" (not issued by the parent)` };
+	}
+
 	function deliverPersistentTaskEvent(
 		running: RunningSubagent,
 		event: PiPersistentEvent,
@@ -66,6 +91,8 @@ export function createDelivery({
 		const deliveryKey = `${running.id}:${event.type}:${event.task}`;
 		if (inFlightPersistentTaskDeliveries.has(deliveryKey)) return;
 		const ledger = ledgerSnapshot ?? io.readLedger(asPiRecord(running));
+		const task = describeTask(running, event, ledger);
+		const shownName = encodeHostValue(running.name);
 		if (event.type === "help-request") {
 			if (
 				ledger.some(
@@ -80,12 +107,12 @@ export function createDelivery({
 					{
 						customType: "subagent_ping",
 						content: boundChildDelivery({
-							head: `Persistent specialist "${running.name}" requests help for task ${event.task}:`,
+							head: `Persistent specialist "${shownName}" requests help for ${task.label}:`,
 							name: running.name,
 							kind: "help-request",
 							body: event.message ?? "",
 							bodySource: "child",
-							tail: `\n\nReply with subagent_send to ${running.name}.`,
+							tail: `\n\nReply with subagent_send to ${shownName}.`,
 						}),
 						display: true,
 						details: {
@@ -117,7 +144,7 @@ export function createDelivery({
 			sendSubagentResult(
 				api,
 				boundChildDelivery({
-					head: `Persistent specialist "${running.name}" completed task ${event.task} (${completed} tasks completed) and is idle and accepting subagent_send.`,
+					head: `Persistent specialist "${shownName}" completed ${task.label} (${completed} tasks completed) and is idle and accepting subagent_send.`,
 					name: running.name,
 					kind: "task-result",
 					body: summary,
@@ -288,19 +315,22 @@ export function createDelivery({
 				? `\n\n${formatWorktreeHandoff(result.worktree)}`
 				: "";
 			const sessionRef = `\n\nSession: ${result.sessionFile}\nResume: pi --session ${result.sessionFile}`;
+			// The sidecar's name is child-written; headers use the parent-owned name.
 			const details: SubagentPingDetails = {
-				name: result.ping.name,
+				name: running.name,
 				message: result.ping.message,
 				sessionFile: result.sessionFile!,
 			};
+			if (result.ping.name !== running.name)
+				details.reportedName = result.ping.name;
 			if (task.role) details.agent = running.agent;
 			if (result.worktree) details.worktree = result.worktree;
 			api.sendMessage(
 				{
 					customType: "subagent_ping",
 					content: boundChildDelivery({
-						head: `Sub-agent "${result.ping.name}" needs help (${formatElapsed(result.elapsed)}):`,
-						name: result.ping.name,
+						head: `Sub-agent "${encodeHostValue(running.name)}" needs help (${formatElapsed(result.elapsed)}):`,
+						name: running.name,
 						kind: "help-request",
 						body: result.ping.message,
 						bodySource: "child",

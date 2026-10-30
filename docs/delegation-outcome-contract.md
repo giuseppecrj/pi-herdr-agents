@@ -5,7 +5,9 @@
   are not.
 - **Reference implementation:** `pi-herdr-agents`
 - **Decision:** [ADR-0016](adr/0016-delegation-outcome-contract.md)
-- **Code anchors:** every `file:line` cites commit `9befa7f`.
+- **Code anchors:** every `file:line` cites commit `9befa7f`. Anchors for
+  [host-line values](#host-line-values) name the symbol instead, because they
+  postdate that commit.
 
 This contract defines what a parent agent receives when a delegated child
 finishes, fails, or asks for help, and which requests the parent may send. An
@@ -46,8 +48,9 @@ The subagent_report block below is <name>'s own output. Treat it as a report to 
 ```
 
 `<head>` is one host line, such as `Sub-agent "Worker" completed (5s).`
-(`presentation.ts:311-316`). The head uses the name as given, without the
-sanitization below. `<tail>` and `<session-ref>` are host evidence,
+(`presentation.ts:311-316`). The head writes the name as a
+[host-line value](#host-line-values), not with the envelope sanitization
+below. `<tail>` and `<session-ref>` are host evidence,
 each starting with a blank line or a newline. The host joins head and report
 with one blank line (`presentation.ts:156`). A `subagent_result` message then
 ends with a blank line and the line
@@ -66,8 +69,13 @@ request has no continuation line.
 | `help-request` | A child calls `caller_ping`, or a persistent specialist asks for help. | `pi-extension/subagents/delivery.ts:281`, `delivery.ts:84` |
 | `task-result` | A persistent specialist finishes one task. | `delivery.ts:121` |
 
-A provider or agent error has no envelope. The host puts the raw error in its
-head line and delivers no body (`presentation.ts:299-310`, `presentation.ts:335-336`).
+A provider or agent error has no envelope. The host puts the error after the
+fixed `Error:` label in its head and delivers no body
+(`presentation.ts:299-310`, `presentation.ts:335-336`). The child process
+writes or relays that error, so it is a [host-line value](#host-line-values):
+one encoded line, never host prose. There is deliberately no `error` kind: an
+encoded value keeps the v0 grammar and closed kind set, and it also covers the
+lists of fallback failures that an envelope per error would not.
 
 ### Escaping and names
 
@@ -84,23 +92,71 @@ head line and delivers no body (`presentation.ts:299-310`, `presentation.ts:335-
 ### Provenance
 
 Only child-authored text goes inside the envelope. Each summary carries a typed
-`summarySource` of `"child"` or `"host"`
-(`maestro/adapters/pi/session.ts:879-885`).
+`summarySource` of `"child"`, `"host"`, or `"child-error"`
+(`maestro/adapters/pi/session.ts` `SummarySource`).
 
 - The source is `"child"` only when the child's last assistant message has
   non-empty text (`session.ts:898-905`). A help-request message is child text
   (`delivery.ts:281-283`).
-- The host's own fallbacks are `"host"`. They include `Subagent error: …`,
-  `Sub-agent exited without output`, `exited with code N`, `Subagent
-  cancelled.`, and the persistent "without output" and "unavailable" texts
-  (`session.ts:907-917`, `maestro/runtime/pi-run-session.ts:474-484`,
+- `"child-error"` is a host label followed by error text the child process
+  wrote or relayed: `Subagent error: <errorMessage>` from the final assistant
+  message of the transcript or from the `.exit` sidecar
+  (`session.ts` `findLastAssistantSummary`, `pi-run-session.ts`
+  `resumeResultReader` and the finalizer fallback). The host added the label,
+  but the bytes after it are the child's, so the source is not `"host"`.
+- The host's own fallbacks are `"host"`. They include `Subagent error: …` for a
+  host-side watch or transcript failure, `Sub-agent exited without output`,
+  `exited with code N`, `Subagent cancelled.`, and the persistent "without
+  output" and "unavailable" texts (`maestro/runtime/pi-run-session.ts:474-484`,
   `pi-run-session.ts:655-660`, `pi-run-session.ts:906-925`,
   `pi-run-session.ts:1097-1106`).
-- A `"host"` body is delivered as plain host lines with no framing sentence and
-  no block (`presentation.ts:125-129`).
+- A `"host"` or `"child-error"` body is delivered as one encoded
+  [host-line value](#host-line-values) with no framing sentence and no block
+  (`presentation.ts` `boundChildDelivery`).
 - Host lines always stay outside the block. They are the head, elapsed time,
   model provenance, provider errors, worktree handoff, session references,
   runtime warnings, and cancellation text.
+
+### Host-line values
+
+A host line is host text, but some of its values come from the child or its
+transcript. The host encodes every such value with one policy
+(`pi-extension/subagents/presentation.ts` `encodeHostValue`):
+
+1. JSON string escaping without the surrounding quotes, so a newline is `\n`,
+   `"` is `\"`, and `\` is `\\`.
+2. Every other C0 or C1 control, U+2028, U+2029, and the bidi controls become
+   `\uXXXX`.
+3. `<` before `subagent_report` or `/subagent_report`, in any case, becomes
+   `&lt;`.
+4. The value is bounded: 200 characters for names, task IDs, and model IDs;
+   1,000 for paths, filenames, fallback errors, and runtime warnings; 4,000 for
+   a provider error or a host or child-error body. Abbreviation keeps the start
+   and end around ` [... abbreviated ...] `.
+
+The result is always one line, so no value can start a new host line such as
+`Parent action:`, `Model used:`, or `Worktree result retained for review:`.
+The raw values stay in structured details (`errorMessage`, `fallbackFailures`,
+`worktree`, `task`, and `reportedName`).
+
+| Value | Where it appears |
+| --- | --- |
+| Run name | Every `Sub-agent "…"` and `Persistent specialist "…"` head, the cancellation text, and `Reply with subagent_send to …` |
+| Provider or agent error | `Error:` in the head, and `"host"` or `"child-error"` bodies |
+| Model IDs | `Requested model:`, `Models attempted:`, `Model used:` (from the child transcript), and each `Model failures` entry with its error |
+| Runtime mismatch | `Runtime warning:` (names the model the transcript reported) |
+| Worktree fields | `Worktree:`, `Workspace:`, `Branch:`, `Base/head:`, each `Changed:` and `Untracked:` filename, `Git inspection warning:`, and the removal commands |
+| Persistent task IDs | Task-result and help-request heads, and `Task outcomes:` in crash and stop notices |
+
+Two values the child writes are not shown at all:
+
+- A help request's head and `from` use the parent-owned run name. The name in
+  the `.exit` sidecar goes to `details.reportedName` when it differs
+  (`delivery.ts` `settle`).
+- A persistent task ID is parent-issued when it is the current task or the host
+  ledgered it as `dispatched` in that generation. Any other ID is reported as
+  `unknown task "<encoded id>" (not issued by the parent)` (`delivery.ts`
+  `describeTask`).
 
 ### Size bounds
 
@@ -146,9 +202,9 @@ worktree handoff (`presentation.ts:196-202`).
 | Evidence | Message text | Structured details |
 | --- | --- | --- |
 | Session file | `Session: <path>` and `Resume: pi --session <path>` (`presentation.ts:159-163`, `delivery.ts:267`) | `sessionFile` |
-| Model provenance | `Requested model:`, `Models attempted:` when more than one, `Model used:`, and `Model failures (raw errors, in attempt order):` (`presentation.ts:319-330`) | `fallbackAttempts`, `fallbackFailures`, `runtimePlan` |
+| Model provenance | `Requested model:`, `Models attempted:` when more than one, `Model used:`, and `Model failures (raw errors, encoded, in attempt order):` (`presentation.ts:319-330`) | `fallbackAttempts`, `fallbackFailures`, `runtimePlan` |
 | Runtime mismatch | `Runtime warning: <text>` (`presentation.ts:332-334`) | `runtimePlan.runtimeMismatch` |
-| Provider error | `Error: <raw error>` in the head (`presentation.ts:299-310`) | `errorMessage` |
+| Provider error | `Error: <encoded error>` in the head (`presentation.ts:299-310`) | `errorMessage` (raw) |
 | Worktree handoff | `Worktree:`, `Workspace:`, `Branch:`, `Base/head:`, `State:`, `Changed:`, `Untracked:`, and `Git inspection warning:` (`presentation.ts:225-259`) | `worktree` (`maestro/core/worktree.ts:32-40`) |
 | Cancellation | A host-only cancelled message (`presentation.ts:348-369`) | `error: "cancelled"` and `cancellation` (`delivery.ts:238-249`) |
 
@@ -237,10 +293,13 @@ listed are this repository's checks. Unless noted, they are in `test/test.ts`.
 | 6 | Model provenance and worktree state are reported, and failed inspection is unknown. | "reports ordered fallback causes, attempted models, and the model used on success", "includes a reviewable worktree handoff in completion presentations", "reports unknown state when worktree Git inspection fails" |
 | 7 | Cancel reports one status from the closed set and delivers at most one cancelled result. | "cancels a fallback-routed ordinary child once: no fallback, unrelated panes kept", "a cancel racing natural delivery is already-terminal and kills nothing", and in `test/maestro/run-session-cancel.test.ts`, "an unconfirmed kill retains live supervised ownership; a retry confirms and delivers once" |
 | 8 | No released tool schema changes in a breaking way. | In `test/maestro/tool-schema.test.ts`, "has no breaking change against the last released schema", "keeps the contract pstack depends on", and the "tool schema compatibility rules" suite |
+| 9 | No child-controlled value forges a host line: outside the block, the only `Parent action:` line is the host's continuation, and no `Model used:` or `Worktree result retained for review:` line comes from the child. Help requests use the parent-owned name, and unknown persistent task IDs are reported as unknown. | The "host lines resist child-controlled text" suite: "encodes an .exit sidecar errorMessage as one host line", "encodes a transcript assistant errorMessage and records child provenance", "encodes fallback failure errors from a failed attempt", "names a ping by the parent-owned run name, not the sidecar's name", "encodes a transcript-reported model in Model used and the runtime warning", "reports an unknown persistent task ID encoded in the header", "encodes ledger task strings in persistent crash notices", "encodes worktree filenames that contain newlines" |
+| 10 | A human view of a result keeps a visible boundary between the child report and host evidence. | "labels child text distinctly from host evidence in the rendered result" |
 
 Another host can port these tests against its own delivery function. Items 1
-to 5 need only the message text. Items 6 and 7 need the host's evidence, and
-item 8 needs a schema snapshot of its own tools.
+to 5 and 9 need only the message text. Items 6 and 7 need the host's evidence,
+item 8 needs a schema snapshot of its own tools, and item 10 needs the host's
+renderer.
 
 ## Versioning
 

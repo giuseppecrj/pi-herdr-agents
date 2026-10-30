@@ -484,7 +484,7 @@ function resumeResultReader(
 				: exitCode === 0
 					? "Resumed session exited without new output"
 					: `Resumed session exited with code ${exitCode}`,
-			summarySource: "host",
+			summarySource: errorMessage ? "child-error" : "host",
 		}),
 		sessionFile,
 	});
@@ -920,7 +920,8 @@ export function createDefaultRunSession(
 										? "Sub-agent exited without output"
 										: "Resumed session exited without new output"
 									: `${cursor === undefined ? "Sub-agent" : "Resumed session"} exited with code ${exitCode}`,
-							summarySource: "host",
+							// The sidecar errorMessage is child-written.
+							summarySource: evidence.errorMessage ? "child-error" : "host",
 						})
 					: {
 							summary:

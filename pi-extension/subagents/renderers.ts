@@ -5,7 +5,51 @@ import {
 	isFiniteNumber,
 	isString,
 } from "../../maestro/core/config/type-guards.ts";
-import { formatElapsed, unwrapChildReport } from "./presentation.ts";
+import {
+	encodeHostValue,
+	formatElapsed,
+	splitChildReport,
+} from "./presentation.ts";
+
+/**
+ * The human view of a delivered result: host lines unprefixed, the child's
+ * report fenced by a labelled rule with every child line prefixed, so child
+ * text cannot pass for host evidence.
+ */
+function resultViewLines(
+	rawContent: string,
+	name: string,
+	elapsed: string,
+	exitCode: number,
+): string[] {
+	const shownName = encodeHostValue(name);
+	const stripSession = (text: string) =>
+		text.replace(/\n\nSession: .+\nResume: .+$/, "");
+	const { before, report, after } = splitChildReport(rawContent);
+	const head = stripSession(before)
+		.replace(`Sub-agent "${shownName}" completed (${elapsed}).\n\n`, "")
+		.replace(
+			`Sub-agent "${shownName}" was cancelled by the parent after ${elapsed}. `,
+			"",
+		)
+		.replace(`Sub-agent "${shownName}" failed (exit code ${exitCode}).\n\n`, "")
+		.replace(
+			new RegExp(
+				`^Sub-agent "${shownName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}" failed after ${elapsed} \\(provider/agent error\\)\\.\\n\\n`,
+			),
+			"",
+		);
+	const lines: string[] = [];
+	if (head.trim()) lines.push(...head.trimEnd().split("\n"));
+	if (report) {
+		lines.push(`┌ Child report from ${report.from} (${report.kind})`);
+		for (const line of report.body.split("\n")) lines.push(`│ ${line}`);
+		lines.push("└ end of child report");
+	}
+	const evidence = stripSession(after).replace(/^\n+/, "");
+	if (evidence.trim()) lines.push(...evidence.trimEnd().split("\n"));
+	return lines;
+}
 
 export function registerMessageRenderers(pi: ExtensionAPI): void {
 	// ── subagent_result message renderer ──
@@ -54,34 +98,22 @@ export function registerMessageRenderers(pi: ExtensionAPI): void {
 						? message.content
 						: "";
 
-				// Clean summary (remove session ref and leading label for display)
-				const summary = unwrapChildReport(rawContent)
-					.replace(/\n\nSession: .+\nResume: .+$/, "")
-					.replace(`Sub-agent "${name}" completed (${elapsed}).\n\n`, "")
-					.replace(
-						`Sub-agent "${name}" was cancelled by the parent after ${elapsed}. `,
-						"",
-					)
-					.replace(
-						`Sub-agent "${name}" failed (exit code ${exitCode}).\n\n`,
-						"",
-					)
-					.replace(
-						new RegExp(
-							`^Sub-agent "${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}" failed after ${elapsed} \\(provider/agent error\\)\\.\\n\\n`,
-						),
-						"",
-					);
+				// Host lines, then the fenced child report, then host evidence; the
+				// session reference is rendered from details below.
+				const summaryLines = resultViewLines(
+					rawContent,
+					name,
+					elapsed,
+					exitCode,
+				);
 
 				// Build content for the box
 				const contentLines = [header];
 
 				if (options.expanded) {
 					// Full view: complete summary + session info
-					if (summary) {
-						for (const line of summary.split("\n")) {
-							contentLines.push(line.slice(0, width - 6));
-						}
+					for (const line of summaryLines) {
+						contentLines.push(line.slice(0, width - 6));
 					}
 					if (details.sessionFile) {
 						contentLines.push("");
@@ -94,17 +126,13 @@ export function registerMessageRenderers(pi: ExtensionAPI): void {
 					}
 				} else {
 					// Collapsed: preview + expand hint
-					if (summary) {
-						const previewLines = summary.split("\n").slice(0, 5);
-						for (const line of previewLines) {
-							contentLines.push(theme.fg("dim", line.slice(0, width - 6)));
-						}
-						const totalLines = summary.split("\n").length;
-						if (totalLines > 5) {
-							contentLines.push(
-								theme.fg("muted", `… ${totalLines - 5} more lines`),
-							);
-						}
+					for (const line of summaryLines.slice(0, 5)) {
+						contentLines.push(theme.fg("dim", line.slice(0, width - 6)));
+					}
+					if (summaryLines.length > 5) {
+						contentLines.push(
+							theme.fg("muted", `… ${summaryLines.length - 5} more lines`),
+						);
 					}
 					contentLines.push(
 						theme.fg("muted", keyHint("app.tools.expand", "to expand")),

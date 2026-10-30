@@ -65,6 +65,37 @@ function boundResultPresentation(body: string, sessionRef: string): string {
 type ChildReportKind = "result" | "failure" | "help-request" | "task-result";
 
 const REPORT_TAG = "subagent_report";
+const REPORT_DELIMITER = new RegExp(`<(/?${REPORT_TAG})`, "gi");
+
+/** Bounds for one variable value inside a host line. */
+const HOST_VALUE_CHARS = 200;
+const HOST_PATH_CHARS = 1_000;
+const HOST_ERROR_CHARS = 4_000;
+// Every C0/C1 control, Unicode line and paragraph separators, and bidi
+// controls: anything that could start a new line or reorder what a reader sees.
+const UNSAFE_HOST_CHAR =
+	/[\p{Cc}\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
+
+/**
+ * The encoding policy for any child- or transcript-influenced value shown in a
+ * host line: JSON string escaping (so `\n`, `"` and `\` stay visible as
+ * escapes), every other control or separator as `\uXXXX`, report delimiters
+ * neutralized, and a bounded length. The result is always one line. Callers
+ * keep the original value in structured details.
+ */
+export function encodeHostValue(
+	value: string,
+	maxChars: number = HOST_VALUE_CHARS,
+): string {
+	const escaped = JSON.stringify(value)
+		.slice(1, -1)
+		.replace(
+			UNSAFE_HOST_CHAR,
+			(char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+		)
+		.replace(REPORT_DELIMITER, "&lt;$1");
+	return abbreviateMiddle(escaped, maxChars, " [... abbreviated ...] ");
+}
 const CONTINUATION_RESERVE_CHARS = RESULT_CONTINUATION_PROMPT.length + 16;
 const MAX_HEAD_CHARS = 1_000;
 const MAX_TAIL_CHARS = 3_000;
@@ -83,10 +114,7 @@ function formatChildReport(args: {
 		MAX_REPORT_NAME_CHARS,
 		"…",
 	);
-	const neutralized = args.body.replace(
-		new RegExp(`<(/?${REPORT_TAG})`, "gi"),
-		"&lt;$1",
-	);
+	const neutralized = args.body.replace(REPORT_DELIMITER, "&lt;$1");
 	const body =
 		args.maxBodyChars === undefined || neutralized.length <= args.maxBodyChars
 			? neutralized
@@ -102,15 +130,37 @@ function formatChildReport(args: {
 	);
 }
 
-export function unwrapChildReport(text: string): string {
-	return text
-		.replace(
-			new RegExp(
-				`The ${REPORT_TAG} block below is [^\\n]*\\n\\n<${REPORT_TAG} [^\\n>]*>\\n`,
-			),
-			"",
-		)
-		.replace(new RegExp(`\\n</${REPORT_TAG}>`), "");
+export interface ChildReportParts {
+	/** Host text before the framing sentence. */
+	before: string;
+	report?: { from: string; kind: string; body: string };
+	/** Host evidence after the closing tag. */
+	after: string;
+}
+
+/**
+ * Split a delivered message into its host text and its one child report. Host
+ * values are encoded and child bodies neutralized, so the first framing
+ * sentence and the first closing tag after it are the host's own.
+ */
+export function splitChildReport(text: string): ChildReportParts {
+	const open = new RegExp(
+		`The ${REPORT_TAG} block below is [^\\n]*\\n\\n<${REPORT_TAG} from="([^"\\n]*)" kind="([a-z-]+)">\\n`,
+	).exec(text);
+	const closeTag = `\n</${REPORT_TAG}>`;
+	if (!open) return { before: text, after: "" };
+	const start = open.index + open[0].length;
+	const close = text.indexOf(closeTag, start);
+	if (close < 0) return { before: text, after: "" };
+	return {
+		before: text.slice(0, open.index),
+		report: {
+			from: open[1],
+			kind: open[2],
+			body: text.slice(start, close),
+		},
+		after: text.slice(close + closeTag.length),
+	};
 }
 
 export function boundChildDelivery(args: {
@@ -122,9 +172,11 @@ export function boundChildDelivery(args: {
 	tail?: string;
 	sessionRef?: string;
 }): string {
-	if (args.bodySource === "host")
+	// A host-labelled body (a host fallback, or error text the child relayed
+	// behind a host label) is one encoded host line, never an envelope.
+	if (args.bodySource !== "child")
 		return boundResultPresentation(
-			`${args.head}\n\n${args.body}${args.tail ?? ""}`,
+			`${args.head}\n\n${encodeHostValue(args.body, HOST_ERROR_CHARS)}${args.tail ?? ""}`,
 			args.sessionRef ?? "",
 		);
 	const head = abbreviateMiddle(
@@ -195,6 +247,8 @@ export interface SubagentResultDetails {
 
 export interface SubagentPingDetails {
 	name: string;
+	/** The name the child wrote in its sidecar, when it differs from `name`. */
+	reportedName?: string;
 	message: string;
 	agent?: string;
 	sessionFile: string;
@@ -234,26 +288,33 @@ export function formatWorktreeHandoff(worktree: WorktreeHandoff): string {
 		worktree.commitsAhead == null
 			? "commits ahead unknown"
 			: `${worktree.commitsAhead} commit${worktree.commitsAhead === 1 ? "" : "s"} ahead`;
+	const path = encodeHostValue(worktree.path, HOST_PATH_CHARS);
+	const workspace = encodeHostValue(worktree.workspaceId);
+	const files = (names: string[]) =>
+		names.map((name) => encodeHostValue(name, HOST_PATH_CHARS)).join(", ");
 	const lines = [
 		"Worktree result retained for review:",
-		`Worktree: ${worktree.path}`,
-		`Workspace: ${worktree.workspaceId}`,
-		`Branch: ${worktree.branch}`,
-		`Base/head: ${worktree.baseSha} -> ${worktree.headSha ?? "unknown"}`,
+		`Worktree: ${path}`,
+		`Workspace: ${workspace}`,
+		`Branch: ${encodeHostValue(worktree.branch)}`,
+		`Base/head: ${encodeHostValue(worktree.baseSha)} -> ${worktree.headSha == null ? "unknown" : encodeHostValue(worktree.headSha)}`,
 		`State: ${state} · ${ahead}`,
 	];
+	// Git filenames may contain newlines; each is one encoded value.
 	if (worktree.changedFiles?.length)
-		lines.push(`Changed: ${worktree.changedFiles.join(", ")}`);
+		lines.push(`Changed: ${files(worktree.changedFiles)}`);
 	if (worktree.untrackedFiles?.length)
-		lines.push(`Untracked: ${worktree.untrackedFiles.join(", ")}`);
+		lines.push(`Untracked: ${files(worktree.untrackedFiles)}`);
 	if (worktree.gitError)
-		lines.push(`Git inspection warning: ${worktree.gitError}`);
+		lines.push(
+			`Git inspection warning: ${encodeHostValue(worktree.gitError, HOST_ERROR_CHARS)}`,
+		);
 	lines.push(
 		"After review and preservation, explicitly remove (branch retained):",
-		`  /worktree remove ${worktree.workspaceId}`,
-		`  worktree_remove({ target: ${JSON.stringify(worktree.path)} })`,
+		`  /worktree remove ${workspace}`,
+		`  worktree_remove({ target: "${path}" })`,
 		"Operator override after independent safety checks:",
-		`  herdr worktree remove --workspace ${worktree.workspaceId}`,
+		`  herdr worktree remove --workspace ${workspace}`,
 	);
 	return lines.join("\n");
 }
@@ -291,46 +352,54 @@ export function resolveResultPresentation(
 		attempted[0] ??
 		result.runtimePlan?.requestedModel ??
 		result.runtimePlan?.model;
+	// The observed model comes from the child's transcript.
 	const usedModel =
 		result.runtimePlan?.observed?.model ?? result.runtimePlan?.model;
+	const shownName = encodeHostValue(name);
 
 	let head: string;
 	let body: string | undefined;
 	if (result.errorMessage) {
 		// Pi owns provider retry policy and exposes the settled error as text. Do
-		// not infer retry counts or permanence from that text; preserve it as-is.
+		// not infer retry counts or permanence from that text. The child process
+		// relays it, so it is encoded data after a fixed host label.
 		head =
-			`Sub-agent "${name}" failed after ${formatElapsed(result.elapsed)} ` +
+			`Sub-agent "${shownName}" failed after ${formatElapsed(result.elapsed)} ` +
 			`(provider/agent error).\n\n` +
-			`Error: ${result.errorMessage}\n\n` +
+			`Error: ${encodeHostValue(result.errorMessage, HOST_ERROR_CHARS)}\n\n` +
 			`The subagent did not produce a result. Next action: check the raw ` +
 			`provider reason and verify model access for this account. Spawn a new ` +
 			`subagent with a supported model or configured fallback; use ` +
 			`subagent_resume only after resolving access for this session's stored ` +
 			`model because resume does not select a model.`;
 	} else if (result.exitCode === 0) {
-		head = `Sub-agent "${name}" completed (${formatElapsed(result.elapsed)}).`;
+		head = `Sub-agent "${shownName}" completed (${formatElapsed(result.elapsed)}).`;
 		body = result.summary;
 	} else {
-		head = `Sub-agent "${name}" failed (exit code ${result.exitCode}).`;
+		head = `Sub-agent "${shownName}" failed (exit code ${result.exitCode}).`;
 		body = result.summary;
 	}
 
 	let tail = "";
-	if (requestedModel) tail += `\n\nRequested model: ${requestedModel}`;
+	if (requestedModel)
+		tail += `\n\nRequested model: ${encodeHostValue(requestedModel)}`;
 	if (attempted.length > 1)
-		tail += `\nModels attempted: ${attempted.join(", ")}`;
-	if (usedModel) tail += `\nModel used: ${usedModel}`;
+		tail += `\nModels attempted: ${attempted.map((model) => encodeHostValue(model)).join(", ")}`;
+	if (usedModel) tail += `\nModel used: ${encodeHostValue(usedModel)}`;
 	if (result.fallbackFailures?.length) {
 		tail +=
-			"\nModel failures (raw errors, in attempt order):" +
+			"\nModel failures (raw errors, encoded, in attempt order):" +
 			result.fallbackFailures
-				.map(({ model, error }) => `\n- ${model}: ${error}`)
+				.map(
+					({ model, error }) =>
+						`\n- ${encodeHostValue(model)}: ${encodeHostValue(error, HOST_PATH_CHARS)}`,
+				)
 				.join("");
 	}
 	if (result.worktree) tail += `\n\n${formatWorktreeHandoff(result.worktree)}`;
+	// The mismatch names the model the child's transcript reported.
 	const runtimeWarning = runtimeMismatch
-		? `\n\nRuntime warning: ${runtimeMismatch}`
+		? `\n\nRuntime warning: ${encodeHostValue(runtimeMismatch, HOST_PATH_CHARS)}`
 		: "";
 	if (body === undefined)
 		return boundResultPresentation(head + tail, sessionRef + runtimeWarning);
@@ -354,13 +423,13 @@ export function resolveCancelledPresentation(
 	cancellation: RunCancellation,
 ): string {
 	let body =
-		`Sub-agent "${name}" was cancelled by the parent after ${formatElapsed(result.elapsed)}. ` +
+		`Sub-agent "${encodeHostValue(name)}" was cancelled by the parent after ${formatElapsed(result.elapsed)}. ` +
 		(cancellation.termination === "confirmed"
 			? "Termination was confirmed before this result"
-			: `Termination is unconfirmed (${cancellation.error ?? "unknown"})`) +
+			: `Termination is unconfirmed (${encodeHostValue(cancellation.error ?? "unknown", HOST_PATH_CHARS)})`) +
 		"; no model fallback, retry, or recovery was started.";
 	if (result.fallbackAttempts?.length)
-		body += `\n\nModels attempted: ${result.fallbackAttempts.join(", ")}`;
+		body += `\n\nModels attempted: ${result.fallbackAttempts.map((model) => encodeHostValue(model)).join(", ")}`;
 	if (result.worktree) body += `\n\n${formatWorktreeHandoff(result.worktree)}`;
 	return boundResultPresentation(
 		body,
