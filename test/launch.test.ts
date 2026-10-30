@@ -17,12 +17,14 @@ import {
 	isExpectedPiProcess,
 	launchOperationsFromSurface,
 	PI_LAUNCH_SESSION_ENV,
+	type PiLaunchOperations,
+	type WorktreeSurfaceForLaunch,
+} from "../maestro/adapters/pi/launch-operations.ts";
+import {
 	launchPiSubagent,
 	launchPiWorktreeHandoff,
 	type FreshPiLaunchRequest,
-	type PiLaunchOperations,
 	type ResumePiLaunchRequest,
-	type WorktreeSurfaceForLaunch,
 } from "../maestro/adapters/pi/launch.ts";
 import { createWorktreeOperations } from "../maestro/runtime/worktree-operations.ts";
 import { createSubagentPaneFactory } from "../maestro/core/config/pane-config.ts";

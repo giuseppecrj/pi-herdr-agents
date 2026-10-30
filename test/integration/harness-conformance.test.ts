@@ -14,7 +14,7 @@ import { PiHarnessAdapter } from "../../maestro/adapters/pi/pi-harness-adapter.t
 import {
 	isExpectedPiProcess,
 	launchOperationsFromSurface,
-} from "../../maestro/adapters/pi/launch.ts";
+} from "../../maestro/adapters/pi/launch-operations.ts";
 import { createWorktreeOperations } from "../../maestro/runtime/worktree-operations.ts";
 import type { SpawnOptions } from "../../maestro/core/harness-adapter.ts";
 import {

@@ -15,7 +15,7 @@ import { PiHarnessAdapter } from "../../maestro/adapters/pi/pi-harness-adapter.t
 import {
 	captureSurfacePiProcessIdentity,
 	launchOperationsFromSurface,
-} from "../../maestro/adapters/pi/launch.ts";
+} from "../../maestro/adapters/pi/launch-operations.ts";
 import type {
 	PiProcessIdentity,
 	ProcessIdentityProbe,
