@@ -21,6 +21,29 @@ import {
 import { getFirstText, launchDiagnosticsText } from "./presentation.ts";
 import type { PersistentControls } from "./persistent.ts";
 import type { LaunchPlanner } from "./launch.ts";
+import type { SpawningConfig } from "../../maestro/core/config/spawning-config.ts";
+import {
+	DELEGATION_DEPTH_ENV,
+	decideDelegation,
+	parseDelegationDepth,
+} from "../../maestro/core/delegation-depth.ts";
+
+/**
+ * Refuse a launch past the host-enforced delegation depth limit. The depth is
+ * read from this session's own environment; see maestro/core/delegation-depth.ts.
+ */
+export function delegationDepthRefusal(
+	maxDepth: number,
+	env: NodeJS.ProcessEnv = process.env,
+): { message: string; code: string } | undefined {
+	const decision = decideDelegation(
+		parseDelegationDepth(env[DELEGATION_DEPTH_ENV]),
+		maxDepth,
+	);
+	return decision.allowed
+		? undefined
+		: { message: decision.message, code: `delegation-${decision.reason}` };
+}
 
 function muxUnavailableResult(runtime: SubagentRuntime) {
 	return {
@@ -54,6 +77,7 @@ interface LaunchToolDeps {
 	persistentCapacityError: PersistentControls["persistentCapacityError"];
 	resolveSubagentRuntimePlans: LaunchPlanner["resolveSubagentRuntimePlans"];
 	normalizePiAttempt: LaunchPlanner["normalizePiAttempt"];
+	spawningConfig: SpawningConfig;
 }
 
 /** The subagent launch tool. */
@@ -67,6 +91,7 @@ export function registerSubagentTool(
 		persistentCapacityError,
 		resolveSubagentRuntimePlans,
 		normalizePiAttempt,
+		spawningConfig,
 	}: LaunchToolDeps,
 ): void {
 	const runningSubagents = runtime.runningSubagents;
@@ -102,6 +127,14 @@ export function registerSubagentTool(
 			parameters: SubagentParams,
 
 			async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+				const depthRefusal = delegationDepthRefusal(spawningConfig.maxDepth);
+				if (depthRefusal) {
+					return {
+						content: [{ type: "text", text: depthRefusal.message }],
+						details: { error: depthRefusal.code },
+					};
+				}
+
 				// Prevent a named role from spawning another instance of itself unless
 				// its definition opted in with `self-spawn: true`. This is a role-design
 				// default, not a recursion boundary: role A can still launch role B,
@@ -346,7 +379,11 @@ export function registerResumeTool(
 		shouldRegister,
 		runtime,
 		updateWidget,
-	}: Pick<LaunchToolDeps, "shouldRegister" | "runtime" | "updateWidget">,
+		spawningConfig,
+	}: Pick<
+		LaunchToolDeps,
+		"shouldRegister" | "runtime" | "updateWidget" | "spawningConfig"
+	>,
 ): void {
 	const runningSubagents = runtime.runningSubagents;
 
@@ -427,6 +464,14 @@ export function registerResumeTool(
 
 			async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 				const name = params.name ?? "Resume";
+
+				const depthRefusal = delegationDepthRefusal(spawningConfig.maxDepth);
+				if (depthRefusal) {
+					return {
+						content: [{ type: "text", text: depthRefusal.message }],
+						details: { error: depthRefusal.code },
+					};
+				}
 
 				if (!runtime.session!.availability().available) {
 					return muxUnavailableResult(runtime);

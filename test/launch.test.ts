@@ -1765,6 +1765,7 @@ describe("Pi launch", () => {
 				"worktree-runs",
 				"child-1.json",
 			);
+			let handoffCommand = "";
 			const operations: PiLaunchOperations = {
 				worktree: createWorktreeOperations(),
 				createPane() {
@@ -1794,8 +1795,9 @@ describe("Pi launch", () => {
 				async waitForShellReady(surface) {
 					assert.equal(surface, "pane-linked-handoff");
 				},
-				runScript(surface, _command, options) {
+				runScript(surface, command, options) {
 					assert.equal(surface, "pane-linked-handoff");
+					handoffCommand = command;
 					return options.scriptPath;
 				},
 				async waitForPiReady(surface) {
@@ -1820,6 +1822,7 @@ describe("Pi launch", () => {
 				operations,
 			);
 
+			assert.match(handoffCommand, /PI_SUBAGENT_DEPTH=\d+ /);
 			assert.equal(result.running.worktree?.baseSha, linkedSha);
 			assert.equal(result.running.worktree?.path, worktreePath);
 			assert.equal(
@@ -1962,9 +1965,11 @@ describe("Pi launch", () => {
 				command.startsWith(`cd ${expectedShellQuote(worktreePath)} && `),
 			);
 			// A user-driven worktree handoff is a normal interactive Pi session,
-			// not a subagent: it receives no PI_SUBAGENT_ID or child protocol.
+			// not a subagent: it receives no PI_SUBAGENT_ID or child protocol. It
+			// still carries its delegation depth so it cannot reset the count.
+			assert.match(command, / PI_SUBAGENT_DEPTH=1 /);
 			assert.doesNotMatch(
-				command,
+				command.replace("PI_SUBAGENT_DEPTH=", ""),
 				/subagent-done|PI_SUBAGENT_|__SUBAGENT_DONE_/,
 			);
 			assert.ok(

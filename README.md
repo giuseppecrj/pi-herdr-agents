@@ -283,6 +283,7 @@ The durable configuration file is `$PI_CODING_AGENT_DIR/herdr-agents/config.json
 | `status.enabled` | `true` | The live subagent widget. This section is required. |
 | `models.default`, `models.agents`, `models.tasks` | none | Model defaults and task-category candidates. |
 | `persistent.maxAgents` | `3` | How many persistent specialists can stay open. |
+| `spawning.maxDepth` | `3` | Deepest child any launch may create (parent is depth `0`); deeper launches are refused. |
 | `supervision.forcePolling`, `supervision.hangWarningMinutes` | `false`, `15` | Supervision transport and no-progress advisories. |
 | `panes.mode`, `panes.direction`, `panes.maxPerTab` | `"grouped"`, `"right"`, `4` | Where child panes open. |
 | `guidelines.launchRoster` | `true` | Whether the parent is asked to print a markdown roster table after launching a group. |

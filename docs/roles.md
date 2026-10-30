@@ -406,11 +406,24 @@ its own definition again. Notes:
 
 - The default is unchanged when the key is absent or `false`.
 - `spawning: false` removes every spawning tool, so it wins over `self-spawn: true`.
-- This setting adds no depth limit. A peer inherits no allowance
-  from its parent: each child gets it only if its own role declares it.
+- A peer inherits no allowance from its parent: each child gets it only if its
+  own role declares it. The host sets `PI_SUBAGENT_SELF_SPAWN` explicitly on
+  every launch (`1` only for a named role that opted in, otherwise `0`), so a
+  value left in a pane's shell cannot enable it.
+- **Depth limit.** Self-spawn is bounded by the host-enforced delegation depth
+  limit that applies to every launch, whatever the role. A top-level parent is
+  depth 0 and each launch adds one; by default nothing deeper than depth 3 can be
+  launched (parent 0, children 1, grandchildren 2, great-grandchildren 3). A
+  session at the limit gets a refusal from `subagent`, `subagent_resume`,
+  `/subagent`, and `/worktree`, so an untrusted role that opts in cannot recurse
+  without bound. Change the limit with `spawning.maxDepth` in
+  [`config.json`](configuration.md#delegation-depth-limit). The limit counts
+  depth, not breadth: one session can still launch several children, so bound the
+  split in the role prompt.
 - The default block is a role-design default, not a recursion boundary: role A
-  can still launch role B, which can launch role A. Use `spawning: false` or
-  `deny-tools` to stop delegation.
+  can still launch role B, which can launch role A. The depth limit is what
+  bounds that chain. Use `spawning: false` or `deny-tools` to stop delegation
+  entirely.
 
 ### `deny-tools`
 

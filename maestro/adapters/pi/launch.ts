@@ -17,6 +17,10 @@ import {
 import type { ResolvedRuntimePlan } from "../../core/routing.ts";
 import type { PaneConfig } from "../../core/config/pane-config.ts";
 import { isNonEmptyString } from "../../core/config/type-guards.ts";
+import {
+	childDelegationDepth,
+	DELEGATION_DEPTH_ENV,
+} from "../../core/delegation-depth.ts";
 import { shellQuote } from "../../core/shell.ts";
 import type {
 	SurfaceProvider,
@@ -891,6 +895,14 @@ function prepareTaskArtifacts(
 	return { ...session, taskArg, systemPromptFile };
 }
 
+/**
+ * Always set explicitly so a value left in the pane's shell never reaches the
+ * child. Throws when this session's own depth is unknown.
+ */
+function childDepthAssignment(): string {
+	return `${DELEGATION_DEPTH_ENV}=${childDelegationDepth(process.env[DELEGATION_DEPTH_ENV])}`;
+}
+
 function buildPiCommand(
 	resolved: ResolvedLaunch,
 	artifacts: PreparedArtifacts,
@@ -924,7 +936,10 @@ function buildPiCommand(
 	// Declared skills travel inside the task artifact, never as `/skill:` args.
 	if (!request.handoff) parts.push(shellQuote(artifacts.taskArg));
 
-	const env = [`${PI_LAUNCH_SESSION_ENV}=${shellQuote(artifacts.sessionFile)}`];
+	const env = [
+		`${PI_LAUNCH_SESSION_ENV}=${shellQuote(artifacts.sessionFile)}`,
+		childDepthAssignment(),
+	];
 	if (artifacts.localAgentDir) {
 		env.push(`PI_CODING_AGENT_DIR=${shellQuote(artifacts.localAgentDir)}`);
 	} else if (process.env.PI_CODING_AGENT_DIR) {
@@ -1116,6 +1131,7 @@ async function launchResumedPiSubagent(
 			...(policy.deniedTools.length > 0
 				? [`PI_DENY_TOOLS=${shellQuote(policy.deniedTools.join(","))}`]
 				: []),
+			childDepthAssignment(),
 			`PI_SUBAGENT_NAME=${shellQuote(request.name)}`,
 			`PI_SUBAGENT_SESSION=${shellQuote(request.sessionFile)}`,
 			`PI_SUBAGENT_ID=${shellQuote(id)}`,
