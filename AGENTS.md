@@ -36,11 +36,11 @@ Former bundled roles, `/plan`, its plan skill, and `/skill:orchestrate` now belo
 - `maestro/core/roles/discovery.ts`, `maestro/core/config/` — role parsing/discovery, injected-directory config loaders, and task-model init prompt construction
 - `maestro/core/worktree.ts`, `worktree-cleanup.ts` — manifest schema/state, handoff types, and cleanup eligibility/formatting
 - `maestro/core/host-text.ts` — the one encoding for variable values in parent-facing host lines, lossless command-argument serializers, and display normalization for child text
-- `maestro/adapters/pi/` — `PiHarnessAdapter`, launch transactions, completion evidence, session I/O, activity files, SDK model glue, and task-model registry projection
+- `maestro/adapters/pi/` — `PiHarnessAdapter`, launch transactions, completion evidence, session I/O, activity files, SDK model glue, and task-model registry projection; `launch.ts` is the fresh launch transaction, `launch-resume.ts` the resumed one, `launch-command.ts` the child command-line pieces both share, and `launch-operations.ts` the `PiLaunchOperations` seam with its surface-backed readiness and process-identity capture
 - `maestro/core/declared-skills.ts`, `maestro/adapters/pi/child/declared-skills.ts` — declared skill names (validated by the parent, passed in `PI_SUBAGENT_SKILLS`) and the child's first-run injection of the skills its own Pi loaded, with bounded reads
 - `maestro/adapters/pi/child/subagent-done.ts` — child protocol: `caller_ping`, `subagent_done`, and activity recording
-- `maestro/surfaces/herdr/` — `HerdrSurfaceProvider`, Herdr CLI driver, and terminal scripts/placement, plus `herdr-socket.ts` for socket pane metadata
-- `maestro/runtime/` — `RunSession`, Pi composition, run ownership, controls/retries, observation, delivery-gated cleanup, worktree operations/handoff, and task-model init composition, plus `delegated-marker.ts` for delegated-child sidebar markers
+- `maestro/surfaces/herdr/` — `HerdrSurfaceProvider`, Herdr CLI driver (`herdr-cli.ts` exec, `herdr-pane.ts` pane inspection and readiness, `herdr.ts` placement, worktrees and pane commands), and terminal scripts, plus `herdr-socket.ts` for socket pane metadata
+- `maestro/runtime/` — `RunSession`, Pi composition, run ownership, controls/retries, observation, delivery-gated cleanup, worktree operations/handoff, and task-model init composition, plus `delegated-marker.ts` for delegated-child sidebar markers; `pi-run-session.ts` composes the Pi run session, `pi-run-session-types.ts` holds its public contract types, and `pi-persistent-io.ts` its persistent-specialist inbox and ledger I/O
 - `maestro/adapters/fake/`, `maestro/surfaces/fake/`, `test/maestro/` — conformance fakes, seam tests, and the dependency-rule test
 - `CONTEXT.md` — orchestration-domain glossary
 - `docs/adr/` — hard-to-reverse architectural decisions; [ADR-0012](docs/adr/0012-adopt-maestro-seams-in-repo.md) records the maestro seams decision

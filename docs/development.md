@@ -45,12 +45,22 @@ provider; fakes are for conformance tests only.
   `child/subagent-done.ts` implements the child protocol, and
   `child/declared-skills.ts` injects the declared skills the child's own Pi
   loaded on its first run (names come from `maestro/core/declared-skills.ts`).
+  Launch is split into `launch.ts` (fresh transaction), `launch-resume.ts`
+  (resumed transaction), `launch-command.ts` (shared child command-line
+  pieces), and `launch-operations.ts` (the `PiLaunchOperations` seam, its
+  surface-backed implementation, and process-identity capture).
 - `maestro/surfaces/herdr/` — `HerdrSurfaceProvider`, Herdr CLI driver,
   terminal scripts/placement, and `herdr-socket.ts`, the bounded socket
-  client for pane metadata.
+  client for pane metadata. The CLI driver is `herdr-cli.ts` (exec, JSON,
+  availability, test exec hook), `herdr-pane.ts` (pane inspection, process
+  info, readiness and absence waits), and `herdr.ts` (placement, worktrees,
+  the opened-primary report, pane commands).
 - `maestro/runtime/` — run ownership, controls/retries, observation,
   delivery-gated cleanup, Pi composition, worktree operations/handoff,
   task-model init composition, and sidebar markers (`delegated-marker.ts`).
+  `pi-run-session.ts` composes the Pi run session; its public contract types
+  live in `pi-run-session-types.ts` and its persistent-specialist inbox and
+  ledger I/O in `pi-persistent-io.ts`.
 - `plugins/sidebar/` — the optional Herdr plugin. Its `sidebar.mjs` uses Node
   built-ins only and imports nothing from the extension, so Herdr can install
   the directory by itself.
