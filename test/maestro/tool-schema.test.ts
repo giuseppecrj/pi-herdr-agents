@@ -364,10 +364,12 @@ describe("generated tool docs", () => {
 	it("lists every registered command with its usage", () => {
 		const snapshot = fixture("current");
 		const output = docs();
+		const usageByName = new Map(Object.entries(COMMAND_USAGE));
 		for (const command of snapshot.commands) {
 			assert.ok(output.includes(`| \`/${command.name}\` |`), command.name);
-			for (const form of COMMAND_USAGE[command.name])
-				assert.ok(output.includes(`\`${form}\``), form);
+			const forms = usageByName.get(command.name);
+			assert.ok(forms, `${command.name} has a COMMAND_USAGE entry`);
+			for (const form of forms) assert.ok(output.includes(`\`${form}\``), form);
 		}
 		assert.ok(output.includes("`/worktree <name> [task]`"));
 	});
