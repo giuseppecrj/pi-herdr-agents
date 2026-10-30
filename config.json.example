@@ -8,6 +8,9 @@
   "persistent": {
     "maxAgents": 3
   },
+  "spawning": {
+    "maxDepth": 3
+  },
   "supervision": {
     "forcePolling": false,
     "hangWarningMinutes": 15

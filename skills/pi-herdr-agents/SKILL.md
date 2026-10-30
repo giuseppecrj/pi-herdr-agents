@@ -313,8 +313,9 @@ follow the guide's troubleshooting steps.
 
 Role `spawning: false` and `deny-tools` restrict what a child may call; the
 host applies them at launch and they survive resume. Without a restrictive
-allowlist or spawning policy, a child can spawn further children. A `read,bash`
-allowlist is not a read-only boundary.
+allowlist or spawning policy, a child can spawn further children, up to the
+host's delegation depth limit (`spawning.maxDepth`, default `3`; launches past
+it are refused). A `read,bash` allowlist is not a read-only boundary.
 
 ## Finding current help
 

@@ -21,6 +21,9 @@ Create it by copying the installed package's `config.json.example`, or run
   "persistent": {
     "maxAgents": 3
   },
+  "spawning": {
+    "maxDepth": 3
+  },
   "supervision": {
     "forcePolling": false,
     "hangWarningMinutes": 15
@@ -36,7 +39,7 @@ Create it by copying the installed package's `config.json.example`, or run
 }
 ```
 
-If `config.json` is absent, status, role, pane, persistent-specialist, supervision, and guidelines settings fall back to `config.json.example`.
+If `config.json` is absent, status, role, pane, spawning, persistent-specialist, supervision, and guidelines settings fall back to `config.json.example`.
 Model routing does not read the example: no model overrides apply until a real
 `config.json` exists.
 
@@ -217,6 +220,14 @@ after writing preferences.
 ## Persistent specialist limit
 
 Set `persistent.maxAgents` to the maximum concurrently retained persistent specialists. It defaults to `3`; a persistent spawn at the cap is rejected before Herdr creates a pane or workspace, and no specialist is evicted.
+
+## Delegation depth limit
+
+Set `spawning.maxDepth` to the deepest child any launch may create. It must be a positive integer and defaults to `3`; unknown keys and other values fail configuration loading. A top-level parent session is depth `0`, its children are depth `1`, grandchildren `2`, and great-grandchildren `3`. A session at depth `maxDepth` cannot launch anything.
+
+The limit is enforced by the host on every launch path: `subagent` (including `agent`, persistent, and `worktree` launches), `subagent_resume`, `/subagent`, and `/worktree`. It applies to all roles, not only `self-spawn` ones. A refused launch returns an actionable error before Herdr creates a pane or workspace.
+
+Every launched Pi receives `PI_SUBAGENT_DEPTH=<parent depth + 1>`, set explicitly in the launch command so a value left in the pane's shell never reaches the child. A parent reads its own depth from that variable; an absent variable means a top-level session (depth `0`). A present value that is not a canonical non-negative integer (for example empty, `abc`, `-1`, or `1.5`) is treated as an unknown depth: the session is treated as already at the limit and every launch is refused until the variable is unset. It never resets the count to `0`. Run `/reload` after changing `spawning.maxDepth`.
 
 ## Launch roster
 

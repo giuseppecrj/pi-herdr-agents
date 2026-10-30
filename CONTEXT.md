@@ -148,6 +148,15 @@ pack state decisions. Nested processes inherit it, so it is not a security
 boundary.
 _Avoid_: Authentication token, permission check, second child protocol
 
+**Delegation depth**:
+The number of launches between a top-level session (depth 0) and a session,
+exported as `PI_SUBAGENT_DEPTH=<parent depth + 1>` on every launch, including
+resumes and `/worktree` handoffs. The host refuses any launch whose child depth
+would exceed `spawning.maxDepth` (default 3), for every role. A non-numeric or
+negative inherited value is an unknown depth and refuses launches; it never
+resets to 0.
+_Avoid_: Recursion guard, per-role limit, breadth cap
+
 **Deprecated role setting**:
 A valid legacy `roles.bundled` boolean, accepted as a no-op and reported once per
 parent extension load. Malformed values remain configuration errors. The

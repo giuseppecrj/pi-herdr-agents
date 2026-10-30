@@ -7377,6 +7377,67 @@ describe("self-spawn guard", () => {
 		}
 	});
 
+	async function runDepthLaunch(
+		toolName: "subagent" | "subagent_resume",
+		depth: string | undefined,
+	) {
+		const previous = {
+			depth: process.env.PI_SUBAGENT_DEPTH,
+			agent: process.env.PI_SUBAGENT_AGENT,
+			herdr: process.env.HERDR_ENV,
+		};
+		restoreEnvVar("PI_SUBAGENT_DEPTH", depth);
+		delete process.env.PI_SUBAGENT_AGENT;
+		delete process.env.HERDR_ENV;
+		try {
+			const { api, registeredTools } = createMockExtensionApi();
+			subagentsModule.default(api);
+			const tool = registeredTools.find((entry) => entry.name === toolName);
+			assert.ok(tool, `expected ${toolName} to be registered`);
+			const params =
+				toolName === "subagent"
+					? { name: "Child", task: "Do it" }
+					: { sessionPath: "/nonexistent/session.jsonl" };
+			return await tool.execute(
+				"call-1",
+				params,
+				new AbortController().signal,
+				() => {},
+				{},
+			);
+		} finally {
+			restoreEnvVar("PI_SUBAGENT_DEPTH", previous.depth);
+			restoreEnvVar("PI_SUBAGENT_AGENT", previous.agent);
+			restoreEnvVar("HERDR_ENV", previous.herdr);
+		}
+	}
+
+	it("allows launches below the default depth limit of 3 and refuses at it", async () => {
+		for (const depth of [undefined, "0", "2"]) {
+			const result = await runDepthLaunch("subagent", depth);
+			assert.equal(result.details.error, "herdr not available", String(depth));
+		}
+		for (const toolName of ["subagent", "subagent_resume"] as const) {
+			const result = await runDepthLaunch(toolName, "3");
+			assert.equal(result.details.error, "delegation-max-depth", toolName);
+			assert.match(result.content[0].text, /depth 3 and the maximum is 3/);
+			assert.match(result.content[0].text, /spawning\.maxDepth/);
+		}
+	});
+
+	it("refuses launches when the inherited depth is garbage instead of resetting to 0", async () => {
+		for (const garbage of ["", "abc", "-1", "1.5"]) {
+			for (const toolName of ["subagent", "subagent_resume"] as const) {
+				const result = await runDepthLaunch(toolName, garbage);
+				assert.equal(
+					result.details.error,
+					"delegation-unknown-depth",
+					`${toolName} ${JSON.stringify(garbage)}`,
+				);
+			}
+		}
+	});
+
 	it("keeps spawning false denying every spawning tool regardless of self-spawn", () => {
 		const denied = subagentsModule.__test__.resolveDenyTools({
 			spawning: false,

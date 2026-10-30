@@ -477,7 +477,9 @@ for (const mode of ["success", "focus-warning", "readiness-failure"] as const) {
 			assert.equal(f.settled.length, 0);
 			const command = f.commands[0];
 			assert.ok(
-				!command.includes("PI_SUBAGENT_") &&
+				// A handoff Pi still gets its depth, or it could reset the count.
+				command.includes("PI_SUBAGENT_DEPTH=1 ") &&
+					!command.replace("PI_SUBAGENT_DEPTH=", "").includes("PI_SUBAGENT_") &&
 					!command.includes("subagent-done.ts") &&
 					!command.includes("__SUBAGENT_DONE_"),
 			);

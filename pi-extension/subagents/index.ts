@@ -24,6 +24,7 @@ import {
 } from "./config-path.ts";
 import { loadRoleConfig } from "../../maestro/core/config/role-config.ts";
 import { loadPersistentConfig } from "../../maestro/core/config/persistent-config.ts";
+import { loadSpawningConfig } from "../../maestro/core/config/spawning-config.ts";
 import { loadPaneConfig } from "../../maestro/core/config/pane-config.ts";
 import { loadGuidelinesConfig } from "../../maestro/core/config/guidelines-config.ts";
 import { loadStatusConfig } from "../../maestro/core/status.ts";
@@ -133,6 +134,10 @@ const roleConfig = loadRoleConfig(
 	getSubagentsConfigExamplePath(),
 );
 const persistentConfig = loadPersistentConfig(
+	getSubagentsConfigDir(),
+	getSubagentsConfigExamplePath(),
+);
+const spawningConfig = loadSpawningConfig(
 	getSubagentsConfigDir(),
 	getSubagentsConfigExamplePath(),
 );
@@ -482,6 +487,7 @@ export default function subagentsExtension(
 		persistentCapacityError,
 		resolveSubagentRuntimePlans,
 		normalizePiAttempt,
+		spawningConfig,
 	});
 
 	registerControlTools(pi, {
@@ -494,7 +500,12 @@ export default function subagentsExtension(
 		formatLivePersistentSpecialists,
 	});
 
-	registerResumeTool(pi, { shouldRegister, runtime, updateWidget });
+	registerResumeTool(pi, {
+		shouldRegister,
+		runtime,
+		updateWidget,
+		spawningConfig,
+	});
 
 	registerTaskModelInit(pi);
 
@@ -503,6 +514,7 @@ export default function subagentsExtension(
 		parentSession,
 		cleanupInput,
 		paneConfig,
+		spawningConfig,
 	});
 
 	registerSubagentCommand(pi);

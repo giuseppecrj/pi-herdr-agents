@@ -16,7 +16,9 @@ import {
 	formatWorktreeInventory,
 	type CleanupInput,
 } from "../../maestro/core/worktree-cleanup.ts";
+import type { SpawningConfig } from "../../maestro/core/config/spawning-config.ts";
 import type { SubagentRuntime } from "./state.ts";
+import { delegationDepthRefusal } from "./launch-tools.ts";
 import { launchDiagnosticsText } from "./presentation.ts";
 
 interface WorktreeDeps {
@@ -24,6 +26,7 @@ interface WorktreeDeps {
 	parentSession: boolean;
 	cleanupInput: (ctx: ExtensionContext) => CleanupInput;
 	paneConfig: PaneConfig;
+	spawningConfig: SpawningConfig;
 }
 
 /** Parent-only worktree inventory and removal tools. */
@@ -77,7 +80,13 @@ export function registerWorktreeTools(
 /** The /worktree command: fork into a worktree, list, or remove one. */
 export function registerWorktreeCommand(
 	pi: ExtensionAPI,
-	{ runtime, parentSession, cleanupInput, paneConfig }: WorktreeDeps,
+	{
+		runtime,
+		parentSession,
+		cleanupInput,
+		paneConfig,
+		spawningConfig,
+	}: WorktreeDeps,
 ): void {
 	pi.registerCommand("worktree", {
 		description: parentSession
@@ -152,6 +161,11 @@ export function registerWorktreeCommand(
 						: "Usage: /worktree <name> [task] | /worktree list",
 					"warning",
 				);
+				return;
+			}
+			const depthRefusal = delegationDepthRefusal(spawningConfig.maxDepth);
+			if (depthRefusal) {
+				ctx.ui.notify(depthRefusal.message, "error");
 				return;
 			}
 			if (!runtime.session!.availability().available) {

@@ -224,6 +224,78 @@ describe("PiHarnessAdapter", () => {
 			assert.match(denied, /PI_SUBAGENT_SELF_SPAWN=0/);
 			assert.match(denied, /PI_DENY_TOOLS='subagent,/);
 		}));
+	it("never lets pane-shell values for self-spawn or depth reach a child", async () =>
+		usingFixture(async (f) => {
+			const commands: string[] = [];
+			f.operations.runScript = (_surface, command, options) => {
+				commands.push(command);
+				return options.scriptPath;
+			};
+			const previous = {
+				selfSpawn: process.env.PI_SUBAGENT_SELF_SPAWN,
+				depth: process.env.PI_SUBAGENT_DEPTH,
+			};
+			try {
+				process.env.PI_SUBAGENT_SELF_SPAWN = "1";
+				delete process.env.PI_SUBAGENT_DEPTH;
+				await f.adapter.spawn({
+					...f.options,
+					role: { ...f.options.role, defaults: { autoExit: true } },
+				});
+				assert.match(commands.at(-1) ?? "", /PI_SUBAGENT_SELF_SPAWN=0/);
+				assert.doesNotMatch(commands.at(-1) ?? "", /PI_SUBAGENT_SELF_SPAWN=1/);
+				// A top-level parent (no variable) launches depth 1.
+				assert.match(commands.at(-1) ?? "", /PI_SUBAGENT_DEPTH=1(?!\d)/);
+			} finally {
+				for (const [name, value] of [
+					["PI_SUBAGENT_SELF_SPAWN", previous.selfSpawn],
+					["PI_SUBAGENT_DEPTH", previous.depth],
+				] as const) {
+					if (value === undefined) delete process.env[name];
+					else process.env[name] = value;
+				}
+			}
+		}));
+	it("exports parent depth + 1 on fresh and resumed launches and refuses an unknown parent depth", async () =>
+		usingFixture(async (f) => {
+			const commands: string[] = [];
+			f.operations.runScript = (_surface, command, options) => {
+				commands.push(command);
+				return options.scriptPath;
+			};
+			const previous = process.env.PI_SUBAGENT_DEPTH;
+			try {
+				process.env.PI_SUBAGENT_DEPTH = "2";
+				const h = await f.adapter.spawn(f.options);
+				assert.match(commands.at(-1) ?? "", /PI_SUBAGENT_DEPTH=3(?!\d)/);
+				writeFileSync(
+					h.sessionId,
+					JSON.stringify({
+						type: "session",
+						version: 3,
+						id: h.id,
+						cwd: f.root,
+					}) + "\n",
+				);
+				await f.adapter.kill(h);
+				await f.adapter.resume({ name: "resumed", sessionId: h.sessionId });
+				assert.match(commands.at(-1) ?? "", /PI_SUBAGENT_DEPTH=3(?!\d)/);
+
+				const before = commands.length;
+				for (const garbage of ["", "abc", "-1"]) {
+					process.env.PI_SUBAGENT_DEPTH = garbage;
+					await assert.rejects(
+						f.adapter.spawn(f.options),
+						/PI_SUBAGENT_DEPTH=.* is not a non-negative integer/,
+						garbage,
+					);
+				}
+				assert.equal(commands.length, before, "no command may be sent");
+			} finally {
+				if (previous === undefined) delete process.env.PI_SUBAGENT_DEPTH;
+				else process.env.PI_SUBAGENT_DEPTH = previous;
+			}
+		}));
 	it("preserves an already validated host plan without consulting the registry again", async () =>
 		usingFixture(async (f) => {
 			const plan = {
