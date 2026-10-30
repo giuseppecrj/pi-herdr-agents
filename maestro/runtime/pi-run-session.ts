@@ -650,22 +650,14 @@ export function createDefaultRunSession(
 							exitCode,
 							cwd: child.cwd,
 							worktree,
-							cancellable: control.cancellable,
+							control,
 							runner: state.infrastructure.acceptRunner ?? runAcceptCommand,
 						})
 					: undefined;
-				// A cancel during the re-check delivers the cancelled result.
+				// A cancel that won during the re-check, with termination confirmed,
+				// delivers the cancelled result: the kernel says so, not the check.
 				const cancelledInCheck =
-					!result.cancellation &&
-					accept?.reason === "cancelled" &&
-					entry.record.cancelState === "confirmed";
-				// Otherwise an aborted re-check was a parent shutdown (suppression).
-				if (
-					accept?.reason === "cancelled" &&
-					!result.cancellation &&
-					!cancelledInCheck
-				)
-					accept.reason = "parent shut down";
+					!result.cancellation && control.interruption() === "cancelled";
 				if (child.worktree && worktree) {
 					try {
 						// Only confirmed termination is a cancellation. Shutdown suppression

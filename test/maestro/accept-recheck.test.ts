@@ -377,51 +377,83 @@ test("an unchecked run has no verdict and logs verdict none; the off switch writ
 	);
 });
 
+/** A second session over the fixture whose one child gets a worktree. */
+function worktreeSession(f: Fixture) {
+	const git = (args: string[]) =>
+		execFileSync("git", args, { cwd: f.dir, stdio: "pipe" });
+	git(["init", "-q", "-b", "main"]);
+	git([
+		"-c",
+		"user.name=Test",
+		"-c",
+		"user.email=test@example.invalid",
+		"-c",
+		"commit.gpgsign=false",
+		"commit",
+		"--allow-empty",
+		"-qm",
+		"base",
+	]);
+	const tree = join(f.dir, "tree");
+	mkdirSync(tree);
+	const states: string[] = [];
+	const worktreeOps = createWorktreeOperations();
+	const write = worktreeOps.persistWorktreeResult;
+	worktreeOps.captureWorktreeHandoff = (worktree) => ({
+		...worktree,
+		headSha: "head",
+		commitsAhead: 1,
+		clean: true,
+		conflicted: false,
+		changedFiles: ["src/a.ts", "test/a.test.ts"],
+		untrackedFiles: ["test/new.test.ts"],
+	});
+	worktreeOps.persistWorktreeResult = (worktree, state, handoff) => {
+		states.push(state);
+		write(worktree, state, handoff);
+	};
+	f.options.infrastructure!.worktreeOperations = worktreeOps;
+	const session = runtime.createDefaultRunSession(f.options);
+	const pane = f.provider.createSurface({ name: "worktree", cwd: tree });
+	const operations = f.options.infrastructure!.launchOperations;
+	operations.createWorktree = (_name, _cwd, branch) => ({
+		path: tree,
+		branch,
+		workspaceId: "workspace",
+		paneId: pane,
+	});
+	return { session, tree, pane, states };
+}
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function until(ready: () => boolean, what: string, ms = 10_000) {
+	const deadline = Date.now() + ms;
+	while (!ready()) {
+		assert.ok(Date.now() < deadline, what);
+		await delay(20);
+	}
+}
+
+/** Whether no process is left in group `pgid`. */
+function groupGone(pgid: number): boolean {
+	try {
+		process.kill(-pgid, 0);
+		return false;
+	} catch (error) {
+		// SAFETY: process.kill throws only Node system errors, which carry `code`.
+		return (error as NodeJS.ErrnoException).code === "ESRCH";
+	}
+}
+
+/** The pid a check wrote to `file`, which leads its process group. */
+function readPid(file: string): number {
+	return Number(readFileSync(file, "utf8").trim());
+}
+
 test("worktree re-check runs in the worktree, reports changed check files and leaves the manifest state", () =>
 	fixture(async (f) => {
-		const git = (args: string[]) =>
-			execFileSync("git", args, { cwd: f.dir, stdio: "pipe" });
-		git(["init", "-q", "-b", "main"]);
-		git([
-			"-c",
-			"user.name=Test",
-			"-c",
-			"user.email=test@example.invalid",
-			"-c",
-			"commit.gpgsign=false",
-			"commit",
-			"--allow-empty",
-			"-qm",
-			"base",
-		]);
-		const tree = join(f.dir, "tree");
-		mkdirSync(tree);
-		const states: string[] = [];
-		const worktreeOps = createWorktreeOperations();
-		const write = worktreeOps.persistWorktreeResult;
-		worktreeOps.captureWorktreeHandoff = (worktree) => ({
-			...worktree,
-			headSha: "head",
-			commitsAhead: 1,
-			clean: true,
-			conflicted: false,
-			changedFiles: ["src/a.ts", "test/a.test.ts"],
-			untrackedFiles: ["test/new.test.ts"],
-		});
-		worktreeOps.persistWorktreeResult = (worktree, state, handoff) => {
-			states.push(state);
-			write(worktree, state, handoff);
-		};
-		f.options.infrastructure!.worktreeOperations = worktreeOps;
-		const session = runtime.createDefaultRunSession(f.options);
-		const pane = f.provider.createSurface({ name: "worktree", cwd: tree });
-		const operations = f.options.infrastructure!.launchOperations;
-		operations.createWorktree = (_name, _cwd, branch) => ({
-			path: tree,
-			branch,
-			workspaceId: "workspace",
-			paneId: pane,
-		});
+		const { session, tree, states } = worktreeSession(f);
 		const input = f.input({ run: "pwd; exit 4", paths: ["test"] });
 		input.task.worktree = { branch: "checked" };
 		try {
@@ -460,4 +492,46 @@ test("a rejected verdict never starts a model fallback", () =>
 			f.ledger().map((line) => [line.attempt, line.model, line.verdict]),
 			[[1, "test/one", "rejected"]],
 		);
+	}));
+
+test("a confirmed cancel while the check's pipes drain wins: skipped, cancelled manifest and ledger, one delivery", () =>
+	fixture(async (f) => {
+		const { session, pane, states } = worktreeSession(f);
+		// No identity to wait for: the gone pane alone confirms termination.
+		delete f.options.infrastructure!.launchOperations.captureProcessIdentity;
+		const started = join(f.dir, "shell-started");
+		// The shell exits 0 at once; its background job keeps the pipes open.
+		const input = f.input({ run: `echo $$ > ${started}; sleep 10 & exit 0` });
+		input.task.worktree = { branch: "checked" };
+		try {
+			const handle = await session.spawnPi(input);
+			const record = session.getRecord(input.task.id)!;
+			const wait = session.supervise(handle, input.task);
+			f.complete(record);
+			await until(
+				() => existsSync(started) && readPid(started) > 0,
+				"the parent re-check never started",
+			);
+			const pgid = readPid(started);
+			await delay(150);
+			// The child's Pi has exited with its pane: termination is confirmed.
+			f.provider.closeSurface(pane);
+			const report = await session.cancel(input.task.id);
+			const result = await wait;
+			assert.equal(report.status, "confirmed");
+			assert.equal(result.outcome, "killed");
+			assert.equal(f.settled.length, 1, "exactly one delivery");
+			const [completed] = f.settled;
+			assert.equal(completed.error, "cancelled");
+			assert.equal(completed.accept?.verdict, "skipped");
+			assert.equal(completed.accept?.reason, "cancelled");
+			assert.equal(states.at(-1), "cancelled");
+			assert.deepEqual(
+				f.ledger().map((line) => [line.outcome, line.verdict]),
+				[["cancelled", "skipped"]],
+			);
+			await until(() => groupGone(pgid), "the check's group outlived it");
+		} finally {
+			await session.shutdown("quit");
+		}
 	}));

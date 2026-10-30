@@ -44,7 +44,11 @@ configuration directory.
 5. A cancel during the parent re-check stops it and delivers the cancelled
    result with verdict `skipped`. The kernel reopens the settle point only
    while the re-check runs (`FinalizeControl.cancellable`), so ADR-0014's
-   terminal intent still wins and one cancelled result is delivered.
+   terminal intent still wins and one cancelled result is delivered. Once
+   termination is confirmed the kernel's cancel is authoritative
+   (`FinalizeControl.interruption`): verdict `skipped`, manifest
+   `cancelled`, and ledger `cancelled`, even when the check finished on its
+   own first. Cancellation is never inferred from the check's output.
 6. A rejected verdict is a completed negative result: it starts no model
    fallback and changes neither the sidebar status nor the worktree manifest
    state. The verdict appears in the delivery, its details, and the ledger.
