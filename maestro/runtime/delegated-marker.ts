@@ -116,8 +116,8 @@ export class DelegatedMarkers {
  * Herdr reports the child's session file for the pane. Herdr drops that
  * session when the child exits or another agent takes the pane, so a later
  * occupant never inherits the marker's renewal. With Herdr 0.9.4 or later a
- * suspended child (Ctrl-Z) keeps its session until it resumes or exits, so
- * its marker stays live meanwhile.
+ * suspended child (Ctrl-Z) keeps its session, also after it resumes with fg,
+ * until it exits, so its marker stays live meanwhile.
  */
 export class DelegatedMarker {
 	readonly paneId: string;

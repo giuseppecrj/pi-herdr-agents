@@ -183,7 +183,9 @@ session occupies the pane when Herdr draws the row.
 Herdr's Pi integration reports each Pi's session file for its pane. Herdr
 drops that session when Pi releases the pane or exits, and replaces it when
 another agent reports its own session. With Herdr 0.9.4 or later, a Pi
-suspended with Ctrl-Z keeps its session until it resumes or exits.
+suspended with Ctrl-Z keeps its session, also after it resumes with `fg`,
+until it exits. Herdr 0.9.3 and earlier drop it at suspend.
+
 The parent Pi session writes the marker once Herdr reports the session file
 the parent assigned to the child, waiting up to 15 seconds after launch. It
 renews the marker every 4 to 5 seconds, and only after Herdr still reports
@@ -213,9 +215,11 @@ Some leftover markers still occur:
   clears it, usually within 5 seconds. A new agent started in the same pane
   during that window stays hidden by Focus until the clear arrives or the
   marker expires.
-- With Herdr 0.9.4 or later, a suspended child stays marked until it resumes
-  or exits. A non-Pi program started at that pane's shell meanwhile can stay
-  hidden by Focus until then.
+- With Herdr 0.9.4 or later, a suspended child stays marked, also after it
+  resumes with `fg`, until it exits. A non-Pi program started at that pane's
+  shell meanwhile can stay hidden by Focus until the suspended child exits.
+  Herdr 0.9.3 and earlier clear the marker within about 5 seconds of
+  suspending.
 - If the parent restarts while the same Herdr server keeps running, and the
   system clock has moved backwards, the new parent's sequence numbers can fall
   behind the last ones Herdr applied. Herdr then ignores its writes until the
@@ -235,9 +239,11 @@ after the last write Herdr accepted if the clear is lost. A cleared marker
 never returns.
 
 With Herdr 0.9.4 or later, a child you suspend with Ctrl-Z keeps its session,
-so its marker stays live until it resumes with `fg` or exits. A non-Pi program
-you start at that pane's shell in the meantime can stay hidden by Focus until
-then; run All to see it.
+so its marker stays live, also after it resumes with `fg`, until it exits. A
+non-Pi program you start at that pane's shell in the meantime can stay hidden
+by Focus until the suspended child exits; run All to see it. Herdr 0.9.3 and
+earlier drop the session at suspend, so the marker clears within about 5
+seconds.
 
 ## Limits
 
