@@ -38,6 +38,27 @@ export const HERDR_BIN =
 		encoding: "utf8",
 	}).trim();
 
+/**
+ * Whether the lab's Herdr binary is at least `major.minor.patch`. Reads
+ * `<bin> --version` (`herdr X.Y.Z[-suffix]`) and throws on any other output
+ * rather than guessing.
+ */
+export function herdrAtLeast(
+	major: number,
+	minor: number,
+	patch: number,
+): boolean {
+	const output = execFileSync(HERDR_BIN, ["--version"], {
+		encoding: "utf8",
+	}).trim();
+	const match = /^herdr (\d+)\.(\d+)\.(\d+)(?:[-+]\S*)?$/.exec(output);
+	if (!match) throw new Error(`Unparseable Herdr version: ${output}`);
+	const actual = [Number(match[1]), Number(match[2]), Number(match[3])];
+	for (const [i, want] of [major, minor, patch].entries())
+		if (actual[i] !== want) return (actual[i] ?? 0) > want;
+	return true;
+}
+
 export interface HerdrLabRoot {
 	root: string;
 	home: string;

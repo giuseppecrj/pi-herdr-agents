@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import {
 	createLabRoot,
+	herdrAtLeast,
 	HERDR_BIN,
 	removeLabRoot,
 	startLabServer,
@@ -517,7 +518,7 @@ describe("sidebar plugin on isolated Herdr", {
 		}
 	});
 
-	it("retires once the child's Pi exits; a suspended child stays marked until it exits", async () => {
+	it("retires once the child's Pi exits; a suspended child follows Herdr's session rule", async () => {
 		const live = panes.get("child-live") ?? "";
 		const occupant = occupants.find((entry) => entry.pane === live);
 		assert.ok(occupant);
@@ -559,9 +560,12 @@ describe("sidebar plugin on isolated Herdr", {
 		});
 		assert.equal(await paneToken(live), undefined);
 
-		// Herdr 0.9.4 and later keep a suspended Pi as the pane's agent session
-		// until it resumes or exits. So the marker stays live while the child is
-		// suspended, and retires once the stopped Pi is killed.
+		// Herdr 0.9.4 and later keep a suspended Pi as the pane's agent session,
+		// also after it resumes with fg, until it exits. So the marker stays live
+		// while the child is suspended and retires once the stopped Pi is killed.
+		// Herdr 0.9.3 and earlier drop the session at suspend, so the marker
+		// retires at the next renewal while the child is still alive.
+		const keepsSuspendedSession = herdrAtLeast(0, 9, 4);
 		const suspended = await startPi(live, "child-suspends");
 		const second = markers.attach({
 			surface: live,
@@ -569,33 +573,34 @@ describe("sidebar plugin on isolated Herdr", {
 		});
 		await waitForToken(live, "live");
 		target.cli(["pane", "send-keys", live, "ctrl+z"]);
-		for (
-			let i = 0;
-			i < 100 && linuxProcessProbe.stat(suspended.pid)?.state !== "T";
-			i++
-		)
-			await delay(100);
-		assert.equal(linuxProcessProbe.stat(suspended.pid)?.state, "T");
-		clock.now += DELEGATED_MARKER_RENEW_MS;
-		second.renew();
-		await second.settled();
-		assert.equal(second.kind, "live");
-		assert.equal(await paneSession(live), suspended.sessionFile);
-		assert.equal(await paneToken(live), "live");
-		await waitForRendered(
-			(lines) => header(lines) === "focus" && !shows(lines, "pi"),
-			"suspended child still hidden under Focus",
-		);
-
-		// Killing the stopped Pi makes Herdr clear the session a few seconds later.
-		await killPi(suspended);
+		if (keepsSuspendedSession) {
+			for (
+				let i = 0;
+				i < 100 && linuxProcessProbe.stat(suspended.pid)?.state !== "T";
+				i++
+			)
+				await delay(100);
+			assert.equal(linuxProcessProbe.stat(suspended.pid)?.state, "T");
+			clock.now += DELEGATED_MARKER_RENEW_MS;
+			second.renew();
+			await second.settled();
+			assert.equal(second.kind, "live");
+			assert.equal(await paneSession(live), suspended.sessionFile);
+			assert.equal(await paneToken(live), "live");
+			await waitForRendered(
+				(lines) => header(lines) === "focus" && !shows(lines, "pi"),
+				"suspended child still hidden under Focus",
+			);
+			// Killing the stopped Pi makes Herdr clear the session a few seconds later.
+			await killPi(suspended);
+		}
 		await waitForSession(live, undefined);
+		await startOccupant(live, "child-reuse", "working");
 		clock.now += DELEGATED_MARKER_RENEW_MS;
 		second.renew();
 		await second.settled();
 		assert.equal(second.kind, "retired");
 		await waitForToken(live, undefined);
-		await startOccupant(live, "child-reuse", "working");
 		await waitForRendered(
 			(lines) => header(lines) === "focus" && shows(lines, "child-reuse"),
 			"replacement occupant visible under Focus",
