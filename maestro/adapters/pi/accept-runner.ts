@@ -57,7 +57,8 @@ function signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
  * `sh -c <run>` in `cwd`, asynchronously, with a timeout. Keeps the last 64 KiB
  * of combined output. A timeout or abort sends SIGTERM to the process group
  * and SIGKILL after the grace; whatever is left of the group is killed once
- * the shell exits.
+ * the shell exits. After the shell exits, the check waits briefly for
+ * inherited pipes to close; a timeout or abort then ends it at once.
  */
 export const runAcceptCommand: AcceptRunner = (options) =>
 	new Promise((resolve) => {
@@ -95,8 +96,10 @@ export const runAcceptCommand: AcceptRunner = (options) =>
 		let done = false;
 		const timers: NodeJS.Timeout[] = [];
 		const stop = (reason: "timeout" | "aborted") => {
-			if (stopped || exit) return;
+			if (stopped || done) return;
 			stopped = reason;
+			// The shell is gone; its group may still hold the pipes: kill it now.
+			if (exit) return finish(fromExit());
 			signalGroup(child, "SIGTERM");
 			timers.push(
 				setTimeout(
@@ -130,6 +133,8 @@ export const runAcceptCommand: AcceptRunner = (options) =>
 		);
 		child.on("exit", (code, signal) => {
 			exit = { code, signal };
+			// A stopped check does not wait for its pipes.
+			if (stopped) return finish(fromExit());
 			timers.push(setTimeout(() => finish(fromExit()), PIPE_CLOSE_GRACE_MS));
 		});
 		child.on("close", () => {

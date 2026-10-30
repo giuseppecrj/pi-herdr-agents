@@ -326,6 +326,21 @@ describe("accept check runner", () => {
 		assert.equal((await pending).kind, "aborted");
 	});
 
+	it("honors an abort while inherited pipes keep it running after the shell exits", async () => {
+		const controller = new AbortController();
+		const pending = runAcceptCommand({
+			run: "sleep 10 & exit 0",
+			cwd: dir,
+			timeoutMs: 10_000,
+			signal: controller.signal,
+		});
+		// The shell exits at once; the 1 s pipe grace has not run out.
+		setTimeout(() => controller.abort(), 200);
+		const started = Date.now();
+		assert.equal((await pending).kind, "aborted");
+		assert.ok(Date.now() - started < 800, "the abort did not wait for pipes");
+	});
+
 	it("reads the child's spec file, ignoring a bad one", () => {
 		const file = join(dir, "spec.json");
 		writeFileSync(file, JSON.stringify({ version: 1, run: "true" }));

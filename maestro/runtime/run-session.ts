@@ -94,8 +94,18 @@ export interface FinalizeControl {
 	 * Run `work` while `cancel` is still accepted for an already settled natural
 	 * result. The signal aborts once termination is confirmed or the run is
 	 * suppressed; a cancel recorded meanwhile delivers the cancelled result.
+	 * Such a cancel resolves only once its termination is confirmed (or the run
+	 * is suppressed), so the caller can record it before delivery.
 	 */
 	cancellable<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T>;
+	/**
+	 * How the last `cancellable` window ended, whatever `work` returned:
+	 * `cancelled` when a cancel recorded in it won with confirmed termination
+	 * (the run delivers the cancelled result), `suppressed` when the run was
+	 * suppressed (nothing is delivered), otherwise undefined. The kernel, not
+	 * the work's output, is authoritative.
+	 */
+	interruption(): "cancelled" | "suppressed" | undefined;
 }
 // pi-herdr-agents extension
 export interface PreparedRun {
@@ -511,6 +521,7 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 				result = cancelledResult(owner.handle, entry.cancel);
 			} else if (!retryable(entry, owner, result)) entry.settled = true;
 			let reopened = false;
+			let interruption: "cancelled" | "suppressed" | undefined;
 			const control: FinalizeControl = {
 				async cancellable(work) {
 					// Only a natural result that already took the settle point reopens it.
@@ -522,8 +533,14 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 						return await work(entry.controller.signal);
 					} finally {
 						if (!entry.cancel) entry.settled = true;
+						// A cancel recorded in the window wins once termination is
+						// confirmed, even if the work finished on its own (ADR-0017).
+						else if (!entry.suppressed) await confirmTermination(entry);
+						if (entry.suppressed) interruption = "suppressed";
+						else if (entry.cancel) interruption = "cancelled";
 					}
 				},
+				interruption: () => interruption,
 			};
 			try {
 				if (owner.finalize)

@@ -44,13 +44,14 @@ export interface ParentAcceptInput {
 	cwd: string | undefined;
 	/** Captured before the re-check; its file lists reveal changed check files. */
 	worktree: WorktreeHandoff | undefined;
-	cancellable: FinalizeControl["cancellable"];
+	control: FinalizeControl;
 	runner: AcceptRunner;
 }
 
 /**
  * Re-run the check only for a completed, uncancelled, exit-0, non-ping
- * result. An operator cancel during it stops the check (verdict `skipped`).
+ * result. A cancel that wins during it, or a parent shutdown, makes the
+ * verdict `skipped` whatever the check returned: the kernel is authoritative.
  */
 export async function runParentAcceptCheck(
 	input: ParentAcceptInput,
@@ -62,7 +63,7 @@ export async function runParentAcceptCheck(
 	else {
 		const cwd = input.cwd;
 		const command = cwd
-			? await input.cancellable((signal) =>
+			? await input.control.cancellable((signal) =>
 					input.runner({
 						run: spec.run,
 						cwd,
@@ -71,7 +72,12 @@ export async function runParentAcceptCheck(
 					}),
 				)
 			: { kind: "cwd-missing" as const, output: "" };
-		outcome = verdictFromCommand(command, spec, input.evidence?.accept);
+		const interruption = cwd ? input.control.interruption() : undefined;
+		if (interruption === "cancelled")
+			outcome = skippedOutcome(spec, "cancelled");
+		else if (interruption === "suppressed")
+			outcome = skippedOutcome(spec, "parent shut down");
+		else outcome = verdictFromCommand(command, spec, input.evidence?.accept);
 		if (cwd) outcome.cwd = cwd;
 		// Other writers and the user may share an ordinary checkout.
 		if (outcome.verdict !== "skipped" && !worktree)
