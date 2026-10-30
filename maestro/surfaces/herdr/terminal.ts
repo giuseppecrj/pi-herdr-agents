@@ -9,22 +9,24 @@ import {
 	createHerdrSurfaceSplit,
 	createHerdrWorktree,
 	focusHerdrWorkspace,
-	getHerdrPaneProcessInfo,
-	waitForHerdrShellReady,
-	isHerdrAvailable,
-	isProcessAlive,
 	readHerdrScreen,
 	readHerdrScreenAsync,
-	inspectHerdrPane,
-	listHerdrPanes,
 	renameHerdrTab,
 	renameHerdrWorkspace,
 	sendHerdrCommand,
 	sendHerdrEscape,
+} from "./herdr.ts";
+import {
+	getHerdrPaneProcessInfo,
+	waitForHerdrShellReady,
+	isProcessAlive,
+	inspectHerdrPane,
+	listHerdrPanes,
 	waitForHerdrPaneAbsence,
 	waitForProcessesExit,
 	type HerdrPaneProcessInfo,
-} from "./herdr.ts";
+} from "./herdr-pane.ts";
+import { isHerdrAvailable } from "./herdr-cli.ts";
 
 export type PaneId = string;
 export type SplitDirection = "right" | "down";
@@ -153,7 +155,7 @@ export type {
 } from "../../core/types.ts";
 
 export async function listPanes(): Promise<
-	import("./herdr.ts").HerdrPaneListEntry[] | null
+	import("./herdr-pane.ts").HerdrPaneListEntry[] | null
 > {
 	assertTerminalAvailable();
 	return listHerdrPanes();

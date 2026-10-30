@@ -97,11 +97,9 @@ import {
 	type SessionEntry,
 } from "../maestro/adapters/pi/session.ts";
 
-import {
-	isHerdrAvailable,
-	waitForProcessesExit,
-	__herdrTest__,
-} from "../maestro/surfaces/herdr/herdr.ts";
+import { isHerdrAvailable } from "../maestro/surfaces/herdr/herdr-cli.ts";
+import { waitForProcessesExit } from "../maestro/surfaces/herdr/herdr-pane.ts";
+import { __herdrTest__ } from "../maestro/surfaces/herdr/herdr.ts";
 import {
 	computeConfigRevision,
 	getConfigWriteLockPath,
