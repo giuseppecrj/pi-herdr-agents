@@ -304,6 +304,8 @@ auto-exit: true
 ---
 ```
 
+A child without `auto-exit` closes only through `subagent_done`. When one ends a run normally without calling it, the child is asked 3 seconds later whether its task is complete. The question is skipped while the child has working subagents of its own, queued messages, or a draft in its editor, and is asked at most once per run that something else started, so a child that answers that it is waiting is not asked again until new input arrives. Persistent specialists are not asked.
+
 ### `interactive`
 
 Controls whether status transitions (`stalled`, `recovered`) wake the parent session with a steer message.

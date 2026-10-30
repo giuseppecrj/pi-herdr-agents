@@ -6,7 +6,7 @@ import {
 import { buildSubagentToolAllowlist } from "../maestro/adapters/pi/launch.ts";
 import "./isolated-agent-dir.ts";
 import { createMockExtensionApi } from "./helpers/mock-extension-api.ts";
-import { describe, it, before, after } from "node:test";
+import { describe, it, before, after, type TestContext } from "node:test";
 import { cleanupFixture } from "./worktree-cleanup-fixture.ts";
 import assert from "node:assert/strict";
 import {
@@ -146,6 +146,16 @@ import subagentDoneExtension, {
 	isPersistentStopDirective,
 } from "../maestro/adapters/pi/child/subagent-done.ts";
 import { hasUndeliveredChildren } from "../maestro/core/undelivered-children.ts";
+import {
+	createDoneNudge,
+	DONE_NUDGE_DELAY_MS,
+	DONE_NUDGE_MESSAGE,
+} from "../maestro/adapters/pi/child/done-nudge.ts";
+import {
+	CHILD_BUSY_CHANNEL,
+	isChildBusy,
+	type ChildBusyProbe,
+} from "../maestro/core/child-busy.ts";
 import {
 	interpretExitSidecar,
 	waitForCompletion,
@@ -7313,6 +7323,197 @@ describe("subagent-done.ts", () => {
 		} finally {
 			restoreEnvVar("PI_SUBAGENT_AUTO_EXIT", previousAutoExit);
 		}
+	});
+
+	describe("done nudge", () => {
+		type RunningSubagentRow = Parameters<
+			typeof hostModule.hasWorkingSubagents
+		>[0] extends Iterable<infer Row> | undefined
+			? Row
+			: never;
+		const stopped = [{ role: "assistant", stopReason: "stop" }];
+		const idleCtx = {
+			isIdle: () => true,
+			hasPendingMessages: () => false,
+			ui: { getEditorText: () => "" },
+		};
+
+		function harness(t: TestContext, options: { busy?: boolean } = {}) {
+			t.mock.timers.enable({ apis: ["setTimeout"] });
+			const sent: string[] = [];
+			const nudge = createDoneNudge({
+				send: (message) => sent.push(message),
+				isBusy: () => options.busy ?? false,
+			});
+			const wait = (ms = DONE_NUDGE_DELAY_MS) => t.mock.timers.tick(ms);
+			return { nudge, sent, wait };
+		}
+
+		it("asks once, 3 seconds after a normal run, and not after the run it started", (t) => {
+			const { nudge, sent, wait } = harness(t);
+			assert.equal(DONE_NUDGE_DELAY_MS, 3_000);
+			nudge.runStarting();
+			nudge.settled(stopped, false, idleCtx);
+			wait(DONE_NUDGE_DELAY_MS - 1);
+			assert.deepEqual(sent, []);
+			wait(1);
+			assert.deepEqual(sent, [DONE_NUDGE_MESSAGE]);
+
+			nudge.runStarting();
+			nudge.settled(stopped, false, idleCtx);
+			wait();
+			assert.deepEqual(sent, [DONE_NUDGE_MESSAGE]);
+
+			// Any later run, such as one a subagent result starts, re-arms it.
+			nudge.runStarting();
+			nudge.settled(stopped, false, idleCtx);
+			wait();
+			assert.deepEqual(sent, [DONE_NUDGE_MESSAGE, DONE_NUDGE_MESSAGE]);
+		});
+
+		it("stays quiet before any run, and after an aborted or failed run", (t) => {
+			const { nudge, sent, wait } = harness(t);
+			nudge.settled(stopped, false, idleCtx);
+			wait();
+			nudge.runStarting();
+			nudge.settled(stopped, true, idleCtx);
+			wait();
+			for (const stopReason of ["aborted", "error"]) {
+				nudge.settled([{ role: "assistant", stopReason }], false, idleCtx);
+				wait();
+			}
+			assert.deepEqual(sent, []);
+		});
+
+		it("cancels when a new run starts within the delay", (t) => {
+			const { nudge, sent, wait } = harness(t);
+			nudge.runStarting();
+			nudge.settled(stopped, false, idleCtx);
+			wait(1_000);
+			nudge.runStarting();
+			wait();
+			assert.deepEqual(sent, []);
+		});
+
+		it("skips a child with working subagents, queued messages, or a draft in its editor", (t) => {
+			const busy = harness(t, { busy: true });
+			busy.nudge.runStarting();
+			busy.nudge.settled(stopped, false, idleCtx);
+			busy.wait();
+			assert.deepEqual(busy.sent, []);
+
+			for (const ctx of [
+				{ ...idleCtx, isIdle: () => false },
+				{ ...idleCtx, hasPendingMessages: () => true },
+				{ ...idleCtx, ui: { getEditorText: () => "half-typed" } },
+			]) {
+				const sent: string[] = [];
+				const nudge = createDoneNudge({
+					send: (message) => sent.push(message),
+					isBusy: () => false,
+				});
+				nudge.runStarting();
+				nudge.settled(stopped, false, ctx);
+				busy.wait();
+				assert.deepEqual(sent, []);
+			}
+		});
+
+		it("is wired into children without auto-exit only", (t) => {
+			t.mock.timers.enable({ apis: ["setTimeout"] });
+			// An auto-exit settle writes the completion sidecar of PI_SUBAGENT_SESSION,
+			// so a run inside a real subagent must not reach that subagent's files.
+			const dir = createTestDir();
+			const inherited = [
+				"PI_SUBAGENT_AUTO_EXIT",
+				"PI_SUBAGENT_PERSISTENT",
+				"PI_SUBAGENT_SESSION",
+				"PI_SUBAGENT_ID",
+				"PI_SUBAGENT_ACTIVITY_FILE",
+				"PI_SUBAGENT_PROCESS_FILE",
+			].map((name) => [name, process.env[name]] as const);
+			for (const [name] of inherited) delete process.env[name];
+			process.env.PI_SUBAGENT_SESSION = join(dir, "child.jsonl");
+			try {
+				const run = (autoExit: boolean, busy = false) => {
+					if (autoExit) process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+					else delete process.env.PI_SUBAGENT_AUTO_EXIT;
+					const { api, eventHandlers, sentUserMessages } =
+						createMockExtensionApi();
+					if (busy)
+						api.events.on(CHILD_BUSY_CHANNEL, (probe: ChildBusyProbe) => {
+							probe.busy = true;
+						});
+					subagentDoneExtension(api);
+					const emit = (
+						name: string,
+						event: {
+							prompt?: string;
+							messages?: typeof stopped;
+							aborted?: boolean;
+							reason?: string;
+						},
+						ctx: Partial<typeof idleCtx> & {
+							sessionManager?: { getBranch(): [] };
+							shutdown?(): void;
+						} = {},
+					) => {
+						for (const handler of eventHandlers.get(name) ?? [])
+							handler(event, ctx);
+					};
+					emit("before_agent_start", { prompt: "task" });
+					emit("agent_start", {});
+					emit("agent_end", { messages: stopped });
+					emit(
+						"agent_settled",
+						{ aborted: false },
+						{
+							...idleCtx,
+							sessionManager: { getBranch: () => [] },
+							shutdown() {},
+						},
+					);
+					t.mock.timers.tick(DONE_NUDGE_DELAY_MS);
+					emit("session_shutdown", { reason: "quit" });
+					return sentUserMessages;
+				};
+				assert.deepEqual(run(false), [DONE_NUDGE_MESSAGE]);
+				assert.deepEqual(run(false, true), []);
+				assert.deepEqual(run(true), []);
+			} finally {
+				for (const [name, value] of inherited) restoreEnvVar(name, value);
+				rmSync(dir, { recursive: true, force: true });
+			}
+		});
+
+		it("counts every running subagent except an idle persistent specialist or a failed stop", () => {
+			const { hasWorkingSubagents } = hostModule;
+			// SAFETY: hasWorkingSubagents reads only persistent, taskId, and stopState.
+			const rows = (...partial: object[]) => partial as RunningSubagentRow[];
+			assert.equal(hasWorkingSubagents([]), false);
+			assert.equal(hasWorkingSubagents(rows({})), true);
+			assert.equal(hasWorkingSubagents(rows({ persistent: true })), false);
+			assert.equal(
+				hasWorkingSubagents(rows({ persistent: true, taskId: "task" })),
+				true,
+			);
+			assert.equal(
+				hasWorkingSubagents(
+					rows({ persistent: true, taskId: "task", stopState: "failed" }),
+				),
+				false,
+			);
+
+			const { api } = createMockExtensionApi();
+			subagentsModule.default(api);
+			const running = subagentsModule.__test__.runningSubagents;
+			running.set("child-busy-probe", rows({})[0]);
+			try {
+				assert.equal(isChildBusy(api.events), true);
+			} finally {
+				running.delete("child-busy-probe");
+			}
+		});
 	});
 
 	it("waits for settlement after a transient compaction error", () => {

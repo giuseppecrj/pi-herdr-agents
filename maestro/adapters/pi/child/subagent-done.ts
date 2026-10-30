@@ -14,6 +14,8 @@ import {
 	readPersistentTaskEvents,
 } from "../session.ts";
 import { createSubagentActivityRecorder } from "../activity-file.ts";
+import { createDoneNudge } from "./done-nudge.ts";
+import { isChildBusy } from "../../../core/child-busy.ts";
 import {
 	readOwnProcessIdentity,
 	writeProcessIdentityRecord,
@@ -220,6 +222,18 @@ export default function (pi: ExtensionAPI) {
 	let latestAgentMessages: any[] | undefined;
 	let completionFinalized = false;
 	let sessionContext: { shutdown(): void } | undefined;
+	// A child without auto-exit closes only through subagent_done, so one that
+	// forgets it is asked once whether its task is complete.
+	const doneNudge =
+		!autoExit && !persistent
+			? createDoneNudge({
+					// A run that starts between the idle check and delivery queues the
+					// question instead of rejecting it.
+					send: (message) =>
+						pi.sendUserMessage(message, { deliverAs: "followUp" }),
+					isBusy: () => isChildBusy(pi.events),
+				})
+			: undefined;
 
 	// Show widget + status bar on session start
 	pi.on("session_start", (_event, ctx) => {
@@ -242,6 +256,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("before_agent_start", () => {
 		recorder.beforeAgentStart();
+		doneNudge?.runStarting();
 	});
 
 	pi.on("agent_start", () => {
@@ -259,7 +274,10 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("agent_settled", (_event, ctx) => {
+	pi.on("agent_settled", (event, ctx) => {
+		if (doneNudge && !completionFinalized) {
+			doneNudge.settled(latestAgentMessages, event?.aborted === true, ctx);
+		}
 		if (persistent && !completionFinalized) {
 			let messages = latestAgentMessages;
 			try {
@@ -365,6 +383,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", (event) => {
 		if (inboxPoller) clearInterval(inboxPoller);
+		doneNudge?.cancel();
 		recorder.sessionShutdown(event.reason);
 	});
 
