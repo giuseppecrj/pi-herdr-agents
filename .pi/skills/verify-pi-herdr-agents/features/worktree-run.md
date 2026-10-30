@@ -22,7 +22,7 @@ Preconditions:
 
 - `$L up` printed `LAB_READY`; the lab project has one commit on `main` and `.pi/` ignored. Covered by `test/integration/subagent-lifecycle.test.ts`: "retains a completed worktree, refuses dirty cleanup, and explicitly removes it without deleting history", and `test/integration/subagent-cancel.test.ts` "(c) cancels a worktree child: workspace, checkout, commit and handoff retained".
 
-- **Launch.** Run `$L prompt worktree w1`. Then poll `$L herdr worktree list --cwd "$(node -p 'require(process.argv[1]).project' "$(cat /tmp/verify-pi-herdr-agents/current)/state.json")" --json` until an entry with branch `verify/ticket-w1` appears.
+- **Launch.** Run `$L prompt worktree w1`. Then poll `$L herdr worktree list --cwd "$($L state | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).project')" --json` until an entry with branch `verify/ticket-w1` appears.
 - **Handoff.** Wait for the `subagent_result` from `Worktree-w1`. In the worktree path, `git log -1 --pretty=%s` prints `Implement w1` and `git status --porcelain` is empty.
 - **List.** Run `$L send "/worktree list"` and `$L read 120`, repeating until the entry reads `eligible · Git: 0 dirty`.
 - **Dirty refusal.** `echo x > <worktree>/uncommitted.txt`, then `$L send "/worktree remove <open_workspace_id>"`. The screen shows the dirty refusal and the file still exists.

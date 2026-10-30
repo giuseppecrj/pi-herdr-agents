@@ -83,7 +83,7 @@ HOME=<home> HERDR_SOCKET_PATH=<socket> <herdr-bin> --session verify-piha-<run>
 
 ## Drive
 
-Every command targets the current run (`/tmp/verify-pi-herdr-agents/current`):
+Every command targets the current run (the `current` file in the private state directory, see Evidence):
 
 ```bash
 $L prompt launch [id]      # types a deterministic prompt into the parent Pi and presses Enter
@@ -117,7 +117,7 @@ The helper also records for the whole run:
 - `<run>/pane-timeline.jsonl`: every pane change, which shows a child pane appear and then vanish
 - `<run>/provider-requests.json`: model, tools and last user text per request, which proves the deterministic provider served it
 
-The run dir lives under `/tmp/verify-pi-herdr-agents/` and survives `down`.
+The run dir lives in the owner-private state directory `$XDG_STATE_HOME/pi-herdr-agents/verify/` (default `~/.local/state/pi-herdr-agents/verify/`; override with `VERIFY_EVIDENCE_ROOT`) and survives `down`. The helper creates it with mode 0700 and, on every use, refuses it unless it is a real directory (not a symlink) owned by you and not group/world-writable. `down` removes the lab root only after checking that it is the root recorded in the run state, a real directory you own, directly below the temp dir with a `piha-herdr-lab-XXXXXX` name. Scripted-prompt marker files (cancel, persistent) live in a fresh 0700 directory under the lab root, and prompt ids must match `[A-Za-z0-9][A-Za-z0-9_-]{0,31}`.
 
 A delegation is proved by all of these:
 

@@ -13,6 +13,7 @@ import {
 	copyFileSync,
 	cpSync,
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	readFileSync,
 	readdirSync,
@@ -24,6 +25,15 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import {
+	assertInside,
+	assertLabRootShape,
+	assertMarkerId,
+	assertPrivateDir,
+	assertRemovableLabRoot,
+	assertRunDir,
+	defaultEvidenceRoot,
+} from "./path-guards.ts";
 import {
 	createLinuxProcessEnvironmentReader,
 	createLinuxProcessProbe,
@@ -44,10 +54,13 @@ const SKILL_REPO = resolve(dirname(SELF), "../../../..");
 /** Checkout whose extension and test agents the parent Pi loads. */
 const REPO = resolve(process.env.PIHA_REPO ?? SKILL_REPO);
 const EXTENSION = join(REPO, "pi-extension/subagents/index.ts");
-const EVIDENCE_ROOT =
-	process.env.VERIFY_EVIDENCE_ROOT ?? join(tmpdir(), "verify-pi-herdr-agents");
+/**
+ * State and evidence: an owner-private directory (default
+ * `$XDG_STATE_HOME/pi-herdr-agents/verify`), checked on every use. Never /tmp:
+ * another local user could pre-create a world-writable directory there.
+ */
+const EVIDENCE_ROOT = resolve(process.env.VERIFY_EVIDENCE_ROOT ?? defaultEvidenceRoot());
 const CURRENT = join(EVIDENCE_ROOT, "current");
-const LAB_PREFIX = join(tmpdir(), "piha-herdr-lab-");
 const PI_BIN = (() => {
 	const found =
 		process.env.PI_BIN ??
@@ -110,17 +123,51 @@ function parseJson<T = any>(text: string, what: string): T {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const say = (line: string) => process.stdout.write(`${line}\n`);
 
+/** Create (0700) and verify the private state directory. */
+function ensureEvidenceRoot(): void {
+	mkdirSync(EVIDENCE_ROOT, { recursive: true, mode: 0o700 });
+	assertPrivateDir(EVIDENCE_ROOT);
+}
+
 function readState(dir?: string): LabState {
+	try {
+		lstatSync(EVIDENCE_ROOT);
+	} catch {
+		throw new Error(`no lab run found (${EVIDENCE_ROOT} does not exist)`);
+	}
+	assertPrivateDir(EVIDENCE_ROOT);
 	const runDir = dir ?? (existsSync(CURRENT) ? readFileSync(CURRENT, "utf8").trim() : "");
 	if (!runDir || !existsSync(join(runDir, "state.json")))
 		throw new Error(`no lab run found (looked for ${runDir || CURRENT})`);
+	assertRunDir(runDir, EVIDENCE_ROOT);
 	const state = parseJson<LabState>(readFileSync(join(runDir, "state.json"), "utf8"), `${runDir}/state.json`);
 	// Refuse any state that does not point into our own temp lab.
-	if (!state.root.startsWith(LAB_PREFIX) || !state.home.startsWith(state.root))
-		throw new Error(`state ${runDir} does not name a lab root`);
-	if (state.socket && !state.socket.startsWith(state.home))
-		throw new Error(`socket ${state.socket} is outside the lab home`);
+	if (state.runDir !== runDir) throw new Error(`state ${runDir} names another run dir ${state.runDir}`);
+	assertLabRootShape(state.root);
+	if (state.home !== join(state.root, "home")) throw new Error(`state ${runDir}: home ${state.home} is not the lab home`);
+	for (const [what, path] of [["project", state.project], ["agentDir", state.agentDir], ["parentSession", state.parentSession]] as const)
+		assertInside(state.root, path, `state ${runDir}: ${what}`);
+	if (state.socket) assertInside(state.home, state.socket, "socket");
 	return state;
+}
+
+/** Marker files for a scripted prompt live in a fresh 0700 dir under the private lab root. */
+function makeMarkerDir(state: LabState, kind: string, id: string): string {
+	assertMarkerId(id);
+	assertPrivateDir(state.root);
+	const parent = join(state.root, "markers");
+	mkdirSync(parent, { recursive: true, mode: 0o700 });
+	assertPrivateDir(parent);
+	const dir = join(parent, `${kind}-${id}`);
+	if (/[\s'"\\]/.test(dir)) throw new Error(`marker path ${dir} has characters the provider cannot carry`);
+	try {
+		mkdirSync(dir, { mode: 0o700 });
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`id ${id} was already used for ${kind} in this run; pick another`);
+		throw error;
+	}
+	assertPrivateDir(dir);
+	return dir;
 }
 
 function writeState(state: LabState): void {
@@ -211,11 +258,20 @@ async function doctor(): Promise<number> {
 	report(existsSync(EXTENSION) ? "ok" : "FAIL", "extension", EXTENSION);
 	const suites = integrationSuites();
 	report(suites.length === 0 ? "ok" : "FAIL", "integration suites running", suites.length === 0 ? "none" : suites.join(" | "));
+	try {
+		lstatSync(EVIDENCE_ROOT);
+		assertPrivateDir(EVIDENCE_ROOT);
+		report("ok", "state dir", `${EVIDENCE_ROOT} (owner-private)`);
+	} catch (error) {
+		const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
+		report(missing ? "ok" : "FAIL", "state dir", missing ? `${EVIDENCE_ROOT} (created by up)` : String(error instanceof Error ? error.message : error));
+	}
 	let state: LabState | undefined;
 	try {
 		state = readState();
-	} catch {
-		report("ok", "lab", "no current run");
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		report(message.startsWith("no lab run") ? "ok" : "FAIL", "lab", message.startsWith("no lab run") ? "no current run" : message);
 	}
 	if (state) {
 		say(`     run: ${state.runDir} (started ${state.startedAt})`);
@@ -301,6 +357,7 @@ async function serve(runDir: string): Promise<void> {
 	const lab: HerdrLabRoot = createLabRoot(CONFIG);
 	const self = probe.stat(process.pid);
 	const runId = basename(runDir);
+	assertRunDir(runDir, EVIDENCE_ROOT);
 	const state: LabState = {
 		runId,
 		runDir,
@@ -328,6 +385,7 @@ async function serve(runDir: string): Promise<void> {
 			snapshotFiles(state, join(runDir, "files"));
 			if (server) result.server = await stopLabServer(lab, server);
 			result.leftover = labProcesses(lab.home);
+			assertRemovableLabRoot(lab.root, state.root);
 			removeLabRoot(lab);
 			result.labRootRemoved = !existsSync(lab.root);
 		} catch (error) {
@@ -426,8 +484,9 @@ async function up(): Promise<number> {
 	}
 	const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "").replace("T", "-");
 	const runDir = join(EVIDENCE_ROOT, `${stamp}-${Math.random().toString(36).slice(2, 6)}`);
-	mkdirSync(runDir, { recursive: true });
-	writeFileSync(CURRENT, `${runDir}\n`);
+	ensureEvidenceRoot();
+	mkdirSync(runDir, { mode: 0o700 });
+	writeFileSync(CURRENT, `${runDir}\n`, { mode: 0o600 });
 	const child = spawn(process.execPath, ["--experimental-strip-types", SELF, "serve", runDir], {
 		detached: true,
 		stdio: ["ignore", "ignore", "ignore"],
@@ -453,8 +512,7 @@ async function up(): Promise<number> {
 }
 
 /** Single-line prompts the deterministic provider (fake-provider.ts) understands. */
-function prompt(kind: string, id: string): { text: string; watch: string } {
-	const tmp = join(tmpdir(), `verify-piha-${id}`);
+function prompt(kind: string, id: string, markers: string): { text: string; watch: string } {
 	switch (kind) {
 		case "launch":
 			return {
@@ -468,8 +526,8 @@ function prompt(kind: string, id: string): { text: string; watch: string } {
 			};
 		case "cancel":
 			return {
-				text: `INTEGRATION_CANCEL:${id}:basic CANCEL_START_FILE: ${tmp}-start.txt CANCEL_GATE_FILE: ${tmp}-gate.txt CANCEL_ID_FILE: ${tmp}-id.txt CANCEL_SLEEP: 91.${Date.now() % 1_000_000} CANCEL_MODELS: pi-integration/test,pi-integration/fallback-secondary Follow the scripted cancellation scenario.`,
-				watch: `${tmp}-start.txt appears (child running), then: touch ${tmp}-gate.txt; expect one cancelled subagent_result`,
+				text: `INTEGRATION_CANCEL:${id}:basic CANCEL_START_FILE: ${markers}/start.txt CANCEL_GATE_FILE: ${markers}/gate.txt CANCEL_ID_FILE: ${markers}/id.txt CANCEL_SLEEP: 91.${Date.now() % 1_000_000} CANCEL_MODELS: pi-integration/test,pi-integration/fallback-secondary Follow the scripted cancellation scenario.`,
+				watch: `${markers}/start.txt appears (child running), then: touch ${markers}/gate.txt; expect one cancelled subagent_result`,
 			};
 		case "worktree":
 			return {
@@ -478,7 +536,7 @@ function prompt(kind: string, id: string): { text: string; watch: string } {
 			};
 		case "persistent":
 			return {
-				text: `INTEGRATION_PERSISTENT_SPECIALIST:${id} PERSISTENT_START_FILE: ${tmp}-persistent.txt Spawn the persistent specialist and follow the scripted lifecycle.`,
+				text: `INTEGRATION_PERSISTENT_SPECIALIST:${id} PERSISTENT_START_FILE: ${markers}/persistent.txt Spawn the persistent specialist and follow the scripted lifecycle.`,
 				watch: `two task-result deliveries from Persistent-${id}, then PERSISTENT_LIFECYCLE_COMPLETE_${id}`,
 			};
 		default:
@@ -556,6 +614,7 @@ async function down(): Promise<number> {
 		if (state.serverPid && state.serverStartTime && state.socket)
 			result.server = await stopLabServer(lab, { session: state.session, pid: state.serverPid, startTime: state.serverStartTime, socket: state.socket });
 		try {
+			assertRemovableLabRoot(state.root, state.root);
 			removeLabRoot(lab);
 		} catch (error) {
 			result.error = String(error);
@@ -580,7 +639,8 @@ const HELP = `usage: node --experimental-strip-types lab.ts <command>
   state                  print the current run's state (paths, pane, project)
   evidence [label]       capture pane, sessions, delivered results and verdict.json
   down                   stop what up started, remove the lab root, keep evidence
-env: PIHA_REPO=<checkout> (extension under test), HERDR_BIN, PI_BIN, VERIFY_EVIDENCE_ROOT`;
+env: PIHA_REPO=<checkout> (extension under test), HERDR_BIN, PI_BIN,
+     VERIFY_EVIDENCE_ROOT (default $XDG_STATE_HOME/pi-herdr-agents/verify; must be a real dir you own, not group/world-writable)`;
 
 const [command, ...args] = process.argv.slice(2);
 let code = 0;
@@ -596,10 +656,13 @@ try {
 			await serve(args[0] ?? "");
 			break;
 		case "prompt": {
-			const id = args[1] ?? Math.random().toString(36).slice(2, 8);
-			const { text, watch } = prompt(args[0] ?? "", id);
-			send(readState(), text);
-			say(`SENT ${args[0]} id=${id}\nWATCH ${watch}`);
+			const id = assertMarkerId(args[1] ?? Math.random().toString(36).slice(2, 8));
+			const kind = args[0] ?? "";
+			const state = readState();
+			const markers = kind === "cancel" || kind === "persistent" ? makeMarkerDir(state, kind, id) : "";
+			const { text, watch } = prompt(kind, id, markers);
+			send(state, text);
+			say(`SENT ${kind} id=${id}${markers ? `\nMARKER_DIR ${markers}` : ""}\nWATCH ${watch}`);
 			break;
 		}
 		case "send":

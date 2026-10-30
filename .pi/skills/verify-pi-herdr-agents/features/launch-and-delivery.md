@@ -23,7 +23,7 @@ Preconditions:
 
 - **Launch.** Run `$L prompt launch d1`. It prints `SENT launch id=d1`. Within seconds `$L read 60` shows the launch acknowledgement for `Echo-d1`.
 - **Child pane.** `<run>/pane-timeline.jsonl` gains an entry with a second pane in a new tab. The child exits after one turn, so `$L panes` may already have missed it; the timeline is the record.
-- **Delivery.** Wait until the parent session holds the result: `until grep -q '"customType":"subagent_result"' "$(node -p 'require(process.argv[1]).parentSession' "$(cat /tmp/verify-pi-herdr-agents/current)/state.json")"; do sleep 1; done` (bound it with `timeout 120`).
+- **Delivery.** Wait until the parent session holds the result: `until grep -q '"customType":"subagent_result"' "$($L state | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).parentSession')"; do sleep 1; done` (bound it with `timeout 120`).
 - **Proof.** Run `$L evidence launch`. `verdict.json` must show `envelopeFrom: "Echo-d1"`, `envelopeKind: "result"`, `headOutsideEnvelope: true`, `childSessionExists: true`, `parentContinued: true` and `panesOtherThanParent: 0`. `delivered.txt` must contain `CHILD_RESULT_d1` between `<subagent_report from="Echo-d1" kind="result">` and `</subagent_report>`, with `Parent action:` after the closing tag.
 
 ## Gotchas

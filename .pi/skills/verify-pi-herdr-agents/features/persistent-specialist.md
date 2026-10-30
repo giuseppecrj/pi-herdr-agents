@@ -21,11 +21,11 @@ Preconditions:
 
 - `$L up` printed `LAB_READY`. Covered by `test/integration/persistent-specialist.test.ts`: "delivers sequential tasks, rejects busy work, and stops cleanly"; the stop path is also in `test/integration/harness-conformance.test.ts` "real persistent task outcome keeps Pi alive and saved policy refuses resume".
 
-- **Start.** Run `$L prompt persistent s1`. The scripted parent launches `Persistent-s1` (role `test-echo`). The child writes `PERSISTENT_START_s1` to `/tmp/verify-piha-s1-persistent.txt`, sleeps 5 s, then appends `PERSISTENT_DONE_s1`.
+- **Start.** Run `$L prompt persistent s1`. The scripted parent launches `Persistent-s1` (role `test-echo`). The child writes `PERSISTENT_START_s1` to `persistent.txt` in the marker dir the helper prints as `MARKER_DIR` (inside the private lab root), sleeps 5 s, then appends `PERSISTENT_DONE_s1`.
 - **Busy rejection.** While the file has START but not DONE, the parent has already sent `REJECTED_TASK_s1 must never execute`. `$L read 120` shows the rejection, and the child session never contains `REJECTED_TASK_s1` as executed work.
 - **Task results.** Wait for two `subagent_result` entries named `Persistent-s1`: one carrying `PERSISTENT_TASK_1_RESULT_s1` and one carrying `PERSISTENT_TASK_2_RESULT_s1`.
 - **Stop.** The script then calls `subagent_stop` and `subagents_list`, and the parent finally says `PERSISTENT_LIFECYCLE_COMPLETE_s1`.
-- **Proof.** Run `$L evidence persistent`. `verdict.json` must show two deliveries from `Persistent-s1` with `envelopeKind: "task-result"` and, after stop, `panesOtherThanParent: 0`. Then `rm -f /tmp/verify-piha-s1-*`.
+- **Proof.** Run `$L evidence persistent`. `verdict.json` must show two deliveries from `Persistent-s1` with `envelopeKind: "task-result"` and, after stop, `panesOtherThanParent: 0`.
 
 ## Gotchas
 
