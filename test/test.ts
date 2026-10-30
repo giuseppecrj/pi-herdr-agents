@@ -33,6 +33,7 @@ import childProcess, { execFileSync, spawnSync } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
 import {
 	createEventBus,
+	resolveModelScopeWithDiagnostics,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
@@ -187,7 +188,10 @@ import {
 	type PiRunSession,
 	type PiRunRecord,
 } from "../maestro/runtime/index.ts";
-import { buildAuthenticatedModelCatalog } from "../maestro/core/routing.ts";
+import {
+	assertModelInScope,
+	buildAuthenticatedModelCatalog,
+} from "../maestro/core/routing.ts";
 import { wrapPiModelRegistry } from "../maestro/adapters/pi/model-registry.ts";
 import { FakeSurfaceProvider } from "../maestro/surfaces/fake/fake-surface-provider.ts";
 
@@ -1758,12 +1762,21 @@ describe("host adapter migration", () => {
 				f.commands[0].includes(`--models 'fake/parent,fake/o'\\''brien'`),
 				f.commands[0],
 			);
+			// --models is only Pi's pattern hint; the exact allowlist travels in
+			// the environment for the child's own routing to enforce.
+			assert.ok(
+				f.commands[0].includes(
+					`PI_SUBAGENT_MODEL_SCOPE='["fake/parent","fake/o'\\''brien"]' `,
+				),
+				f.commands[0],
+			);
 			await f.finish(child);
 		}));
 	it("leaves an unscoped session's child unscoped", async () =>
 		withAdapterHost(async (f) => {
 			const child = await f.launch({ name: "unscoped", task: "bounded" });
 			assert.doesNotMatch(f.commands[0], /--models/);
+			assert.match(f.commands[0], /PI_SUBAGENT_MODEL_SCOPE='' /);
 			await f.finish(child);
 		}));
 	it("re-checks a fallback candidate against the live scope and skips one the scope dropped", async () =>
@@ -1866,6 +1879,12 @@ describe("host adapter migration", () => {
 			assert.ok(
 				f.commands[0].includes(
 					`--session '${path}' --model 'fake/worker' --models 'fake/parent,fake/worker' `,
+				),
+				f.commands[0],
+			);
+			assert.ok(
+				f.commands[0].includes(
+					`PI_SUBAGENT_MODEL_SCOPE='["fake/parent","fake/worker"]' `,
 				),
 				f.commands[0],
 			);
@@ -11059,6 +11078,97 @@ describe("tool registration", () => {
 			unscoped.find("other", "fast"),
 			"unscoped sessions keep the full authenticated registry",
 		);
+	});
+
+	describe("a child's inherited exact model allowlist", () => {
+		const catalog = [
+			{ provider: "p", id: "allowed", name: "allowed", reasoning: true },
+			{ provider: "p", id: "foo", name: "foo", reasoning: true },
+		];
+		const modelRegistry = {
+			find: (provider: string, id: string) =>
+				catalog.find((m) => m.provider === provider && m.id === id),
+			getAvailable: () => catalog,
+			hasConfiguredAuth: () => true,
+		};
+		// What the child's Pi makes of `--models <parent scope>` in its catalog.
+		async function childPiScope(patterns: string[]) {
+			const { scopedModels } = await resolveModelScopeWithDiagnostics(
+				patterns,
+				// SAFETY: resolveModelScopeWithDiagnostics reads only getAvailable().
+				{ getAvailable: async () => catalog } as any,
+			);
+			return scopedModels;
+		}
+		function withInherited(
+			value: string | undefined,
+			run: () => Promise<void>,
+		) {
+			const previous = process.env.PI_SUBAGENT_MODEL_SCOPE;
+			restoreEnvVar("PI_SUBAGENT_MODEL_SCOPE", value);
+			return run().finally(() =>
+				restoreEnvVar("PI_SUBAGENT_MODEL_SCOPE", previous),
+			);
+		}
+
+		it("REGRESSION: a parent ref that Pi reads as a thinking-suffixed pattern does not admit the base model", () =>
+			withInherited(JSON.stringify(["p/allowed", "p/foo:free"]), async () => {
+				const scopedModels = await childPiScope(["p/allowed", "p/foo:free"]);
+				// Pi's own --models resolution admits p/foo: the probe's finding.
+				assert.deepEqual(
+					scopedModels.map((s) => `${s.model.provider}/${s.model.id}`),
+					["p/allowed", "p/foo"],
+				);
+				const registry = subagentsModule.__test__.sessionModelRegistry({
+					modelRegistry,
+					scopedModels,
+				});
+				assert.deepEqual(registry.scope, ["p/allowed"]);
+				assert.ok(registry.find("p", "allowed"));
+				assert.equal(registry.find("p", "foo"), undefined);
+				assert.deepEqual(
+					registry.available().map((m: any) => m.id),
+					["allowed"],
+				);
+			}));
+
+		it("fails closed when the inherited scope resolves to nothing in the child's catalog", () =>
+			withInherited(JSON.stringify(["q/missing"]), async () => {
+				const scopedModels = await childPiScope(["q/missing"]);
+				assert.deepEqual(scopedModels, [], "Pi leaves the child unscoped");
+				const registry = subagentsModule.__test__.sessionModelRegistry({
+					modelRegistry,
+					scopedModels,
+				});
+				assert.deepEqual(registry.scope, ["q/missing"]);
+				assert.equal(registry.find("p", "foo"), undefined);
+				assert.deepEqual(registry.available(), []);
+			}));
+
+		it("an empty intersection or a malformed allowlist scopes the child to nothing", async () => {
+			for (const raw of [JSON.stringify(["p/foo:free"]), "not json", "{}"])
+				await withInherited(raw, async () => {
+					const registry = subagentsModule.__test__.sessionModelRegistry({
+						modelRegistry,
+						scopedModels: await childPiScope(["p/foo"]),
+					});
+					assert.deepEqual(registry.scope, [], raw);
+					assert.equal(registry.find("p", "foo"), undefined, raw);
+					assert.throws(
+						() => assertModelInScope("p/foo", registry),
+						/outside this session's model scope \(--models \/ enabledModels: none\)/,
+					);
+				});
+		});
+
+		it("an empty value leaves an unscoped child unscoped", () =>
+			withInherited("", async () => {
+				const registry = subagentsModule.__test__.sessionModelRegistry({
+					modelRegistry,
+				});
+				assert.equal(registry.scope, undefined);
+				assert.ok(registry.find("p", "foo"));
+			}));
 	});
 
 	it("distinguishes ordinary context-isolated review from strict cross-family review", () => {

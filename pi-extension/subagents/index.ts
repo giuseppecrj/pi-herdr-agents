@@ -15,7 +15,7 @@ import {
 	getAuthenticatedTaskPreferences,
 	isThinkingLevel,
 } from "../../maestro/core/routing.ts";
-import { sessionModelRegistry } from "./model-registry.ts";
+import { sessionModelRegistry, sessionScopedModels } from "./model-registry.ts";
 import { loadModelConfig } from "../../maestro/core/config/model-config.ts";
 import {
 	getAgentConfigDir,
@@ -409,15 +409,14 @@ export default function subagentsExtension(
 		// set: sessionModelRegistry hides out-of-scope models from the catalog
 		// and its task shortlists alike.
 		const registry = sessionModelRegistry(ctx);
-		const scopedModels = (ctx.scopedModels ?? []).map((entry) => entry.model);
+		const scopedModels = sessionScopedModels(ctx, registry);
 		const authenticatedTaskPreferences = getAuthenticatedTaskPreferences(
 			registry,
 			modelConfig.tasks,
 		);
-		runtime.modelCatalog =
-			scopedModels.length > 0
-				? buildScopedModelCatalog(registry, scopedModels, modelConfig.tasks)
-				: buildAuthenticatedModelCatalog(registry, 24, modelConfig.tasks);
+		runtime.modelCatalog = scopedModels
+			? buildScopedModelCatalog(registry, scopedModels, modelConfig.tasks)
+			: buildAuthenticatedModelCatalog(registry, 24, modelConfig.tasks);
 		const refreshedGuidelines = buildSubagentRoutingGuidelines(
 			runtime.modelCatalog,
 			authenticatedTaskPreferences,

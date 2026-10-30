@@ -225,9 +225,9 @@ Set `persistent.maxAgents` to the maximum concurrently retained persistent speci
 
 Set `spawning.maxDepth` to the deepest child any launch may create. It must be a positive integer and defaults to `3`; unknown keys and other values fail configuration loading. A top-level parent session is depth `0`, its children are depth `1`, grandchildren `2`, and great-grandchildren `3`. A session at depth `maxDepth` cannot launch anything.
 
-The limit is enforced by the host on every launch path: `subagent` (including `agent`, persistent, and `worktree` launches), `subagent_resume`, `/subagent`, and `/worktree`. It applies to all roles, not only `self-spawn` ones. A refused launch returns an actionable error before Herdr creates a pane or workspace.
+The limit is enforced by the host on every child launch path: `subagent` (including `agent`, persistent, and `worktree` launches), `subagent_resume`, and `/subagent`. It applies to all roles, not only `self-spawn` ones. A refused launch returns an actionable error before Herdr creates a pane or workspace. A `/worktree` handoff is not a child: it continues the parent's conversation at the parent's own depth, so it is allowed at the limit and refused only when the parent's depth is unknown.
 
-Every launched Pi receives `PI_SUBAGENT_DEPTH=<parent depth + 1>`, set explicitly in the launch command so a value left in the pane's shell never reaches the child. A parent reads its own depth from that variable; an absent variable means a top-level session (depth `0`). A present value that is not a canonical non-negative integer (for example empty, `abc`, `-1`, or `1.5`) is treated as an unknown depth: the session is treated as already at the limit and every launch is refused until the variable is unset. It never resets the count to `0`. Run `/reload` after changing `spawning.maxDepth`.
+Every launched child receives `PI_SUBAGENT_DEPTH=<parent depth + 1>`, and a `/worktree` handoff receives the parent's own depth, set explicitly in the launch command so a value left in the pane's shell never reaches the new session. A parent reads its own depth from that variable; an absent variable means a top-level session (depth `0`). A present value that is not a canonical non-negative integer (for example empty, `abc`, `-1`, or `1.5`) is treated as an unknown depth: the session is treated as already at the limit and every launch is refused until the variable is unset. It never resets the count to `0`. Run `/reload` after changing `spawning.maxDepth`.
 
 ## Launch roster
 
@@ -493,24 +493,34 @@ before it creates a pane, worktree or session file:
   `/worktree`, fail with an error that names the parent model and the scope.
   To launch, pass an in-scope `model` or `task:` category, set `model` in the
   role definition, or switch the parent model with `/model`.
-- `subagent_resume` reads the stored model of the session being resumed (the
-  latest `model_change` on its active branch, else its latest assistant
-  response) and refuses when that model is missing or out of scope. Otherwise
-  it pins that model with `--model` so Pi cannot restore a different one.
+- `subagent_resume` reads the stored model of the session being resumed as
+  Pi's `buildSessionContext()` restores it (on the active branch, the later of
+  the latest `model_change` and the latest assistant response) and refuses when
+  that model is missing or out of scope. Otherwise it pins that model with
+  `--model` so Pi cannot restore a different one.
 - A fallback candidate is checked again against the live scope just before its
   attempt. A candidate the scope no longer contains is skipped and recorded in
   the fallback failures with the reason. Candidate order and thinking level
   stay unchanged.
 - Fresh, persistent, worktree, `/worktree` and resumed children receive the
-  parent's resolved scope as `--models provider/model-id,…`, so nested
-  delegation stays scoped. A scope ref that contains a comma cannot be passed
+  parent's resolved scope as an exact allowlist in
+  `PI_SUBAGENT_MODEL_SCOPE` (a JSON array of `provider/model-id` refs), so
+  nested delegation stays scoped. The child's own routing intersects its
+  scope with that allowlist. Pi reads `--models` as patterns (globs, partial
+  ids, `:thinking` suffixes), so a child's Pi can resolve a parent ref such
+  as `p/foo:free` to a different model `p/foo`; the allowlist keeps that
+  model out of scope. When none of the refs resolves in the child's catalog,
+  the child stays scoped to the allowlist rather than becoming unscoped, and
+  a malformed allowlist leaves nothing in scope. The children also receive
+  the scope as Pi's `--models provider/model-id,…`, only as a hint for Pi's
+  own model cycling. A scope ref that contains a comma cannot be passed
   this way, and the launch fails.
 
 The extension checks only exact `provider/model-id` membership in the scope Pi
-resolved for the parent. When the session is unscoped (no `--models`, and
-`enabledModels` absent or empty), none of these checks apply and children get
-no `--models`. A child resolves `--models` against its own catalog: if none
-of those refs resolves there, Pi treats the child as unscoped. The scope
+resolved for the parent, narrowed by any allowlist the parent inherited. When
+the session is unscoped (no `--models`, `enabledModels` absent or empty, and no
+inherited allowlist), none of these checks apply, children get no `--models`,
+and `PI_SUBAGENT_MODEL_SCOPE` is set empty. The scope
 limits only what this extension launches. It does not stop someone working in a
 child pane from switching models with Pi's own `/model` command.
 

@@ -136,10 +136,10 @@ Discovery only reads files. It never loads extensions, installs packages or
 starts processes. It searches the directories Pi searches, in Pi's order (the
 first skill with a name wins):
 
-1. plain-path `skills` entries in `<cwd>/.pi/settings.json`;
+1. `skills` entries in `<cwd>/.pi/settings.json`;
 2. `<cwd>/.pi/skills`, and `.agents/skills` in the child's cwd and each
    parent folder up to the Git root;
-3. plain-path `skills` entries in `<agentDir>/settings.json`;
+3. `skills` entries in `<agentDir>/settings.json`;
 4. `<agentDir>/skills` and `~/.agents/skills`;
 5. skills of configured `packages` that are already installed under Pi's
    install folders (`npm/node_modules/<name>`, `git/<host>/<path>`, or a local
@@ -148,8 +148,18 @@ first skill with a name wins):
 `<cwd>` and `<agentDir>` are the child's own, so a worktree child sees its
 checkout's skills. Project sources (1, 2 and project packages) count only when
 Pi would trust the project without asking: no trust-requiring project files,
-a saved trust decision, or `defaultProjectTrust: "always"`. Settings patterns
-(`!`, `+`, `-`, globs) are not expanded.
+a saved trust decision, or `defaultProjectTrust: "always"`.
+
+Filters narrow what is delivered as they narrow what Pi loads: settings
+`skills` overrides (`!`, `+`, `-`), a package manifest's own overrides, and a
+`packages` entry's `skills` allowlist. A project entry for a package replaces
+the user's entry for the same package. A package entry with
+`autoload: false` contributes no skills. Where the host cannot evaluate a
+filter exactly it delivers less, never more: a glob that would include a skill
+includes nothing, and a glob that would exclude one excludes every file it
+could match. Ignore files inside skill folders are not consulted. A skill file
+over the size limit is never read whole: the host reads only its head, to
+learn its name.
 
 A declared skill that is not found does not stop the launch, which matches
 Pi's own handling of an unknown `/skill:name`. The launch acknowledgement
@@ -408,15 +418,17 @@ its own definition again. Notes:
 - `spawning: false` removes every spawning tool, so it wins over `self-spawn: true`.
 - A peer inherits no allowance from its parent: each child gets it only if its
   own role declares it. The host sets `PI_SUBAGENT_SELF_SPAWN` explicitly on
-  every launch (`1` only for a named role that opted in, otherwise `0`), so a
-  value left in a pane's shell cannot enable it.
+  every launch, resumes and `/worktree` handoffs included (`1` only for a fresh
+  launch of a named role that opted in, otherwise `0`), so a value left in a
+  pane's shell cannot enable it.
 - **Depth limit.** Self-spawn is bounded by the host-enforced delegation depth
   limit that applies to every launch, whatever the role. A top-level parent is
   depth 0 and each launch adds one; by default nothing deeper than depth 3 can be
   launched (parent 0, children 1, grandchildren 2, great-grandchildren 3). A
-  session at the limit gets a refusal from `subagent`, `subagent_resume`,
-  `/subagent`, and `/worktree`, so an untrusted role that opts in cannot recurse
-  without bound. Change the limit with `spawning.maxDepth` in
+  session at the limit gets a refusal from `subagent`, `subagent_resume`, and
+  `/subagent`, so an untrusted role that opts in cannot recurse without bound.
+  A `/worktree` handoff keeps the parent's depth, so it is allowed at the limit
+  and refused only when the depth is unknown. Change the limit with `spawning.maxDepth` in
   [`config.json`](configuration.md#delegation-depth-limit). The limit counts
   depth, not breadth: one session can still launch several children, so bound the
   split in the role prompt.

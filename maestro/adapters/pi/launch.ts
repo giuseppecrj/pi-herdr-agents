@@ -16,6 +16,8 @@ import {
 } from "../../core/lifecycle.ts";
 import {
 	assertModelInScope,
+	formatInheritedModelScope,
+	MODEL_SCOPE_ENV,
 	modelScopeOf,
 	type ResolvedRuntimePlan,
 } from "../../core/routing.ts";
@@ -80,7 +82,8 @@ export interface FreshPiLaunchRequest {
 	};
 	runtimePlan: ResolvedRuntimePlan;
 	/** The parent session's model scope (exact provider/model-id refs). The
-	 * child receives it as `--models`; absent or empty leaves it unscoped. */
+	 * child receives it as its exact allowlist ({@link MODEL_SCOPE_ENV}) and as
+	 * Pi's `--models` hint; absent leaves it unscoped. */
 	modelScope?: readonly string[];
 	behavior: {
 		tools?: string;
@@ -112,7 +115,8 @@ export interface ResumePiLaunchRequest {
 		sessionDir: string;
 	};
 	/** The parent session's model scope. When set, the stored model must be in
-	 * it and is pinned with `--model`; the child receives it as `--models`. */
+	 * it and is pinned with `--model`; the child receives it as its exact
+	 * allowlist ({@link MODEL_SCOPE_ENV}) and as Pi's `--models` hint. */
 	modelScope?: readonly string[];
 	behavior?: {
 		autoExit?: boolean;
@@ -120,10 +124,14 @@ export interface ResumePiLaunchRequest {
 	};
 }
 
-/** `--models <patterns>` for a scoped parent, or nothing when unscoped. */
+/**
+ * `--models <refs>` for a scoped parent, or nothing when unscoped. Pi reads
+ * these as patterns, so this is only a hint for the child's own model
+ * cycling; {@link modelScopeAssignment} carries the enforced allowlist.
+ */
 function modelScopeArgs(modelScope: readonly string[] | undefined): string[] {
 	const scope = modelScopeOf({ scope: modelScope });
-	if (!scope) return [];
+	if (!scope || scope.length === 0) return [];
 	// Pi splits --models on commas; a ref containing one cannot be carried.
 	const unrepresentable = scope.find((ref) => ref.includes(","));
 	if (unrepresentable)
@@ -131,6 +139,17 @@ function modelScopeArgs(modelScope: readonly string[] | undefined): string[] {
 			`Cannot pass the session model scope to the child: ${JSON.stringify(unrepresentable)} contains a comma`,
 		);
 	return ["--models", shellQuote(scope.join(","))];
+}
+
+/**
+ * The exact allowlist the child's routing intersects with its own scope. Set
+ * on every launch, empty when unscoped, so a value left in the pane's shell
+ * never reaches the child.
+ */
+function modelScopeAssignment(
+	modelScope: readonly string[] | undefined,
+): string {
+	return `${MODEL_SCOPE_ENV}=${shellQuote(formatInheritedModelScope(modelScope))}`;
 }
 
 export type PiLaunchRequest = FreshPiLaunchRequest | ResumePiLaunchRequest;
@@ -968,6 +987,10 @@ function buildPiCommand(
 	const env = [
 		`${PI_LAUNCH_SESSION_ENV}=${shellQuote(artifacts.sessionFile)}`,
 		childDepthAssignment(resolved.request.handoff ? "handoff" : "child"),
+		modelScopeAssignment(request.modelScope),
+		// Explicit on every path, including a handoff, so an opt-in left in the
+		// pane's shell never reaches a session whose role did not declare it.
+		`PI_SUBAGENT_SELF_SPAWN=${!request.handoff && request.agent && request.behavior.selfSpawn ? "1" : "0"}`,
 	];
 	if (artifacts.localAgentDir) {
 		env.push(`PI_CODING_AGENT_DIR=${shellQuote(artifacts.localAgentDir)}`);
@@ -985,9 +1008,6 @@ function buildPiCommand(
 		env.push(`PI_SUBAGENT_NAME=${shellQuote(request.name)}`);
 		if (request.agent)
 			env.push(`PI_SUBAGENT_AGENT=${shellQuote(request.agent)}`);
-		env.push(
-			`PI_SUBAGENT_SELF_SPAWN=${request.agent && request.behavior.selfSpawn ? "1" : "0"}`,
-		);
 		env.push(`PI_SUBAGENT_AUTO_EXIT=${request.behavior.autoExit ? "1" : "0"}`);
 		if (request.behavior.persistent) {
 			env.push("PI_SUBAGENT_PERSISTENT=1");
@@ -1140,7 +1160,7 @@ async function launchResumedPiSubagent(
 	// restore an out-of-scope model on resume.
 	const scopeArgs = modelScopeArgs(request.modelScope);
 	let pinnedModel: string | undefined;
-	if (scopeArgs.length > 0) {
+	if (modelScopeOf({ scope: request.modelScope })) {
 		const stored = findStoredSessionModel(
 			getNewEntries(request.sessionFile, 0),
 		);
@@ -1181,6 +1201,9 @@ async function launchResumedPiSubagent(
 				? [`PI_DENY_TOOLS=${shellQuote(policy.deniedTools.join(","))}`]
 				: []),
 			childDepthAssignment(),
+			modelScopeAssignment(request.modelScope),
+			// The saved session policy records no self-spawn opt-in.
+			"PI_SUBAGENT_SELF_SPAWN=0",
 			`PI_SUBAGENT_NAME=${shellQuote(request.name)}`,
 			`PI_SUBAGENT_SESSION=${shellQuote(request.sessionFile)}`,
 			`PI_SUBAGENT_ID=${shellQuote(id)}`,

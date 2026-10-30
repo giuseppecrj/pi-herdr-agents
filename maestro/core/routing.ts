@@ -56,7 +56,8 @@ export interface ModelRegistryAdapter {
 	clampThinkingLevel(model: RoutingModel, level: ThinkingLevel): ThinkingLevel;
 	// pi-herdr-agents extension
 	/** Exact `provider/model-id` refs of the session's model scope (`--models` /
-	 * `enabledModels`). Absent or empty means the session is unscoped. */
+	 * `enabledModels`, narrowed by an inherited {@link MODEL_SCOPE_ENV}).
+	 * Absent means the session is unscoped; empty means no model is in scope. */
 	scope?: readonly string[];
 }
 
@@ -205,13 +206,71 @@ export function scopeModelRegistryAdapter(
 }
 
 // pi-herdr-agents extension
-/** The session's model scope, or undefined when the session is unscoped. */
+/** The session's model scope, or undefined when the session is unscoped. An
+ * empty scope is still a scope: no model passes it. */
 export function modelScopeOf(
 	registry: Pick<ModelRegistryAdapter, "scope">,
 ): readonly string[] | undefined {
-	return registry.scope && registry.scope.length > 0
-		? registry.scope
-		: undefined;
+	return registry.scope;
+}
+
+// pi-herdr-agents extension
+/**
+ * A scoped parent's exact model allowlist, carried to its child as a JSON
+ * array of `provider/model-id` refs. Pi reads `--models` as patterns (globs,
+ * fuzzy ids, `:thinking` suffixes) and drops the scope entirely when nothing
+ * resolves, so `--models` alone can widen a child's scope. The child's routing
+ * intersects its own scope with this allowlist instead.
+ */
+export const MODEL_SCOPE_ENV = "PI_SUBAGENT_MODEL_SCOPE";
+
+// pi-herdr-agents extension
+/** The value a launch exports for {@link MODEL_SCOPE_ENV}; empty when unscoped. */
+export function formatInheritedModelScope(
+	scope: readonly string[] | undefined,
+): string {
+	return scope ? JSON.stringify(scope) : "";
+}
+
+// pi-herdr-agents extension
+/**
+ * Parse an inherited allowlist. Unset or empty means the parent was unscoped.
+ * Anything else that is not a JSON array of strings fails closed: an empty
+ * allowlist, under which no model is in scope.
+ */
+export function parseInheritedModelScope(
+	raw: string | undefined,
+): readonly string[] | undefined {
+	if (raw === undefined || raw === "") return undefined;
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		if (Array.isArray(parsed) && parsed.every(isString)) return parsed;
+	} catch {
+		// Malformed: fall through to the empty allowlist.
+	}
+	return [];
+}
+
+// pi-herdr-agents extension
+/**
+ * This session's effective scope: its own resolved scope, narrowed to the
+ * allowlist it inherited. An inherited allowlist applies even when the
+ * session's own `--models` resolved to nothing, so a child never becomes
+ * unscoped because its catalog failed to match the parent's refs.
+ */
+export function sessionModelScope(
+	ownScope: readonly string[],
+	rawInherited: string | undefined,
+): readonly string[] | undefined {
+	const inherited = parseInheritedModelScope(rawInherited);
+	if (!inherited) return ownScope.length > 0 ? ownScope : undefined;
+	if (ownScope.length === 0) return inherited;
+	const allowed = new Set(inherited);
+	return ownScope.filter((ref) => allowed.has(ref));
+}
+
+function formatScope(scope: readonly string[]): string {
+	return scope.length > 0 ? scope.join(", ") : "none";
 }
 
 // pi-herdr-agents extension
@@ -225,7 +284,7 @@ export function assertModelInScope(
 	const scope = modelScopeOf(registry);
 	if (!scope || scope.includes(model)) return;
 	throw new RuntimeResolutionError(
-		`${what} ${JSON.stringify(model)} is outside this session's model scope (--models / enabledModels: ${scope.join(", ")}); ${hint}`,
+		`${what} ${JSON.stringify(model)} is outside this session's model scope (--models / enabledModels: ${formatScope(scope)}); ${hint}`,
 	);
 }
 
@@ -283,7 +342,7 @@ export function resolveRuntimePlan(
 		!scope.includes(`${provider}/${modelId}`)
 	) {
 		throw new RuntimeResolutionError(
-			`the parent model ${JSON.stringify(`${provider}/${modelId}`)} is outside this session's model scope (--models / enabledModels: ${scope.join(", ")}), so a subagent cannot inherit it. Pass model with an in-scope exact provider/model-id or a task: category, set model in the role definition, or switch the parent to an in-scope model with /model`,
+			`the parent model ${JSON.stringify(`${provider}/${modelId}`)} is outside this session's model scope (--models / enabledModels: ${formatScope(scope)}), so a subagent cannot inherit it. Pass model with an in-scope exact provider/model-id or a task: category, set model in the role definition, or switch the parent to an in-scope model with /model`,
 		);
 	}
 

@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
+import { buildSessionContext } from "@earendil-works/pi-coding-agent";
 import {
 	isExpectedPiProcess,
 	launchOperationsFromSurface,
@@ -239,6 +240,50 @@ describe("session model scope", () => {
 			findStoredSessionModel([{ type: "session", id: "h" }]),
 			undefined,
 		);
+	});
+
+	it("REGRESSION: reads the stored model chronologically, as Pi's buildSessionContext() restores it", () => {
+		const modelChange = (id: string, parentId: string, modelId: string) => ({
+			type: "model_change",
+			id,
+			parentId,
+			provider: "p",
+			modelId,
+		});
+		const answer = (id: string, parentId: string, model: string) => ({
+			type: "message",
+			id,
+			parentId,
+			message: { role: "assistant", provider: "p", model, content: [] },
+		});
+		const histories = [
+			// The reviewer's probe: a later answer outranks an earlier model_change.
+			[modelChange("m", "h", "old"), answer("a", "m", "new")],
+			// A later model_change still outranks an earlier answer.
+			[answer("a", "h", "old"), modelChange("m", "a", "new")],
+			[
+				modelChange("m1", "h", "first"),
+				answer("a1", "m1", "first"),
+				modelChange("m2", "a1", "second"),
+				answer("a2", "m2", "new"),
+				{ type: "label", id: "leaf", parentId: "a2" },
+			],
+		];
+		for (const history of histories) {
+			const entries = [{ type: "session", id: "h" }, ...history];
+			assert.deepEqual(
+				findStoredSessionModel(entries),
+				{ provider: "p", modelId: "new" },
+				JSON.stringify(history),
+			);
+			assert.deepEqual(
+				findStoredSessionModel(entries),
+				// SAFETY: the fixtures are well-formed session, model_change,
+				// message and label entries, the shapes Pi's projection reads.
+				buildSessionContext(entries as any).model,
+				"the host and Pi agree",
+			);
+		}
 	});
 
 	it("refuses an out-of-scope fresh plan or an unrepresentable scope before creating a pane", async () => {
@@ -1466,6 +1511,10 @@ describe("Pi launch", () => {
 				assert.match(command, /PI_SUBAGENT_ACTIVITY_FILE='/);
 				assert.match(command, /PI_SUBAGENT_AUTO_EXIT=1/);
 				assert.match(command, /PI_DENY_TOOLS='subagent,subagent_resume'/);
+				// The saved policy records no self-spawn opt-in, so a resume never
+				// inherits one left in the pane's shell.
+				assert.match(command, / PI_SUBAGENT_SELF_SPAWN=0 /);
+				assert.match(command, / PI_SUBAGENT_MODEL_SCOPE='' /);
 				assert.doesNotMatch(command, /--model|--thinking|^cd /);
 				const messagePath = command.match(/'@([^']+\.md)'/)?.[1];
 				assert.ok(messagePath, "expected artifact-backed follow-up message");
@@ -1909,6 +1958,13 @@ describe("Pi launch", () => {
 				/--model 'fake\/worker' --thinking 'high' --models 'fake\/worker,fake\/other'/,
 				"a worktree handoff carries the parent's model scope",
 			);
+			assert.ok(
+				handoffCommand.includes(
+					` PI_SUBAGENT_MODEL_SCOPE='["fake/worker","fake/other"]' `,
+				),
+				"a worktree handoff carries the exact allowlist",
+			);
+			assert.match(handoffCommand, / PI_SUBAGENT_SELF_SPAWN=0 /);
 			assert.equal(result.running.worktree?.baseSha, linkedSha);
 			assert.equal(result.running.worktree?.path, worktreePath);
 			assert.equal(
@@ -2058,8 +2114,15 @@ describe("Pi launch", () => {
 				command,
 				new RegExp(` PI_SUBAGENT_DEPTH=${process.env.PI_SUBAGENT_DEPTH ?? 0} `),
 			);
+			// It never inherits a self-spawn opt-in or a model allowlist left in
+			// the pane's shell: both are set explicitly.
+			assert.match(command, / PI_SUBAGENT_SELF_SPAWN=0 /);
+			assert.match(command, / PI_SUBAGENT_MODEL_SCOPE='' /);
 			assert.doesNotMatch(
-				command.replace("PI_SUBAGENT_DEPTH=", ""),
+				command
+					.replace("PI_SUBAGENT_DEPTH=", "")
+					.replace("PI_SUBAGENT_SELF_SPAWN=", "")
+					.replace("PI_SUBAGENT_MODEL_SCOPE=", ""),
 				/subagent-done|PI_SUBAGENT_|__SUBAGENT_DONE_/,
 			);
 			assert.ok(

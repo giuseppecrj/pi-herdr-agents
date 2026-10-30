@@ -478,12 +478,21 @@ for (const mode of ["success", "focus-warning", "readiness-failure"] as const) {
 			const command = f.commands[0];
 			assert.ok(
 				// A handoff Pi keeps this session's depth, so it cannot reset the count.
+				// It never inherits a self-spawn opt-in or a model allowlist left in
+				// the pane's shell; otherwise it carries no child protocol.
 				command.includes(
 					`PI_SUBAGENT_DEPTH=${process.env.PI_SUBAGENT_DEPTH ?? 0} `,
 				) &&
-					!command.replace("PI_SUBAGENT_DEPTH=", "").includes("PI_SUBAGENT_") &&
+					command.includes(" PI_SUBAGENT_SELF_SPAWN=0 ") &&
+					command.includes(" PI_SUBAGENT_MODEL_SCOPE='' ") &&
+					!command
+						.replace("PI_SUBAGENT_DEPTH=", "")
+						.replace("PI_SUBAGENT_SELF_SPAWN=", "")
+						.replace("PI_SUBAGENT_MODEL_SCOPE=", "")
+						.includes("PI_SUBAGENT_") &&
 					!command.includes("subagent-done.ts") &&
 					!command.includes("__SUBAGENT_DONE_"),
+				command,
 			);
 			if ("error" in result) {
 				assert.equal(mode, "readiness-failure");
