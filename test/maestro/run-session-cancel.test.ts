@@ -289,9 +289,9 @@ describe("RunSession operator cancel", { timeout: 5000 }, () => {
 		let attempts = 0;
 		const prepared = f.prepared();
 		const base = prepared.spawnAttempt;
-		prepared.spawnAttempt = async (spawn, index) => {
+		prepared.spawnAttempt = async (spawn, index, cancelled) => {
 			attempts++;
-			if (index === 0) return base(spawn, index);
+			if (index === 0) return base(spawn, index, cancelled);
 			started.resolve();
 			return acquired.promise;
 		};
@@ -339,9 +339,9 @@ describe("RunSession operator cancel", { timeout: 5000 }, () => {
 		const prepared = f.prepared();
 		const base = prepared.spawnAttempt;
 		let attempts = 0;
-		prepared.spawnAttempt = async (spawn, index) => {
+		prepared.spawnAttempt = async (spawn, index, cancelled) => {
 			attempts++;
-			if (index === 0) return base(spawn, index);
+			if (index === 0) return base(spawn, index, cancelled);
 			started.resolve();
 			return refused.promise;
 		};

@@ -58,7 +58,7 @@ This page is the detailed reference for the tools, commands, and run lifecycle o
 5. Main agent processes result     → continues with new context
 ```
 
-Multiple subagents run concurrently — each steers its result back independently as it finishes. Active watchers survive parent `/reload`, `/new`, `/resume`, and `/fork` transitions, so completion is delivered into the replacement session. A result that settles while the old session is shut down and the replacement has not started is held, then delivered once when the replacement starts, and a model fallback due in that gap waits to launch until the replacement starts. Quitting Pi still stops parent-side delivery. The live widget above the input tracks every agent still in flight:
+Multiple subagents run concurrently — each steers its result back independently as it finishes. Active watchers survive parent `/reload`, `/new`, `/resume`, and `/fork` transitions, so completion is delivered into the replacement session. A result that settles while the old session is shut down and the replacement has not started is held, then delivered once when the replacement starts, and a model fallback due in that gap waits to launch until the replacement starts (a `subagent_cancel` recorded during that wait ends it at once and launches nothing). Quitting Pi still stops parent-side delivery. The live widget above the input tracks every agent still in flight:
 
 ```
 ╭─ Subagents ──────────────────── 1 active · 2 open ─╮

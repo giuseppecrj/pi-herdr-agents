@@ -86,9 +86,15 @@ export interface PreparedRun {
 	role: Role;
 	persistent: boolean;
 	candidates: readonly RuntimeCandidate[];
+	/**
+	 * `cancelled` aborts when the run's cancel intent is recorded while the
+	 * attempt is still being acquired; a long wait inside it must end then and
+	 * launch nothing.
+	 */
 	spawnAttempt(
 		options: SpawnOptions,
 		candidateIndex: number,
+		cancelled: AbortSignal,
 	): Promise<OwnedRunAttempt>;
 }
 // pi-herdr-agents extension
@@ -165,6 +171,8 @@ interface RunEntry {
 	attempts: OwnedRunAttempt[];
 	active?: OwnedRunAttempt;
 	controller: AbortController;
+	/** Aborted once, when cancel intent is first recorded. */
+	cancelIntent: AbortController;
 	producer?: Promise<RunResult>;
 	suppressed: boolean;
 	released: boolean;
@@ -196,6 +204,7 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 			nextCandidate: 0,
 			attempts: [],
 			controller: new AbortController(),
+			cancelIntent: new AbortController(),
 			suppressed: false,
 			released: false,
 			acquiring: false,
@@ -332,6 +341,7 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 				owner = await prepared.spawnAttempt(
 					spawnOptions(entry, prepared, index),
 					index,
+					entry.cancelIntent.signal,
 				);
 			} catch (error) {
 				failures.push({
@@ -702,6 +712,7 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 				termination: "unconfirmed",
 				waiters: new Set(),
 			});
+			entry.cancelIntent.abort();
 			if (state.termination !== "confirmed") notifyCancel(entry, "requested");
 			const report = (status: CancelReport["status"]): CancelReport => {
 				const value: CancelReport = { status, requestedAt: state.requestedAt };

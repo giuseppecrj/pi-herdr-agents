@@ -264,8 +264,12 @@ export function registerSubagentTool(
 					plans: [plan, ...fallbacks],
 					// Fallbacks outlive this tool call; session replacement invalidates ctx.
 					// In a reload gap, wait for the replacement's context; never fail a candidate.
-					prepareAttempt: async () => {
-						const live = await awaitLiveContext(runtime, id);
+					prepareAttempt: async (_index, cancelled) => {
+						const live = await awaitLiveContext(runtime, id, cancelled);
+						// A cancel recorded while waiting launches nothing, even if the
+						// replacement bound its context first.
+						if (cancelled.aborted)
+							throw new Error("Cancelled before the fallback launch");
 						if (!live)
 							throw new Error("No live parent context for the fallback launch");
 						return normalizePiAttempt(params, live, parentThinking, attempt);
