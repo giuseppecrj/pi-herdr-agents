@@ -1,8 +1,19 @@
 # Accept check design
 
-- **Status:** Proposed design. Nothing here is shipped behavior.
+- **Status:** Implemented as `delegation-outcome/v0.1`
+  ([ADR-0017](adr/0017-accept-check.md)). The shipped behavior is in
+  [`tools.md`](tools.md#accept-checks),
+  [`configuration.md`](configuration.md#outcome-ledger), and the
+  [contract](delegation-outcome-contract.md#verdicts), which govern where this
+  note differs. See [As implemented](#as-implemented) for the differences; the
+  [open questions](#open-questions) and [later steps](#rollout) remain.
 - **Code anchors:** every `file:line` cites commit
-  `97944a65f840a6a1026b1947a8dc7ae3a9e8e61e`.
+  `97944a65f840a6a1026b1947a8dc7ae3a9e8e61e`, before the code was split; they
+  are historical. The implementation lives in `maestro/core/accept.ts`,
+  `maestro/adapters/pi/accept-runner.ts`,
+  `maestro/adapters/pi/child/accept-check.ts`,
+  `maestro/runtime/accept-recheck.ts`, and `finalize` in
+  `maestro/runtime/pi-run-session.ts`.
 - **Constrained by:** [ADR-0013](adr/0013-pack-neutral-execution-host.md)
   (pack-neutral host) and
   [ADR-0014](adr/0014-operator-cancel-terminal-intent.md) (operator cancel).
@@ -315,7 +326,8 @@ once they pass `accept`.
 - `docs/README.md`, which at this commit has no section for proposed design. It
   needs one to list this note.
 
-This needs a new ADR, ADR-0016. It adds a public parameter and a closed verdict
+This needs a new ADR. It shipped as ADR-0017, because ADR-0016 became the
+delegation outcome contract itself. It adds a public parameter and a closed verdict
 vocabulary that packs will branch on. It also makes the parent process run
 caller-supplied shell commands, which the host does not do today, and it adds a
 durable file under the user's config directory. Those are hard to reverse.
@@ -404,6 +416,36 @@ open questions.
 - A rejected verdict changes neither the sidebar status nor the worktree
   manifest state in the first version. The verdict appears only in the
   delivery and the outcome ledger.
+
+## As implemented
+
+The implementation follows the settled defaults and the recommended defaults
+above, with these differences:
+
+- **ADR number.** ADR-0017, not ADR-0016.
+- **Check output.** The delivery shows it as one encoded host line,
+  `Check output (last 1,500 characters, encoded): …`, not a multi-line block:
+  check output is child-influenced, and every host field is exactly one line.
+  Details keep up to 4,000 raw characters in `accept.output`.
+- **Help requests.** The `Check:` line appears on help-request deliveries too
+  (`skipped (help request)` or `none`), so every non-persistent delivery
+  carries a verdict.
+- **Cancel during the re-check.** The kernel's `FinalizeControl.cancellable`
+  reopens the settle point only while the re-check runs. A cancel then
+  terminates the owner as usual, which aborts the re-check; the kernel delivers
+  the cancelled result. To record that cancel in the worktree manifest, the
+  manifest write moved after the re-check; the handoff is still captured
+  before it.
+- **Outcome ledger keys.** `role` replaces `agent`, and `outcome` is
+  `completed`, `failed`, `help`, or `cancelled`. Persistent specialists and
+  resumed runs also get lines, with verdict `none`.
+- **Child loop.** The child skips its check while it still owes deliveries
+  from its own children (it would not exit at that settlement anyway), and an
+  aborted check run counts as no try. `ctx.signal` is passed to the check, but
+  Pi 1.1.0 exposes no agent signal at `agent_before_settle`, so the second open
+  question below is still open.
+- **Validation.** `paths` must be repo-relative without `..`. Changed check
+  files are reported for every worktree verdict, including `skipped`.
 
 ## Open questions
 

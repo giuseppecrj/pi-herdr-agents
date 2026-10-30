@@ -22,5 +22,6 @@
   },
   "guidelines": {
     "launchRoster": true
-  }
+  },
+  "outcomeLedger": true
 }

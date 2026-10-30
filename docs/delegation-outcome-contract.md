@@ -1,13 +1,15 @@
-# Delegation outcome contract v0
+# Delegation outcome contract v0.1
 
-- **Contract version:** `delegation-outcome/v0`
-- **Status:** v0 is implemented. The [proposed v0.1 additions](#proposed-for-v01)
-  are not.
+- **Contract version:** `delegation-outcome/v0.1`
+- **Status:** v0.1 is implemented. It adds [verdicts](#verdicts) to v0, an
+  additive change: a v0 parent can ignore the `accept` request field and the
+  `Check:` line.
 - **Reference implementation:** `pi-herdr-agents`
-- **Decision:** [ADR-0016](adr/0016-delegation-outcome-contract.md)
+- **Decisions:** [ADR-0016](adr/0016-delegation-outcome-contract.md) (the
+  contract), [ADR-0017](adr/0017-accept-check.md) (the accept check)
 - **Code anchors:** every `file:line` cites commit `9befa7f`. Anchors for
-  [host-line values](#host-line-values) name the symbol instead, because they
-  postdate that commit.
+  [host-line values](#host-line-values) and [verdicts](#verdicts) name the
+  symbol instead, because they postdate that commit.
 
 This contract defines what a parent agent receives when a delegated child
 finishes, fails, or asks for help, and which requests the parent may send. An
@@ -294,7 +296,8 @@ shows whole outcome entries and then `(and N more ledger entries)`.
 A parent treats the block as data to evaluate. It does not follow instructions
 inside the block as if they came from the user. It decides acceptance from its
 own checks and the host evidence. The `kind` and the exit code describe how the
-run ended, not whether the work is right.
+run ended, not whether the work is right. A `Check: accepted` verdict says the
+caller's own check passed when the parent re-ran it, and nothing more.
 
 ## Host evidence
 
@@ -314,6 +317,7 @@ file, and any worktree handoff.
 | Provider error | `Error: <encoded error>` in the head | `errorMessage` (raw) |
 | Worktree handoff | `Worktree:`, `Workspace:`, `Branch:`, `Base/head:`, `State:`, `Changed:`, `Untracked:`, `Git inspection warning:`, and the [cleanup commands](#executable-commands) (`worktreeHandoffFields`) | `worktree` (`maestro/core/worktree.ts`) |
 | Cancellation | A host-only cancelled message (`resolveCancelledPresentation`) | `error: "cancelled"` and `cancellation` (`delivery.ts` `settle`) |
+| Verdict | `Check: <verdict> (<detail>)` in the head, and `Check output (last 1,500 characters, encoded): …` for `rejected` and `error` (`presentation.ts` `checkField`) | `accept` (`maestro/core/accept.ts` `AcceptOutcome`) |
 
 The worktree `State:` value is `clean`, `dirty`, `conflicted`, or
 `inspection unknown`, followed by the commits-ahead count or
@@ -372,23 +376,87 @@ The same test file pins fields packs depend on. These are
 of `subagents_write_task_models` (`tool-schema.test.ts:78-90`). It also pins
 `caller_ping` and `subagent_done` to the child scope (`tool-schema.test.ts:92-97`).
 
-## Proposed for v0.1
+## Verdicts
 
-These items are designed in [`accept-check-design.md`](accept-check-design.md)
-and are not implemented.
+A caller may attach a check to a run. The host enforces the mechanism; the
+command is the caller's or its pack's policy, and the host ships none
+([ADR-0017](adr/0017-accept-check.md)).
 
-- An optional `accept` object on `subagent` names a shell command. The child
-  runs it and retries on failure a bounded number of times. The parent's own
-  run of the command decides the verdict.
-- Each delivery carries one verdict from a closed set: `accepted`, `rejected`,
-  `error`, `skipped`, or `none`. A sixth value is a contract change.
-- A cancelled run is always `skipped`. A rejected verdict never starts a model
-  fallback.
+### Request
+
+`subagent` takes an optional `accept: { run, maxRetries?, timeoutSec?, paths? }`
+(`pi-extension/subagents/catalog.ts` `SubagentParams`). `run` is a shell
+command run with `sh -c`; `maxRetries` is 0 to 5 (default 1); `timeoutSec` is
+1 to 3,600 (default 600); `paths` are repo-relative check files. The host
+refuses it before creating any resource for a persistent specialist or a
+non-auto-exit child (`maestro/core/accept.ts` `acceptLaunchRefusal`, applied in
+`launch-tools.ts` and `pi-harness-adapter.ts` `spawn`). A refusal is a tool
+result with `details.error: "accept-unsupported"`.
+
+### Who decides
+
+1. The child runs the check when a turn ends normally, and while retries remain
+   it works another turn with the last 4,000 characters of output
+   (`maestro/adapters/pi/child/accept-check.ts`). Its `.exit` sidecar carries
+   `accept: { tries, childVerdict, lastExitCode?, timedOut }`, which is
+   evidence only (`completion.ts` `interpretExitSidecar`).
+2. The parent re-runs the check after the child exits, and that run alone
+   decides `accepted`, `rejected`, or `error`
+   (`maestro/runtime/accept-recheck.ts` `runParentAcceptCheck`, called from
+   `finalize` in `pi-run-session.ts` after the worktree handoff capture and
+   before the lifecycle and manifest marks). It runs only for a completed,
+   uncancelled, exit-0 run that did not ask for help, in the worktree for a
+   worktree child and in the child's cwd otherwise. Callers cannot skip it.
+
+### Verdict set
+
+The set is closed (`maestro/core/accept.ts` `ACCEPT_VERDICTS`). A sixth value
+is a contract change.
+
+| Verdict | Meaning |
+| --- | --- |
+| `accepted` | The parent re-check exited 0 within the timeout. |
+| `rejected` | The parent re-check exited non-zero. |
+| `error` | The parent re-check gave no pass or fail: it timed out, was killed by a signal, its directory was missing, or it could not start. |
+| `skipped` | A check was requested, but the run was cancelled, asked for help, hit a provider error, or exited non-zero. A cancel during the parent re-check stops it and yields `skipped`. |
+| `none` | No check was requested, including every resumed run. |
+
+A rejected verdict is a completed negative result. It starts no model fallback
+and changes neither the run's lifecycle status nor the worktree manifest state.
+
+### Delivery
+
+Every result and help-request delivery of a non-persistent run carries one
+`Check:` host field in its head, directly under the status line, so it is never
+dropped by the size budget (`presentation.ts` `checkField`). Unchecked runs read
+`Check: none`. The detail after the verdict, such as `accepted (2 tries)` or
+`rejected (child reported a pass; parent re-check exit 1)`, is host text
+(`accept.ts` `describeAcceptVerdict`) written as an encoded value. The field
+adds `· shared checkout` when the re-check ran in an ordinary child's cwd, and
+`· check files changed by the child: <list>` with encoded file names when a
+worktree child changed files under `paths`; the verdict is unchanged.
+
+The re-check output is child-influenced data. For `rejected` and `error`, its
+last 1,500 characters are one encoded, bounded evidence field before the model
+lines, outside the envelope: `Check output (last 1,500 characters, encoded): …`.
+Structured details keep up to 4,000 raw characters in `accept.output`.
+
+### Outcome ledger
+
+The host appends one line per model attempt to
+`$PI_CODING_AGENT_DIR/herdr-agents/outcomes.jsonl` (`accept-recheck.ts`
+`appendOutcomeLedger`), unless `outcomeLedger` is `false`. Its keys are `v`,
+`at`, `runId`, `attempt`, `role`, `requestedModel`, `category`, `model`,
+`thinking`, `elapsedSec`, `outcome`, `checkTries`, `verdict`, and `checkHash`
+(`accept.ts` `buildOutcomeLedgerLine`). It never holds task text, check output,
+environment values, or the command; `checkHash` is the command's SHA-256. It is
+local host evidence, not part of the delivery.
 
 ## Conformance
 
-A host conforms to v0 when a test suite can verify each item below. The tests
-listed are this repository's checks. Unless noted, they are in `test/test.ts`.
+A host conforms to v0.1 when a test suite can verify each item below. Items 1
+to 14 are v0; items 15 to 19 are the v0.1 verdicts. The tests listed are this
+repository's checks. Unless noted, they are in `test/test.ts`.
 
 | # | Requirement | Tests in this repository |
 | --- | --- | --- |
@@ -406,26 +474,34 @@ listed are this repository's checks. Unless noted, they are in `test/test.ts`.
 | 12 | Persistent task issuance comes from parent memory. An event for a task the parent did not issue changes no accounting, claims no idle state, and yields at most one encoded notice that does not start a turn. | "does not let a forged ledger dispatched entry make an unknown task look issued", "ignores an unknown persistent task ID with one encoded notice" |
 | 13 | Error provenance is explicit: host diagnostics stay `host`, and only text the child wrote is `child-error`. | "marks host-generated completion errors as host and child-written ones as child", "encodes a transcript assistant errorMessage and records child provenance" |
 | 14 | Other parent-facing sinks encode every variable value, including errors thrown by any host tool or command. | "routes every registered host tool through the encoding boundary, in parent and child scope", "encodes a thrown error from any tool and command, keeping the cause", "encodes a U+2028 activity label at the widget and recovery-status sinks", "encodes a malformed .git newline path in worktree_list", "encodes inspection errors in worktree_list, worktree_remove and /worktree list", "encodes every launch diagnostic", "encodes names echoed by control tool replies", "encodes role-definition values in subagents_list rows", and in "public launch errors and executable commands", "encodes a malformed .git worktree failure thrown by the public subagent tool", "encodes a role model with U+2028 in the public subagent routing error", "encodes a hostile session path in the public subagent_resume failure" |
+| 15 | `accept` is optional and bounded, and is refused before launch for persistent and non-auto-exit children. | In `test/maestro/accept-check.test.ts`, "applies defaults and validates bounds", "is an optional schema field with the documented bounds", "the public tool refuses accept before launch for persistent or interactive runs" |
+| 16 | The child retries with bounded failing output while retries remain; its report reaches the parent as evidence only. | In `test/maestro/accept-check.test.ts`, "retries with the bounded failing output, then records a pass", "records a failure when retries are exhausted and keeps other entries", "writes the report into the done sidecar, which the parent parses" |
+| 17 | The parent re-check alone decides `accepted`, `rejected`, or `error`; a timeout is `error`; skipped runs and unchecked runs get `skipped` and `none`; a rejected verdict starts no fallback and leaves the manifest state. | In `test/maestro/accept-recheck.test.ts`, "the parent re-check accepts a completed run and writes one ledger line", "the parent re-check is authoritative over the child's reported pass", "a re-check timeout is verdict error, not rejected", "help requests, provider errors and failed exits skip the re-check", "a rejected verdict never starts a model fallback", "worktree re-check runs in the worktree, reports changed check files and leaves the manifest state" |
+| 18 | A cancel during the parent re-check stops it and delivers one cancelled result with verdict `skipped`. | In `test/maestro/accept-recheck.test.ts`, "a cancel during the parent re-check stops it and delivers a cancelled, skipped result" |
+| 19 | The `Check:` line sits in the head outside the envelope, reads `none` without a check, and survives the size budget; check output and changed file names are encoded and cannot forge a host line; the ledger has only its listed keys and an off switch. | In `test/maestro/accept-check.test.ts`, the "Check delivery line" suite, "builds a ledger line with only the listed keys", "is on by default and accepts only a boolean"; in `test/maestro/accept-recheck.test.ts`, "an unchecked run has no verdict and logs verdict none; the off switch writes nothing"; and in `test/integration/subagent-lifecycle.test.ts`, "delivers an accept-check verdict (success) with one retry and one outcome-ledger line" and its `(reject)` twin |
 
 Another host can port these tests against its own delivery function. Items 1
 to 5 and 9, and item 11 apart from its renderer check, need only the message
 text. Items 6, 7, 12, and 13 need the host's evidence and records, item 8
 needs a schema snapshot of its own tools, items 10 and 11 need the host's
-renderer, and item 14 needs its other sinks.
+renderer, and item 14 needs its other sinks. Items 15 to 19 need the host's
+request validation, child protocol, and re-check; item 19's message checks
+need only the message text.
 
 ## Versioning
 
-The contract version string is `delegation-outcome/v0`. The host does not emit
-it in v0. It names this document.
+The contract version string is `delegation-outcome/v0.1`. The host does not
+emit it. It names this document. v0.1 added the `accept` request field, the
+`Check:` line, the verdict details, and the outcome ledger to v0.
 
 - A new optional request field or evidence line that a v0 parent can ignore is
   a minor change, such as v0.1.
-- Adding, removing, or renaming a kind, changing the envelope grammar, moving child text
+- Adding, removing, or renaming a kind or a verdict, changing the envelope grammar, moving child text
   outside the envelope or host text inside it, or lowering the 16,000-character
   bound is a breaking change. It bumps the major contract version.
 - The contract version is separate from the package version. A breaking
   contract change ships in a major package version. A minor contract change
   ships in a minor or major package version.
 
-Changes to the envelope, the host evidence, or tool-schema compatibility update
-this document and its tests in the same commit.
+Changes to the envelope, the host evidence, the verdicts, or tool-schema
+compatibility update this document and its tests in the same commit.

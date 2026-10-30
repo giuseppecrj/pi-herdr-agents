@@ -46,6 +46,7 @@ notices are facts, not instructions to act.
 | `interactive` | Controls parent notifications only (silences stall/recovered pings); it does not affect terminal focus. Precedence: this argument, then the role's `interactive`, then the inverse of `auto-exit` (autonomous roles get pings, others stay quiet). Bare spawns default to autonomous auto-exit unless `interactive: true`. Exception: persistent specialists are always non-interactive unless this argument says otherwise (a persistent role's `interactive: true` is ignored), and they never auto-exit. |
 | `persistent` | Keep one specialist session alive for sequential tasks (see below). Rejected at the `persistent.maxAgents` cap (default 3). |
 | `worktree` | `{ branch, base? }` for an isolated Herdr-managed Git worktree (see below). Omit, or pass `null`, for an ordinary pane. |
+| `accept` | `{ run, maxRetries?, timeoutSec?, paths? }`: a shell check (exit 0 passes). The child runs it before it finishes and retries with the failing output (default 1 retry); then the parent re-runs it in the child's checkout and that run decides `Check: accepted`, `rejected`, `error` (timeout or no answer), or `skipped` (cancelled, help, provider error, failed exit). Unchecked runs read `Check: none`. Refused for persistent and non-auto-exit children. A rejected verdict starts no fallback. You supply the command; the host ships none. |
 
 Label coordinated children `<task>-<role>[-n]`. Panes and tabs are created
 without stealing focus. Read-only scouts and reviewers use ordinary panes; a
@@ -244,6 +245,7 @@ changes. Without a real file, only non-model settings fall back to the example.
 | `persistent.maxAgents` | Retained specialist cap (default 3) |
 | `supervision.*`, `panes.*` | Transport, hang advisory minutes, pane grouping |
 | `guidelines.launchRoster` | Ask for a markdown roster table after the final launch (default true) |
+| `outcomeLedger` | Append one line per model attempt to `herdr-agents/outcomes.jsonl` (default true; `false` turns it off) |
 | `roles.bundled` | Deprecated no-op; remove it |
 
 Model values must be exact authenticated IDs. `/subagents-init [preferences]`

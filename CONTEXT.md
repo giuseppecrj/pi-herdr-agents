@@ -52,8 +52,29 @@ _Avoid_: Completion result, user alert
 
 **Child result delivery**:
 The parent-facing handoff of a child run's observed outcome and available
-evidence. Receiving it does not establish that the work is correct or accepted.
+evidence. Receiving it does not establish that the work is correct or accepted;
+only an `accepted` verdict from a parent re-check of the caller's accept check
+does, and only for what that check tests.
 _Avoid_: Wake-up signal, acceptance
+
+**Accept check**:
+A caller-supplied shell command on a `subagent` call. The child runs it before
+it finishes and retries a bounded number of times; the parent then re-runs it.
+The host enforces the mechanism; the command is the caller's or its pack's
+policy.
+_Avoid_: Host-shipped test, review workflow
+
+**Verdict**:
+The accept-check outcome a delivery carries, from the closed set `accepted`,
+`rejected`, `error`, `skipped`, and `none`. Only the parent re-check produces
+`accepted`, `rejected`, or `error`; the child's own check report is evidence.
+_Avoid_: Child claim, open status string, run outcome
+
+**Outcome ledger**:
+The local append-only `herdr-agents/outcomes.jsonl` file with one line per model
+attempt: run, role, models, elapsed time, outcome, and verdict, never task text,
+check output, or environment. It is not the persistent delivery ledger.
+_Avoid_: Ledger (unqualified), delivery ledger, run log
 
 **Report envelope**:
 The `<subagent_report from="…" kind="…">` block that holds only child-authored
@@ -61,9 +82,9 @@ text in a delivery. Host lines and host fallbacks stay outside it.
 _Avoid_: Instructions from the user, host summary
 
 **Delegation outcome contract**:
-The versioned rules (`delegation-outcome/v0`) for the report envelope, host
-evidence, and tool-schema compatibility that a host implements.
-_Avoid_: Acceptance verdict, orchestrator adapter
+The versioned rules (`delegation-outcome/v0.1`) for the report envelope, host
+evidence, verdicts, and tool-schema compatibility that a host implements.
+_Avoid_: Orchestrator adapter
 
 **Operator cancel**:
 A parent's `subagent_cancel` of one ordinary managed run. Its terminal intent is
@@ -187,7 +208,7 @@ _Avoid_: Assumed completion, replay candidate
 **Delivery ledger**:
 The append-only evidence record of persistent task dispatch and terminal
 outcomes for one session generation.
-_Avoid_: Work queue, mutable task list
+_Avoid_: Work queue, mutable task list, outcome ledger
 
 **Agents tab**:
 An extension-owned Herdr tab grouping delegated child panes in an existing
