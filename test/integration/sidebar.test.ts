@@ -517,7 +517,7 @@ describe("sidebar plugin on isolated Herdr", {
 		}
 	});
 
-	it("stops marking once the child's Pi exits or is suspended, and a later occupant is never hidden", async () => {
+	it("retires when the child's Pi exits or another Pi takes the pane; a suspended child stays marked", async () => {
 		const live = panes.get("child-live") ?? "";
 		const occupant = occupants.find((entry) => entry.pane === live);
 		assert.ok(occupant);
@@ -559,8 +559,10 @@ describe("sidebar plugin on isolated Herdr", {
 		});
 		assert.equal(await paneToken(live), undefined);
 
-		// A suspended child is still alive, but Herdr drops its session once the
-		// pane is back at its shell, so another agent there is never hidden.
+		// Herdr 0.9.4 and later keep a suspended Pi as the pane's agent session
+		// until it resumes, exits, or another Pi takes the pane. So the marker
+		// stays live while the child is suspended, and retires once a
+		// replacement Pi owns the pane.
 		const suspended = await startPi(live, "child-suspends");
 		const second = markers.attach({
 			surface: live,
@@ -568,19 +570,38 @@ describe("sidebar plugin on isolated Herdr", {
 		});
 		await waitForToken(live, "live");
 		target.cli(["pane", "send-keys", live, "ctrl+z"]);
-		await waitForSession(live, undefined);
-		await startOccupant(live, "child-reuse", "working");
+		for (
+			let i = 0;
+			i < 100 && linuxProcessProbe.stat(suspended.pid)?.state !== "T";
+			i++
+		)
+			await delay(100);
+		assert.equal(linuxProcessProbe.stat(suspended.pid)?.state, "T");
 		clock.now += DELEGATED_MARKER_RENEW_MS;
-		marker.renew();
+		second.renew();
+		await second.settled();
+		assert.equal(second.kind, "live");
+		assert.equal(await paneSession(live), suspended.sessionFile);
+		assert.equal(await paneToken(live), "live");
+		await waitForRendered(
+			(lines) => header(lines) === "focus" && !shows(lines, "pi"),
+			"suspended child still hidden under Focus",
+		);
+
+		const replacement = await startPi(live, "child-replaces");
+		clock.now += DELEGATED_MARKER_RENEW_MS;
 		second.renew();
 		await second.settled();
 		assert.equal(second.kind, "retired");
-		assert.ok(ownsPi(suspended), "the suspended child is still alive");
+		await waitForToken(live, undefined);
 		await waitForRendered(
-			(lines) => header(lines) === "focus" && shows(lines, "child-reuse"),
-			"replacement occupant visible under Focus",
+			(lines) => header(lines) === "focus" && shows(lines, "pi"),
+			"replacement Pi visible under Focus",
 		);
-		assert.equal(await paneToken(live), undefined);
+
+		await killPi(replacement);
+		await killPi(suspended);
+		assert.equal(ownsPi(suspended), false);
 		assert.equal((await invoke("all")).exit_code, 0);
 	});
 
