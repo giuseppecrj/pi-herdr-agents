@@ -15,6 +15,10 @@ import {
 	type SubagentSessionMode,
 } from "../../maestro/core/roles/discovery.ts";
 import { THINKING_LEVELS } from "../../maestro/core/routing.ts";
+import {
+	ACCEPT_MAX_RETRIES,
+	ACCEPT_MAX_TIMEOUT_SEC,
+} from "../../maestro/core/accept.ts";
 import type { TaskPreferences } from "../../maestro/core/config/task-model-types.ts";
 import { getAgentConfigDir } from "./config-path.ts";
 
@@ -132,6 +136,43 @@ export const SubagentParams = Type.Object({
 			description:
 				"Keep this stable specialist session alive between turn-based tasks. Persistent agents accept follow-up work only through subagent_send.",
 		}),
+	),
+	accept: Type.Optional(
+		Type.Object(
+			{
+				run: Type.String({
+					minLength: 1,
+					description:
+						"Shell command run with `sh -c`. Exit 0 passes. The child runs it before it finishes and retries on failure; then the host re-runs it in the child's checkout (the worktree for worktree children) and that run decides the verdict.",
+				}),
+				maxRetries: Type.Optional(
+					Type.Integer({
+						minimum: 0,
+						maximum: ACCEPT_MAX_RETRIES,
+						description:
+							"Extra child turns after a failed check, each with the failing output. Default 1.",
+					}),
+				),
+				timeoutSec: Type.Optional(
+					Type.Integer({
+						minimum: 1,
+						maximum: ACCEPT_MAX_TIMEOUT_SEC,
+						description:
+							"Per-run timeout in seconds. Default 600. A timeout is verdict `error`.",
+					}),
+				),
+				paths: Type.Optional(
+					Type.Array(Type.String({ minLength: 1 }), {
+						description:
+							"Repo-relative check files (for example tests). The delivery reports any the child changed; the verdict is unchanged.",
+					}),
+				),
+			},
+			{
+				description:
+					"Optional accept check. The delivery carries `Check: <verdict>` from the closed set accepted, rejected, error, skipped, none. Only auto-exit, non-persistent children support it.",
+			},
+		),
 	),
 	interactive: Type.Optional(
 		Type.Boolean({

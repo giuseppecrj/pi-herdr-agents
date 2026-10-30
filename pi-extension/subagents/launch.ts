@@ -14,6 +14,7 @@ import {
 	type ModelConfig,
 } from "../../maestro/core/config/model-config.ts";
 import { getAgentConfigDir } from "./config-path.ts";
+import { normalizeAcceptSpec } from "../../maestro/core/accept.ts";
 import type { PaneConfig } from "../../maestro/core/config/pane-config.ts";
 import type { SubagentRuntime } from "./state.ts";
 import {
@@ -105,6 +106,10 @@ export function createLaunchPlanner({
 				role: params.agent ?? "",
 				cwd: options.origin.cwd,
 				worktree: params.worktree ?? undefined,
+				...(params.accept
+					? { accept: normalizeAcceptSpec(params.accept) }
+					: {}),
+				...(params.model ? { requestedModel: params.model } : {}),
 				session: { mode: resolveEffectiveSessionMode(params, agentDefs) },
 				behavior: {
 					skills: effectiveSkills

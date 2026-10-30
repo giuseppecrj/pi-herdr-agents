@@ -20,8 +20,13 @@ import {
 	formatVisibleAgentDefinitions,
 	formatAgentDiagnostics,
 	resolveEffectivePersistent,
+	resolveEffectiveAutoExit,
 	loadAgentDefaults,
 } from "./catalog.ts";
+import {
+	acceptLaunchRefusal,
+	normalizeAcceptSpec,
+} from "../../maestro/core/accept.ts";
 import { getFirstText, launchDiagnosticsText } from "./presentation.ts";
 import {
 	encodeHostValue,
@@ -198,10 +203,23 @@ export function registerSubagentTool(
 					};
 				}
 
-				const persistent = resolveEffectivePersistent(
-					params,
-					params.agent ? loadAgentDefaults(params.agent, runtime.pi) : null,
-				);
+				const agentDefs = params.agent
+					? loadAgentDefaults(params.agent, runtime.pi)
+					: null;
+				const persistent = resolveEffectivePersistent(params, agentDefs);
+				if (params.accept) {
+					// Before any Herdr resource: v1 checks only auto-exit ordinary runs.
+					normalizeAcceptSpec(params.accept);
+					const refusal = acceptLaunchRefusal({
+						persistent,
+						autoExit: resolveEffectiveAutoExit(params, agentDefs),
+					});
+					if (refusal)
+						return {
+							content: [{ type: "text", text: `Error: ${refusal}` }],
+							details: { error: "accept-unsupported" },
+						};
+				}
 				const capError = persistent ? persistentCapacityError() : undefined;
 				if (capError) {
 					return {

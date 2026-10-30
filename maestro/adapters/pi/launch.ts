@@ -16,6 +16,7 @@ import {
 	parseDeclaredSkills,
 } from "../../core/declared-skills.ts";
 import { shellQuote } from "../../core/shell.ts";
+import { ACCEPT_FILE_ENV, type AcceptSpec } from "../../core/accept.ts";
 import { WorktreeProvisioningError } from "../../core/surface-provider.ts";
 import type {
 	FailedWorktreeManifest,
@@ -58,6 +59,8 @@ export interface FreshPiLaunchRequest {
 	agent?: string;
 	cwd?: string;
 	worktree?: { branch: string; base?: string } | null;
+	/** Written to a spec file the child reads; a handoff carries none. */
+	accept?: AcceptSpec;
 	fork?: boolean;
 	handoff?: { leafId: string };
 	surface?: string;
@@ -128,6 +131,10 @@ export interface PiRunningChild {
 	interactive: boolean;
 	runtimePlan: ResolvedRuntimePlan | undefined;
 	worktree?: WorktreeLaunch;
+	/** Where the child runs: the worktree root or the ordinary cwd. */
+	cwd?: string;
+	/** The validated accept check the parent re-runs in `cwd`. */
+	accept?: AcceptSpec;
 	lifecycle: SubagentLifecycle;
 	persistent?: boolean;
 	logicalId?: string;
@@ -182,6 +189,7 @@ interface PreparedSession extends PreparedSurface {
 interface PreparedArtifacts extends PreparedSession {
 	taskArg: string;
 	systemPromptFile?: string;
+	acceptFile?: string;
 }
 
 /**
@@ -591,7 +599,21 @@ function prepareTaskArtifacts(
 		mkdirSync(dirname(systemPromptFile), { recursive: true });
 		writeFileSync(systemPromptFile, identityInSystemPrompt, "utf8");
 	}
-	return { ...session, taskArg, systemPromptFile };
+	// A file, never the raw command in the launch environment or script.
+	let acceptFile: string | undefined;
+	if (request.accept && !request.handoff) {
+		acceptFile = join(
+			resolved.artifactDir,
+			`context/${safeName(request.name) || "subagent"}-accept-${resolved.id}.json`,
+		);
+		mkdirSync(dirname(acceptFile), { recursive: true });
+		writeFileSync(
+			acceptFile,
+			JSON.stringify({ version: 1, ...request.accept }),
+			"utf8",
+		);
+	}
+	return { ...session, taskArg, systemPromptFile, acceptFile };
 }
 
 function buildPiCommand(
@@ -652,6 +674,8 @@ function buildPiCommand(
 		if (request.agent)
 			env.push(`PI_SUBAGENT_AGENT=${shellQuote(request.agent)}`);
 		env.push(`PI_SUBAGENT_AUTO_EXIT=${request.behavior.autoExit ? "1" : "0"}`);
+		if (artifacts.acceptFile)
+			env.push(`${ACCEPT_FILE_ENV}=${shellQuote(artifacts.acceptFile)}`);
 		// Names only, always set: the child's own Pi decides which skills exist.
 		env.push(
 			`${DECLARED_SKILLS_ENV}=${shellQuote(formatDeclaredSkillsEnv(parseDeclaredSkills(request.behavior.skills)))}`,
@@ -729,6 +753,10 @@ function createRunningChild(
 		interactive: resolved.request.behavior.interactive,
 		runtimePlan: resolved.request.runtimePlan,
 		worktree: artifacts.worktree,
+		cwd: artifacts.targetCwd,
+		...(resolved.request.accept && !resolved.request.handoff
+			? { accept: resolved.request.accept }
+			: {}),
 		lifecycle: createLifecycle(resolved.startTime),
 		processIdentityFile: artifacts.processIdentityFile,
 	};

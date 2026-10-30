@@ -50,6 +50,9 @@ export interface SpawnOptions {
 	tools?: string[];
 	// pi-herdr-agents extension
 	systemPrompt?: string;
+	/** Validated accept check for the child's own loop and the parent re-check. */
+	// pi-herdr-agents extension
+	accept?: Task["accept"];
 }
 
 // pi-herdr-agents extension
