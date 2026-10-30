@@ -181,6 +181,7 @@ Defaults and behavior the schema does not carry:
 - `thinking` defaults to the role's thinking level when set, otherwise the parent's.
 - `cwd` is the source repository when `worktree` is set (see [Role Folders](roles.md#role-folders)); `worktree.base` defaults to committed `HEAD`.
 - `fork`: `true` forces fork, `false` forces standalone. Omit to inherit the agent `session-mode` frontmatter.
+- `accept` defaults: `maxRetries` 1 (at most 5), `timeoutSec` 600 (at most 3,600), `paths` none. It is refused before launch for a persistent or non-auto-exit child. See [Accept checks](#accept-checks).
 
 A bare spawn's `systemPrompt` is not passed to Pi as a system prompt. The host
 prepends it as a role block to the child's first message, which is delivered
@@ -222,6 +223,39 @@ Successful, failed, and help-requesting worktree runs retain their workspace and
 An ownership manifest is written under the parent session's `artifacts/<session-id>/worktree-runs/` directory before Herdr creates resources. V1 does not automatically recover watchers after a full process restart, and `subagent_resume` does not reattach the managed worktree lifecycle.
 
 The extension does **not** push, create a PR, merge, cherry-pick, or remove the worktree or branch automatically. For task selection, lifecycle states, review commands, failure recovery, and safe cleanup, read [Worktree subagents](worktree-subagents.md). The [research report](research/worktree-subagent-orchestration.md) records the rationale and deferred roadmap.
+
+### Accept checks
+
+Pass `accept` to turn a finished run into an accepted or rejected outcome. The host runs the caller's command; it ships no checks and no default command ([ADR-0017](adr/0017-accept-check.md)).
+
+```typescript
+subagent({
+  name: "fix-parser",
+  model: "<provider>/<mid-tier-id>",
+  thinking: "medium",
+  worktree: { branch: "fix/parser" },
+  task: "Fix the date parser and commit",
+  accept: { run: "npm test", maxRetries: 1, paths: ["test"] },
+});
+```
+
+1. **Child loop.** When the child's turn ends normally, it runs `sh -c <run>` in its own checkout. On a failure with retries left, the last 4,000 characters of output go back to it as a check-failure message, and it works one more turn. With the default `maxRetries: 1` the child runs the check at most twice. The child reads the spec from a file named by `PI_SUBAGENT_ACCEPT_FILE`; the command is never in the launch environment or script.
+2. **Parent re-check.** After the child exits, the parent runs the check once more, and that run alone decides the verdict. The child's own report is evidence. It runs only for a completed, uncancelled, exit-0 run that did not ask for help, in the worktree for a worktree child and in the child's `cwd` otherwise. The check's environment drops every `PI_SUBAGENT_*` variable. A timeout sends SIGTERM to the check's process group, then SIGKILL after 5 seconds. Callers cannot skip this re-check; use `timeoutSec` for a slow suite.
+3. **Delivery.** Every result and help request carries a `Check:` host line directly under its status line, outside the `subagent_report` block. Unchecked runs read `Check: none`.
+
+| Verdict | Meaning |
+| --- | --- |
+| `accepted` | The parent re-check exited 0. |
+| `rejected` | The parent re-check exited non-zero. |
+| `error` | The parent re-check gave no answer: it timed out, was killed by a signal, its directory was missing, or it could not start. |
+| `skipped` | A check was requested, but the run was cancelled, asked for help, hit a provider error, or exited non-zero. |
+| `none` | No check was requested. |
+
+Example lines: `Check: accepted (2 tries)`, `Check: rejected after 2 tries (exit 1)`, `Check: rejected (child reported a pass; parent re-check exit 1)`, `Check: error (timed out after 600s)`, `Check: skipped (cancelled)`. The line adds `· shared checkout` when the re-check ran in an ordinary child's cwd, which other writers and the user may share, and `· check files changed by the child: …` when a worktree child changed files under `paths` (encoded names, from the handoff's changed and untracked files). A changed check file never changes the verdict; the caller decides what it means. For `rejected` and `error`, the last 1,500 characters of the re-check output follow the report as one encoded host line, `Check output (last 1,500 characters, encoded): …`. Structured details carry `accept` with the verdict, tries, exit code, timeout, the command's SHA-256, the re-check directory, changed check files, and up to 4,000 raw output characters.
+
+A rejected verdict changes neither the sidebar status nor the worktree manifest state, and it never starts a model fallback: a rejected run is a completed negative result. Each fallback attempt is a fresh child with a fresh retry budget. A cancel during the parent re-check stops it and delivers the cancelled result with verdict `skipped`. `subagent_resume` and `/worktree` handoffs carry no check, so they report `Check: none`.
+
+Each model attempt also appends one line to the [outcome ledger](configuration.md#outcome-ledger).
 
 ## Persistent specialists
 
@@ -270,7 +304,7 @@ The cancel intent is recorded before anything is aborted or killed. From then on
 | `unconfirmed` | Termination failed (the error is reported). The run stays live, owned, and supervised, and nothing is delivered or cleaned up. Call `subagent_cancel` again to retry. |
 | `already-terminal` | The run already took a natural result or was retired; nothing was cancelled. |
 
-Repeated cancels join an in-flight termination and keep the first request time. The parent receives exactly one `subagent_result` whose details carry `error: "cancelled"` and a `cancellation` record (`requestedAt`, `termination`, `confirmedAt`). Its message says the run was cancelled and lists any models already attempted. It is never presented as a provider failure. A child's natural result taken before the cancel stays authoritative. A cancel while a provider error is still eligible for fallback wins and stops that fallback.
+Repeated cancels join an in-flight termination and keep the first request time. The parent receives exactly one `subagent_result` whose details carry `error: "cancelled"` and a `cancellation` record (`requestedAt`, `termination`, `confirmedAt`). Its message says the run was cancelled and lists any models already attempted. It is never presented as a provider failure. A child's natural result taken before the cancel stays authoritative. A cancel while a provider error is still eligible for fallback wins and stops that fallback. A cancel while the parent re-runs an [accept check](#accept-checks) stops that check and delivers the cancelled result with `Check: skipped (cancelled)`.
 
 Termination follows surface ownership:
 

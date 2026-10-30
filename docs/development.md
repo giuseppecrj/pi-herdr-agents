@@ -49,6 +49,14 @@ provider; fakes are for conformance tests only.
   (resumed transaction), `launch-command.ts` (shared child command-line
   pieces), and `launch-operations.ts` (the `PiLaunchOperations` seam, its
   surface-backed implementation, and process-identity capture).
+- The accept check ([ADR-0017](adr/0017-accept-check.md)):
+  `maestro/core/accept.ts` (spec validation, the closed verdict set, the
+  `Check:` detail text, and the outcome-ledger line),
+  `maestro/adapters/pi/accept-runner.ts` (`sh -c` with a timeout and
+  process-group termination), `maestro/adapters/pi/child/accept-check.ts` (the
+  child's `agent_before_settle` retry loop), and
+  `maestro/runtime/accept-recheck.ts` (the parent re-check `finalize` runs and
+  the outcome-ledger append).
 - `maestro/surfaces/herdr/` — `HerdrSurfaceProvider`, Herdr CLI driver,
   terminal scripts/placement, and `herdr-socket.ts`, the bounded socket
   client for pane metadata. The CLI driver is `herdr-cli.ts` (exec, JSON,

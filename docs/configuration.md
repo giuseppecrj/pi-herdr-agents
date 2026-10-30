@@ -35,11 +35,12 @@ Create it by copying the installed package's `config.json.example`, or run
   },
   "guidelines": {
     "launchRoster": true
-  }
+  },
+  "outcomeLedger": true
 }
 ```
 
-If `config.json` is absent, status, role, pane, spawning, persistent-specialist, supervision, and guidelines settings fall back to `config.json.example`.
+If `config.json` is absent, status, role, pane, spawning, persistent-specialist, supervision, guidelines, and outcome-ledger settings fall back to `config.json.example`.
 Model routing does not read the example: no model overrides apply until a real
 `config.json` exists.
 
@@ -228,6 +229,20 @@ Set `spawning.maxDepth` to the deepest child any launch may create. It must be a
 The limit is enforced by the host on every child launch path: `subagent` (including `agent`, persistent, and `worktree` launches), `subagent_resume`, and `/subagent`. It applies to all roles, not only `self-spawn` ones. A refused launch returns an actionable error before Herdr creates a pane or workspace. A `/worktree` handoff is not a child: it continues the parent's conversation at the parent's own depth, so it is allowed at the limit and refused only when the parent's depth is unknown.
 
 Every launched child receives `PI_SUBAGENT_DEPTH=<parent depth + 1>`, and a `/worktree` handoff receives the parent's own depth, set explicitly in the launch command so a value left in the pane's shell never reaches the new session. A parent reads its own depth from that variable; an absent variable means a top-level session (depth `0`). A present value that is not a canonical non-negative integer (for example empty, `abc`, `-1`, or `1.5`) is treated as an unknown depth: the session is treated as already at the limit and every launch is refused until the variable is unset. It never resets the count to `0`. Run `/reload` after changing `spawning.maxDepth`.
+
+## Outcome ledger
+
+The parent appends one JSON line per model attempt to `$PI_CODING_AGENT_DIR/herdr-agents/outcomes.jsonl`, defaulting to `~/.pi/agent/herdr-agents/outcomes.jsonl`. A fallback model attempt gets its own line. Checked and unchecked runs are both recorded, so later routing tools have data from every run; nothing reads the file yet.
+
+```json
+{"v":1,"at":"2026-10-30T16:52:03.000Z","runId":"a1b2c3d4","attempt":1,"role":"worker","requestedModel":"task:implementation","category":"implementation","model":"provider/model-id","thinking":"medium","elapsedSec":252,"outcome":"completed","checkTries":2,"verdict":"rejected","checkHash":"sha256:9f2c…"}
+```
+
+`outcome` is `completed`, `failed`, `help`, or `cancelled`; `verdict` is one of the [accept-check verdicts](tools.md#accept-checks) (`none` without a check). `role` is absent for a bare launch, `category` appears only for a `task:<category>` model request, and `checkTries` and `checkHash` only when a check was requested. A line never holds the task text, the check output, environment values, or the check command: `checkHash` is the SHA-256 of the command, so runs of the same check group together without it being readable. The file is not rotated. A write failure never changes or delays a delivery.
+
+This is not the persistent specialists' delivery ledger, which records task dispatch per session generation.
+
+The ledger is on by default. Set top-level `outcomeLedger` to `false` to stop writing it; any value other than `true` or `false` fails configuration loading. Run `/reload` after changing it.
 
 ## Launch roster
 

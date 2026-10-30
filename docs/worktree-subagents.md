@@ -136,6 +136,8 @@ The parent receives the normal child summary plus:
 
 `clean` means there are no staged, unstaged, or untracked files. It does **not** mean the branch has no commits or diff relative to its base.
 
+With an [accept check](tools.md#accept-checks), the parent captures this handoff first and then re-runs the check in the worktree root, so build output the check writes is not in the reported state. The `Check:` line lists any changed or untracked files under the check's `paths`. A rejected verdict does not change the manifest state; a cancel during the re-check records `cancelled`.
+
 If Git inspection fails, SHA/count/state/file fields are reported as unknown rather than guessed, and the warning is included in the handoff. Inspect the retained workspace directly before integrating or deleting it. Every retained handoff points to `/worktree remove` and `worktree_remove`, with the raw Herdr command as an operator override after independent safety checks.
 
 ## Parallel pull-request review without new worktrees
