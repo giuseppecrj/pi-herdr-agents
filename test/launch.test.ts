@@ -5,6 +5,7 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -94,6 +95,25 @@ function withFixture(
 	return Promise.resolve(run(value)).finally(() => {
 		rmSync(value.root, { recursive: true, force: true });
 	});
+}
+
+function writeSkill(dir: string, name: string, body: string): string {
+	const skillDir = join(dir, name);
+	mkdirSync(skillDir, { recursive: true });
+	const file = join(skillDir, "SKILL.md");
+	writeFileSync(
+		file,
+		`---\nname: ${name}\ndescription: ${name} skill\n---\n\n${body}\n`,
+	);
+	return file;
+}
+
+function trustProject(agentDir: string, project: string): void {
+	mkdirSync(agentDir, { recursive: true });
+	writeFileSync(
+		join(agentDir, "trust.json"),
+		JSON.stringify({ [realpathSync(project)]: true }),
+	);
 }
 
 function initializeGitRepository(cwd: string): void {
@@ -569,6 +589,12 @@ describe("Pi launch", () => {
 		await withFixture(async ({ request, project, agentDir }) => {
 			const projectAgentDir = join(project, ".pi", "agent");
 			mkdirSync(projectAgentDir, { recursive: true });
+			const skillFile = writeSkill(
+				join(project, ".pi", "skills"),
+				"tdd",
+				"# TDD\nWrite the failing test first.",
+			);
+			trustProject(agentDir, project);
 			const events: string[] = [];
 			const closed: string[] = [];
 			let command = "";
@@ -629,14 +655,23 @@ describe("Pi launch", () => {
 					`${PI_LAUNCH_SESSION_ENV}=${expectedShellQuote(running.sessionFile)}`,
 				),
 			);
-			assert.match(command, /'' '\/skill:tdd' '@[^']+\.md'/);
+			assert.doesNotMatch(command, /\/skill:/);
+			assert.match(command, /--tools 'read,bash,caller_ping' '@[^']+\.md';/);
 
 			const taskPath = command.match(/'@([^']+\.md)'/)?.[1];
 			assert.ok(taskPath, "expected artifact-backed task delivery");
-			assert.match(
-				readFileSync(taskPath, "utf8"),
-				/Complete your task autonomously\.[\s\S]*Implement the bounded change\./,
+			const taskArtifact = readFileSync(taskPath, "utf8");
+			assert.ok(
+				taskArtifact.startsWith(
+					`<skill name="tdd" location="${skillFile}">\nReferences are relative to ${join(project, ".pi", "skills", "tdd")}.\n\n# TDD\nWrite the failing test first.\n</skill>`,
+				),
+				"the declared skill arrives in the first request",
 			);
+			assert.match(
+				taskArtifact,
+				/<\/skill>[\s\S]*Complete your task autonomously\.[\s\S]*Implement the bounded change\./,
+			);
+			assert.equal(running.launchDiagnostics, undefined);
 			const systemPromptPath = command.match(
 				/--append-system-prompt '([^']+\.md)'/,
 			)?.[1];
@@ -1080,6 +1115,7 @@ describe("Pi launch", () => {
 					...request,
 					behavior: {
 						...request.behavior,
+						skills: undefined,
 						sessionMode: "fork",
 					},
 				},
@@ -1118,6 +1154,108 @@ describe("Pi launch", () => {
 				/PI_SUBAGENT_ID='child-1'/,
 				"forked children receive the same child-context hint as standalone children",
 			);
+		});
+	});
+
+	it("delivers a fork's declared skills through the task artifact, never argv", async () => {
+		await withFixture(async ({ request, agentDir }) => {
+			const body = `Large skill body marker. ${"z".repeat(60 * 1024)}`;
+			writeSkill(join(agentDir, "skills"), "tdd", body);
+			let command = "";
+			await launchPiSubagent(
+				{
+					...request,
+					task: "Forked task.",
+					behavior: { ...request.behavior, sessionMode: "fork" },
+				},
+				{
+					createPane: () => "pane-fork-skills",
+					createWorktree: () => {
+						throw new Error("unexpected worktree creation");
+					},
+					waitForShellReady: async () => {},
+					runScript: (_surface, value, options) => {
+						command = value;
+						return options.scriptPath;
+					},
+					closePane: () => {},
+				},
+			);
+
+			assert.ok(
+				command.length < 4096,
+				`fork command line stays small (${command.length} bytes)`,
+			);
+			assert.doesNotMatch(command, /Large skill body marker/);
+			assert.doesNotMatch(command, /\/skill:/);
+			const taskPath = command.match(/'@([^']+\.md)'/)?.[1];
+			assert.ok(taskPath, "a fork with skills uses the task artifact");
+			const taskArtifact = readFileSync(taskPath, "utf8");
+			assert.match(taskArtifact, /^<skill name="tdd" location="[^"]+">/);
+			assert.match(taskArtifact, /Large skill body marker/);
+			assert.match(taskArtifact, /<\/skill>\n\nForked task\.$/);
+		});
+	});
+
+	it("launches without a declared skill that is not found and reports it", async () => {
+		await withFixture(async ({ request }) => {
+			let command = "";
+			const running = await launchPiSubagent(
+				{
+					...request,
+					behavior: { ...request.behavior, skills: "no-such-skill-anywhere" },
+				},
+				{
+					createPane: () => "pane-missing-skill",
+					createWorktree: () => {
+						throw new Error("unexpected worktree creation");
+					},
+					waitForShellReady: async () => {},
+					runScript: (_surface, value, options) => {
+						command = value;
+						return options.scriptPath;
+					},
+					closePane: () => {},
+				},
+			);
+
+			assert.match(
+				running.launchDiagnostics?.join("\n") ?? "",
+				/"no-such-skill-anywhere" was not found/,
+			);
+			const taskPath = command.match(/'@([^']+\.md)'/)?.[1];
+			assert.ok(taskPath);
+			assert.match(
+				readFileSync(taskPath, "utf8"),
+				/not found: no-such-skill-anywhere/,
+			);
+		});
+	});
+
+	it("refuses a launch whose declared skill exceeds the per-skill limit", async () => {
+		await withFixture(async ({ request, agentDir }) => {
+			writeSkill(join(agentDir, "skills"), "tdd", "x".repeat(65 * 1024));
+			const closed: string[] = [];
+			let ran = false;
+			await assert.rejects(
+				launchPiSubagent(request, {
+					createPane: () => "pane-oversize",
+					createWorktree: () => {
+						throw new Error("unexpected worktree creation");
+					},
+					waitForShellReady: async () => {},
+					runScript: (_surface, _value, options) => {
+						ran = true;
+						return options.scriptPath;
+					},
+					closePane: (pane) => {
+						closed.push(pane);
+					},
+				}),
+				/Skill "tdd" .* over the 64 KiB per-skill limit/,
+			);
+			assert.equal(ran, false, "Pi never starts");
+			assert.deepEqual(closed, ["pane-oversize"]);
 		});
 	});
 
