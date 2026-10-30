@@ -39,6 +39,7 @@ interface ToolCallArguments {
 	runId?: string;
 	path?: string;
 	command?: string;
+	accept?: { run: string; maxRetries?: number };
 }
 
 interface ToolCall {
@@ -558,6 +559,53 @@ async function cancelScenarioResponse(
 	return { text: `CANCEL_SCENARIO_DONE_${id}` };
 }
 
+/**
+ * Accept check: the parent launches a child with a check that a file exists.
+ * The child first answers with text only, so its first check fails. In
+ * `success` mode it creates the file once it reads the check-failure message,
+ * then answers again; in `reject` mode it never does. Each tool call is
+ * one-shot: it is issued only while the retry message is the latest input.
+ */
+function acceptScenarioResponse(request: ChatRequest): ResponsePlan | null {
+	const source = requestText(request);
+	const match = source.match(
+		/INTEGRATION_ACCEPT:([A-Za-z0-9_-]+):(success|reject) ACCEPT_FILE:(\S+)/,
+	);
+	if (!match) return null;
+	const [, id, mode, file] = match;
+	const names = toolNames(request);
+	const lastRole = request.messages?.at(-1)?.role;
+	if (names.has("subagent")) {
+		if (new RegExp(`Sub-agent "Accept-${id}" (completed|failed)`).test(source))
+			return { text: `ACCEPT_SCENARIO_DONE_${id}` };
+		if (source.includes(`Sub-agent "Accept-${id}" launched`))
+			return { text: `ACCEPT_SCENARIO_WAITING_${id}` };
+		return {
+			toolCalls: [
+				{
+					name: "subagent",
+					arguments: {
+						name: `Accept-${id}`,
+						agent: "test-echo",
+						task: `INTEGRATION_ACCEPT:${id}:${mode} ACCEPT_FILE:${file} Finish the task.`,
+						accept: { run: `test -f '${file}'`, maxRetries: 1 },
+					},
+				},
+			],
+		};
+	}
+	if (lastRole === "tool") return { text: `ACCEPT_CHILD_FIXED_${id}` };
+	if (
+		mode === "success" &&
+		lastUserText(request).includes("The accept check") &&
+		names.has("bash")
+	)
+		return {
+			toolCalls: [{ name: "bash", arguments: { command: `touch '${file}'` } }],
+		};
+	return { text: `ACCEPT_CHILD_ANSWER_${id}` };
+}
+
 async function planResponse(request: ChatRequest): Promise<ResponsePlan> {
 	const names = toolNames(request);
 	const source = requestText(request);
@@ -575,6 +623,9 @@ async function planResponse(request: ChatRequest): Promise<ResponsePlan> {
 
 	const multiWave = multiWaveCoordinatorResponse(request);
 	if (multiWave) return multiWave;
+
+	const acceptScenario = acceptScenarioResponse(request);
+	if (acceptScenario) return acceptScenario;
 
 	const resumed = !/Call the subagent_resume tool/i.test(user)
 		? user.match(/RESUME_FOLLOWUP_INPUT:\s*([a-z0-9]+)/i)?.[1]

@@ -51,6 +51,7 @@ import {
 	runInPane,
 	shellQuote,
 	PI_TIMEOUT,
+	USE_TEST_PROVIDER,
 	type TestEnv,
 } from "./harness.ts";
 
@@ -277,6 +278,84 @@ for (const backend of backends) {
 				false,
 			);
 		});
+
+		for (const mode of ["success", "reject"] as const) {
+			it(`delivers an accept-check verdict (${mode}) with one retry and one outcome-ledger line`, {
+				skip: !USE_TEST_PROVIDER && "needs the deterministic provider",
+			}, async () => {
+				const id = uniqueId();
+				const file = join(env.dir, `accept-${id}.done`);
+				const parentSession = join(env.dir, `accept-parent-${id}.jsonl`);
+				const ledger = join(
+					env.dir,
+					".pi",
+					"agent",
+					"herdr-agents",
+					"outcomes.jsonl",
+				);
+				const surface = createTrackedSurface(env, `accept-${id}`);
+				await waitForPaneReady(surface);
+				startPi(
+					surface,
+					env.dir,
+					`INTEGRATION_ACCEPT:${id}:${mode} ACCEPT_FILE:${file}`,
+					{ extraArgs: `--session ${shellQuote(parentSession)}` },
+				);
+				const results = () =>
+					existsSync(parentSession)
+						? readFileSync(parentSession, "utf8")
+								.trim()
+								.split("\n")
+								.filter(Boolean)
+								.map((line) => JSON.parse(line))
+								.filter(
+									(entry) =>
+										entry.type === "custom_message" &&
+										entry.customType === "subagent_result",
+								)
+						: [];
+				await waitForObservation(
+					() => results().length > 0,
+					`the accept ${mode} delivery`,
+				);
+				const [result, ...extra] = results();
+				assert.deepEqual(extra, []);
+				assert.match(
+					result.content,
+					mode === "success"
+						? /\nCheck: accepted \(2 tries\) · shared checkout\n/
+						: /\nCheck: rejected after 2 tries \(exit 1\) · shared checkout\n/,
+				);
+				assert.equal(
+					result.details.accept.verdict,
+					mode === "success" ? "accepted" : "rejected",
+				);
+				// The child session holds exactly one check-failure message.
+				const childSession = result.details.sessionFile;
+				const retries = readFileSync(childSession, "utf8")
+					.trim()
+					.split("\n")
+					.map((line) => JSON.parse(line))
+					.filter(
+						(entry) =>
+							entry.type === "custom_message" &&
+							entry.customType === "subagent-accept-check",
+					);
+				assert.equal(retries.length, 1);
+				await waitForObservation(
+					() => existsSync(ledger),
+					"the outcome ledger",
+				);
+				const lines = readFileSync(ledger, "utf8")
+					.trim()
+					.split("\n")
+					.map((line) => JSON.parse(line));
+				assert.equal(lines.length, 1, "one line for the one model attempt");
+				assert.equal(lines[0].verdict, result.details.accept.verdict);
+				assert.equal(lines[0].checkTries, 2);
+				assert.doesNotMatch(readFileSync(ledger, "utf8"), /test -f/);
+			});
+		}
 
 		it("runs a non-auto-exit coordinator through discovery and synthesis waves", async () => {
 			const id = uniqueId();
