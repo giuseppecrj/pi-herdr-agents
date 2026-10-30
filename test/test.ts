@@ -5439,8 +5439,10 @@ describe("guidelines configuration", () => {
 		const shippedExample = fileURLToPath(
 			new URL("../config.json.example", import.meta.url),
 		);
-		assert.deepEqual(loadGuidelinesConfig(tmpdir(), shippedExample), {
-			launchRoster: true,
+		withTempDir((dir) => {
+			assert.deepEqual(loadGuidelinesConfig(dir, shippedExample), {
+				launchRoster: true,
+			});
 		});
 		withTempDir((dir) => {
 			const examplePath = join(dir, "config.json.example");
