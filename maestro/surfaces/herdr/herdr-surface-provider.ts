@@ -19,11 +19,6 @@ import {
 	createHerdrWorktree,
 	focusHerdrWorkspace,
 	reportOpenedPrimaryWorkspace as reportHerdrOpenedPrimaryWorkspace,
-	getHerdrPaneProcessInfo,
-	getHerdrPaneProcessInfoAsync,
-	inspectHerdrPane,
-	isHerdrAvailable,
-	listHerdrPanes,
 	listHerdrWorktrees,
 	readHerdrScreenAsync,
 	removeHerdrWorktree,
@@ -31,9 +26,16 @@ import {
 	renameHerdrWorkspace,
 	sendHerdrCommand,
 	sendHerdrKeys,
+} from "./herdr.ts";
+import {
+	getHerdrPaneProcessInfo,
+	getHerdrPaneProcessInfoAsync,
+	inspectHerdrPane,
+	listHerdrPanes,
 	waitForHerdrPaneAbsence,
 	waitForHerdrShellReady,
-} from "./herdr.ts";
+} from "./herdr-pane.ts";
+import { isHerdrAvailable } from "./herdr-cli.ts";
 import { runScriptInPane, terminalSetupHint } from "./terminal.ts";
 
 export class HerdrSurfaceProvider implements SurfaceProvider {
