@@ -24,7 +24,7 @@ import type {
 	PiLaunchInput,
 	PiRunRecord,
 	PiCompletedMetadata,
-} from "../../maestro/runtime/pi-run-session.ts";
+} from "../../maestro/runtime/pi-run-session-types.ts";
 import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
 import { launchOperationsFromSurface } from "../../maestro/adapters/pi/launch.ts";
 import { discoverAgentCatalog } from "../../maestro/core/roles/discovery.ts";
