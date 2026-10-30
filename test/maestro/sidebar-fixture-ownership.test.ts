@@ -205,14 +205,21 @@ describe("sidebar fixture pane quiescing", {
 		const scope = { pane, shellPid: shell.pid, socket: undefined };
 		try {
 			let request: number | undefined;
-			for (let attempt = 0; attempt < 100 && !request; attempt++) {
+			let spawned = 0;
+			for (
+				let attempt = 0;
+				attempt < 100 && (!request || spawned <= 2);
+				attempt++
+			) {
 				await delay(20);
-				request = paneProcesses(scope).find((entry) =>
+				const processes = paneProcesses(scope);
+				spawned = processes.length;
+				request = processes.find((entry) =>
 					entry.argv0.endsWith("/herdr"),
 				)?.pid;
 			}
 			assert.ok(request, "the stand-in request started");
-			assert.ok(paneProcesses(scope).length > 2, "the pane kept spawning");
+			assert.ok(spawned > 2, "the pane kept spawning");
 			const startedAt = Date.now();
 			assert.deepEqual(await quiescePane(scope, 10_000), []);
 			assert.ok(
