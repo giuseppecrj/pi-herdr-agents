@@ -16,6 +16,8 @@ provider; fakes are for conformance tests only.
   types and reload slots; the role catalog, `subagent` parameters, and launch
   policy; the parent message model, its one serializer, and the child-report
   envelope.
+- `pi-extension/subagents/tool-boundary.ts` — the one registration boundary
+  that encodes errors thrown by any host tool or command.
 - `pi-extension/subagents/observation.ts`, `widgets.ts`, `controls.ts`,
   `persistent.ts`, `delivery.ts`, `launch.ts` — per-load controllers
   (`create*`) for activity observation, the widget and status refresh,

@@ -252,11 +252,12 @@ delivery messages, with the raw value kept in `details`:
   (`launch-tools.ts`, `launch.ts`);
 - control replies that echo a name, an ID, or an error (`controls.ts`,
   `control-tools.ts`, `persistent.ts`);
-- errors thrown by the public `subagent` and `subagent_resume` tools. Routing,
-  adapter, Git, and worktree failures carry raw paths, role models, and Git
-  output, so the tool boundary encodes the thrown message once, as one line
-  bounded at 4,000 characters, and keeps the raw error as its `cause`
-  (`launch-tools.ts` `registerEncodedTool`). Inner layers throw raw text.
+- errors thrown by any host tool or command. Routing, adapter, Git, worktree,
+  ledger and config-lock failures carry raw paths, role models, and file
+  contents, so every tool and command registers through one boundary that
+  encodes the thrown message once, as one line bounded at 4,000 characters,
+  and keeps the raw error as its `cause` (`tool-boundary.ts`
+  `withEncodedToolErrors`, applied in `index.ts`). Inner layers throw raw text.
 
 ### Size bounds
 
@@ -404,7 +405,7 @@ listed are this repository's checks. Unless noted, they are in `test/test.ts`.
 | 11 | Executable commands round-trip the exact argument or are omitted: an oversized cleanup path command is omitted for the workspace-ID form, a resume command whose path contains a report delimiter is omitted, the message keeps exactly one opening and one closing tag, and the human renderer shows the same serialized command. | "serializes the cleanup command losslessly, so the exact path round-trips", "omits an oversized path command and offers the workspace-ID form instead", and in "public launch errors and executable commands", "omits the resume command when the session path contains a report delimiter", "keeps exactly one envelope for hostile session and cleanup paths together", "renders the expanded Resume line from the serialized command, never from display text" |
 | 12 | Persistent task issuance comes from parent memory. An event for a task the parent did not issue changes no accounting, claims no idle state, and yields at most one encoded notice that does not start a turn. | "does not let a forged ledger dispatched entry make an unknown task look issued", "ignores an unknown persistent task ID with one encoded notice" |
 | 13 | Error provenance is explicit: host diagnostics stay `host`, and only text the child wrote is `child-error`. | "marks host-generated completion errors as host and child-written ones as child", "encodes a transcript assistant errorMessage and records child provenance" |
-| 14 | Other parent-facing sinks encode every variable value, including errors thrown by the public `subagent` and `subagent_resume` tools. | "encodes a U+2028 activity label at the widget and recovery-status sinks", "encodes a malformed .git newline path in worktree_list", "encodes inspection errors in worktree_list, worktree_remove and /worktree list", "encodes every launch diagnostic", "encodes names echoed by control tool replies", "encodes role-definition values in subagents_list rows", and in "public launch errors and executable commands", "encodes a malformed .git worktree failure thrown by the public subagent tool", "encodes a role model with U+2028 in the public subagent routing error", "encodes a hostile session path in the public subagent_resume failure" |
+| 14 | Other parent-facing sinks encode every variable value, including errors thrown by any host tool or command. | "routes every registered host tool through the encoding boundary, in parent and child scope", "encodes a thrown error from any tool and command, keeping the cause", "encodes a U+2028 activity label at the widget and recovery-status sinks", "encodes a malformed .git newline path in worktree_list", "encodes inspection errors in worktree_list, worktree_remove and /worktree list", "encodes every launch diagnostic", "encodes names echoed by control tool replies", "encodes role-definition values in subagents_list rows", and in "public launch errors and executable commands", "encodes a malformed .git worktree failure thrown by the public subagent tool", "encodes a role model with U+2028 in the public subagent routing error", "encodes a hostile session path in the public subagent_resume failure" |
 
 Another host can port these tests against its own delivery function. Items 1
 to 5 and 9, and item 11 apart from its renderer check, need only the message

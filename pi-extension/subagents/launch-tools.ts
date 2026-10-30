@@ -1,8 +1,4 @@
-import type {
-	ExtensionAPI,
-	ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
-import type { TSchema } from "@sinclair/typebox";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { Text } from "@earendil-works/pi-tui";
 import { existsSync } from "node:fs";
@@ -65,28 +61,6 @@ export function delegationDepthRefusal(
  * report delimiters, so the thrown tool error is one encoded line; the raw
  * error stays its `cause`.
  */
-function registerEncodedTool<TParams extends TSchema, TDetails, TState>(
-	pi: ExtensionAPI,
-	tool: ToolDefinition<TParams, TDetails, TState>,
-): void {
-	pi.registerTool({
-		...tool,
-		async execute(...args) {
-			try {
-				return await tool.execute(...args);
-			} catch (error) {
-				throw new Error(
-					encodeHostValue(
-						error instanceof Error ? error.message : String(error),
-						HOST_ERROR_CHARS,
-					),
-					{ cause: error },
-				);
-			}
-		},
-	});
-}
-
 function muxUnavailableResult(runtime: SubagentRuntime) {
 	return {
 		content: [
@@ -140,7 +114,7 @@ export function registerSubagentTool(
 
 	// ── subagent tool ──
 	if (shouldRegister("subagent"))
-		registerEncodedTool(pi, {
+		pi.registerTool({
 			name: "subagent",
 			label: "Subagent",
 			description:
@@ -426,7 +400,7 @@ export function registerResumeTool(
 
 	// ── subagent_resume tool ──
 	if (shouldRegister("subagent_resume"))
-		registerEncodedTool(pi, {
+		pi.registerTool({
 			name: "subagent_resume",
 			label: "Resume Subagent",
 			description:

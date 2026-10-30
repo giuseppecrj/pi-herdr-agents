@@ -27,6 +27,7 @@ Former bundled roles, `/plan`, its plan skill, and `/skill:orchestrate` now belo
 
 - `pi-extension/subagents/index.ts` — Pi composition root: loads config, adopts the reload-surviving runtime, builds the per-load controllers, and registers session handlers, tools, commands, and renderers in order; also the `__test__` surface
 - `pi-extension/subagents/state.ts`, `catalog.ts`, `presentation.ts` — run-state types and reload slots; role catalog, `subagent` parameters, and launch policy; the parent message model, its one serializer, and the child-report envelope
+- `pi-extension/subagents/tool-boundary.ts` — the one registration boundary that encodes errors thrown by any host tool or command
 - `pi-extension/subagents/observation.ts`, `widgets.ts`, `controls.ts`, `persistent.ts`, `delivery.ts`, `launch.ts` — per-load controllers (`create*`) for activity observation, the widget and status refresh, interrupt/cancel, persistent specialists, parent delivery, and launch plans
 - `pi-extension/subagents/launch-tools.ts`, `control-tools.ts`, `worktree-tools.ts`, `task-models.ts`, `renderers.ts` — `register*` functions for the public tools, commands, and message renderers
 - `pi-extension/subagents/model-registry.ts`, `config-path.ts` — permanent host-local SDK capability glue and configuration-path conventions

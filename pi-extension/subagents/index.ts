@@ -1,3 +1,4 @@
+import { withEncodedToolErrors } from "./tool-boundary.ts";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
@@ -478,11 +479,15 @@ export default function subagentsExtension(
 
 	const shouldRegister = (name: string) => !deniedTools.has(name);
 
-	registerWorktreeTools(pi, { parentSession, cleanupInput });
+	// Every tool and command registers through one boundary that encodes
+	// thrown errors before they reach the parent.
+	const host = withEncodedToolErrors(pi);
 
-	registerTaskModelTool(pi, { shouldRegister });
+	registerWorktreeTools(host, { parentSession, cleanupInput });
 
-	registerSubagentTool(pi, {
+	registerTaskModelTool(host, { shouldRegister });
+
+	registerSubagentTool(host, {
 		shouldRegister,
 		runtime,
 		updateWidget,
@@ -493,7 +498,7 @@ export default function subagentsExtension(
 		spawningConfig,
 	});
 
-	registerControlTools(pi, {
+	registerControlTools(host, {
 		shouldRegister,
 		runtime,
 		supervisionConfig,
@@ -503,23 +508,23 @@ export default function subagentsExtension(
 		formatLivePersistentSpecialists,
 	});
 
-	registerResumeTool(pi, {
+	registerResumeTool(host, {
 		shouldRegister,
 		runtime,
 		updateWidget,
 		spawningConfig,
 	});
 
-	registerTaskModelInit(pi);
+	registerTaskModelInit(host);
 
-	registerWorktreeCommand(pi, {
+	registerWorktreeCommand(host, {
 		runtime,
 		parentSession,
 		cleanupInput,
 		paneConfig,
 	});
 
-	registerSubagentCommand(pi);
+	registerSubagentCommand(host);
 
 	registerMessageRenderers(pi);
 }
