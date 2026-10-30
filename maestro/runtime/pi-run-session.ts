@@ -659,6 +659,13 @@ export function createDefaultRunSession(
 					!result.cancellation &&
 					accept?.reason === "cancelled" &&
 					entry.record.cancelState === "confirmed";
+				// Otherwise an aborted re-check was a parent shutdown (suppression).
+				if (
+					accept?.reason === "cancelled" &&
+					!result.cancellation &&
+					!cancelledInCheck
+				)
+					accept.reason = "parent shut down";
 				if (child.worktree && worktree) {
 					try {
 						// Only confirmed termination is a cancellation. Shutdown suppression
