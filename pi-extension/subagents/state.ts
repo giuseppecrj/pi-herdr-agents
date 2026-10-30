@@ -8,6 +8,7 @@ import type {
 	SummarySource,
 } from "../../maestro/runtime/index.ts";
 import type { ResolvedRuntimePlan } from "../../maestro/core/routing.ts";
+import type { AcceptOutcome } from "../../maestro/core/accept.ts";
 import type { SubagentStatusState } from "../../maestro/core/status.ts";
 import type { SubagentActivityState } from "../../maestro/core/types.ts";
 import type {
@@ -70,6 +71,8 @@ export interface SubagentResult {
 	ping?: { name: string; message: string };
 	worktree?: WorktreeHandoff;
 	runtimePlan?: ResolvedRuntimePlan;
+	/** The accept verdict; absent means no check was requested. */
+	accept?: AcceptOutcome;
 }
 
 /**

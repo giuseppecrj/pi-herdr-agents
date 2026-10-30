@@ -1108,7 +1108,7 @@ describe("host adapter migration", () => {
 						// Stage3 watchSubagent catch -> fallback wrapper -> ordinary .then:
 						// no result runtimePlan/session/errorMessage; details retain the live plan.
 						const rawError = `EISDIR: illegal operation on a directory, read`;
-						const resultContent = `Sub-agent "processing" failed (exit code 1).\n\nSubagent error: ${rawError}\n\nRequested model: fake/first`;
+						const resultContent = `Sub-agent "processing" failed (exit code 1).\nCheck: none\n\nSubagent error: ${rawError}\n\nRequested model: fake/first`;
 						assert.deepEqual(message.details, {
 							name: "processing",
 							task: "bounded",
@@ -2366,7 +2366,7 @@ describe("host adapter migration", () => {
 							exitCode: 1,
 							elapsed: f.mock.sentMessages[0].message.details.elapsed,
 							sessionFile: path,
-							resultContent: `Sub-agent "resumed" failed (exit code 1).\n\n${recover === "empty" ? "Resumed session exited with code 1" : childReport("resumed", "failure", "Recovered new output")}\n\nSession: ${path}\nResume: pi --session ${path}`,
+							resultContent: `Sub-agent "resumed" failed (exit code 1).\nCheck: none\n\n${recover === "empty" ? "Resumed session exited with code 1" : childReport("resumed", "failure", "Recovered new output")}\n\nSession: ${path}\nResume: pi --session ${path}`,
 						});
 					} else assert.match(String(readError), /EISDIR/);
 				}));
@@ -2523,7 +2523,7 @@ describe("host adapter migration", () => {
 							assert.equal(message.customType, "subagent_ping");
 							assert.match(
 								message.content,
-								/^Sub-agent "resumed" needs help \(\d+s\):\n\n/,
+								/^Sub-agent "resumed" needs help \(\d+s\):\nCheck: none\n\n/,
 							);
 							assert.ok(
 								message.content.includes(
@@ -13999,7 +13999,7 @@ describe("subagent interruption", () => {
 
 		assert.equal(
 			presentation,
-			'Sub-agent "Reviewer" completed (5s).\n\n' +
+			'Sub-agent "Reviewer" completed (5s).\nCheck: none\n\n' +
 				childReport("Reviewer", "result", "Useful result") +
 				"\n\n" +
 				"Session: /tmp/subagent.jsonl\nResume: pi --session /tmp/subagent.jsonl",
@@ -14347,7 +14347,7 @@ describe("subagent interruption", () => {
 			assert.doesNotMatch(content, /own output/);
 			assert.equal(
 				content,
-				`Sub-agent "Worker" ${exitCode === 0 ? "completed (5s)" : "failed (exit code 1)"}.\n\n${summary}\n\nParent action: Continue the parent task using this result; do not return an empty response.`,
+				`Sub-agent "Worker" ${exitCode === 0 ? "completed (5s)" : "failed (exit code 1)"}.\nCheck: none\n\n${summary}\n\nParent action: Continue the parent task using this result; do not return an empty response.`,
 			);
 		}
 	});
@@ -14370,7 +14370,7 @@ describe("subagent interruption", () => {
 		);
 		assert.equal(
 			sentMessages[0].message.content,
-			`Sub-agent "Worker" failed (exit code 1).\n\n${childReport("Worker", "failure", "Subagent error: quoted by the child itself")}\n\nParent action: Continue the parent task using this result; do not return an empty response.`,
+			`Sub-agent "Worker" failed (exit code 1).\nCheck: none\n\n${childReport("Worker", "failure", "Subagent error: quoted by the child itself")}\n\nParent action: Continue the parent task using this result; do not return an empty response.`,
 		);
 	});
 
@@ -14484,7 +14484,7 @@ describe("subagent interruption", () => {
 
 		assert.equal(
 			presentation,
-			'Sub-agent "Reviewer" completed (5s).\n\n' +
+			'Sub-agent "Reviewer" completed (5s).\nCheck: none\n\n' +
 				childReport("Reviewer", "result", "Useful result") +
 				"\n\n" +
 				"Session: /tmp/subagent.jsonl\nResume: pi --session /tmp/subagent.jsonl\n\n" +

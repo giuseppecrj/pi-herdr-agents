@@ -19,6 +19,7 @@ import {
 	holdDelivery,
 } from "./state.ts";
 import {
+	checkField,
 	formatElapsed,
 	hostLine,
 	hostText,
@@ -337,6 +338,7 @@ export function createDelivery({
 				details.fallbackFailures = result.fallbackFailures;
 			if (result.worktree) details.worktree = result.worktree;
 			if (running.runtimePlan) details.runtimePlan = running.runtimePlan;
+			if (result.accept) details.accept = result.accept;
 			sendSubagentResult(
 				api,
 				resolveCancelledPresentation(result, running.name, cancellation),
@@ -355,6 +357,7 @@ export function createDelivery({
 				details.reportedName = result.ping.name;
 			if (task.role) details.agent = running.agent;
 			if (result.worktree) details.worktree = result.worktree;
+			if (result.accept) details.accept = result.accept;
 			sendParentMessage(
 				api,
 				"subagent_ping",
@@ -362,6 +365,7 @@ export function createDelivery({
 					head: [
 						[
 							hostLine`Sub-agent "${running.name}" needs help (${formatElapsed(result.elapsed)}):`,
+							checkField(result.accept),
 						],
 					],
 					report: {
@@ -398,6 +402,7 @@ export function createDelivery({
 				details.fallbackFailures = result.fallbackFailures;
 			if (result.worktree) details.worktree = result.worktree;
 			if (running.runtimePlan) details.runtimePlan = running.runtimePlan;
+			if (result.accept) details.accept = result.accept;
 			sendSubagentResult(
 				api,
 				resolveResultPresentation(
