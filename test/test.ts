@@ -19,7 +19,7 @@ import {
 	sessionFields,
 	worktreeHandoffFields,
 } from "../pi-extension/subagents/presentation.ts";
-import { buildSubagentToolAllowlist } from "../maestro/adapters/pi/launch.ts";
+import { buildSubagentToolAllowlist } from "../maestro/adapters/pi/launch-command.ts";
 import "./isolated-agent-dir.ts";
 import { createMockExtensionApi } from "./helpers/mock-extension-api.ts";
 import {
@@ -202,10 +202,8 @@ import {
 	type CompletionDelivery,
 	type SubagentLifecycle,
 } from "../maestro/core/lifecycle.ts";
-import {
-	launchPiSubagent,
-	launchOperationsFromSurface,
-} from "../maestro/adapters/pi/launch.ts";
+import { launchPiSubagent } from "../maestro/adapters/pi/launch.ts";
+import { launchOperationsFromSurface } from "../maestro/adapters/pi/launch-operations.ts";
 import { HerdrSurfaceProvider } from "../maestro/surfaces/herdr/herdr-surface-provider.ts";
 import {
 	createDefaultRunSession,

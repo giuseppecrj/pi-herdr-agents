@@ -14,9 +14,9 @@ import type { SurfaceProvider } from "../core/surface-provider.ts";
 import { PiHarnessAdapter } from "../adapters/pi/pi-harness-adapter.ts";
 import {
 	launchOperationsFromSurface,
-	launchPiWorktreeHandoff,
 	type PiLaunchOperations,
-} from "../adapters/pi/launch.ts";
+} from "../adapters/pi/launch-operations.ts";
+import { launchPiWorktreeHandoff } from "../adapters/pi/launch.ts";
 import {
 	createWorktreeOperations,
 	createWorktreeCleanupOperations,

@@ -26,7 +26,7 @@ import type {
 	PiCompletedMetadata,
 } from "../../maestro/runtime/pi-run-session-types.ts";
 import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
-import { launchOperationsFromSurface } from "../../maestro/adapters/pi/launch.ts";
+import { launchOperationsFromSurface } from "../../maestro/adapters/pi/launch-operations.ts";
 import { discoverAgentCatalog } from "../../maestro/core/roles/discovery.ts";
 import {
 	appendPersistentTaskEvent,

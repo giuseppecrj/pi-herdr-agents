@@ -12,7 +12,7 @@ import type {
 	WorktreeSurfaceInfo,
 } from "../core/surface-provider.ts";
 import type { ProcessIdentityProbe } from "../adapters/pi/process-identity.ts";
-import type { PiLaunchOperations } from "../adapters/pi/launch.ts";
+import type { PiLaunchOperations } from "../adapters/pi/launch-operations.ts";
 import type {
 	WorktreeOperations,
 	WorktreeLaunch,

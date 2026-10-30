@@ -16,11 +16,13 @@ import {
 import { dirname, join } from "node:path";
 import {
 	launchPiSubagent as launchWithOperations,
-	launchOperationsFromSurface,
 	type FreshPiLaunchRequest,
 	type PiLaunchRequest,
-	type PiLaunchOperations,
 } from "../../maestro/adapters/pi/launch.ts";
+import {
+	launchOperationsFromSurface,
+	type PiLaunchOperations,
+} from "../../maestro/adapters/pi/launch-operations.ts";
 import {
 	readWorktreeManifest,
 	createWorktreeOperations,
@@ -220,7 +222,8 @@ for (const backend of getAvailableBackends()) {
 					`
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { launchPiSubagent, launchOperationsFromSurface } from ${JSON.stringify(launchUrl)};
+import { launchPiSubagent } from ${JSON.stringify(launchUrl)};
+import { launchOperationsFromSurface } from ${JSON.stringify(new URL("../../maestro/adapters/pi/launch-operations.ts", import.meta.url).href)};
 import { HerdrSurfaceProvider } from ${JSON.stringify(new URL("../../maestro/surfaces/herdr/herdr-surface-provider.ts", import.meta.url).href)};
 import { loadPaneConfig } from ${JSON.stringify(new URL("../../maestro/core/config/pane-config.ts", import.meta.url).href)};
 import { getSubagentsConfigDir, getSubagentsConfigExamplePath } from ${JSON.stringify(new URL("../../pi-extension/subagents/config-path.ts", import.meta.url).href)};

@@ -43,11 +43,13 @@ import {
 } from "./process-identity.ts";
 import {
 	launchOperationsFromSurface,
-	launchPiSubagent,
 	settleBefore,
+	type PiLaunchOperations,
+} from "./launch-operations.ts";
+import {
+	launchPiSubagent,
 	startProcessIdentityCapture,
 	type FreshPiLaunchRequest,
-	type PiLaunchOperations,
 	type PiRunningChild,
 } from "./launch.ts";
 import type { WorktreeOperations } from "../../core/worktree.ts";

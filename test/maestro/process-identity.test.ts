@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, type TestContext } from "node:test";
-import { captureSurfacePiProcessIdentity } from "../../maestro/adapters/pi/launch.ts";
+import { captureSurfacePiProcessIdentity } from "../../maestro/adapters/pi/launch-operations.ts";
 import {
 	createLinuxProcessProbe,
 	judgeProcessIdentity,
@@ -128,7 +128,8 @@ async function captureDrains(file: string, stall: "record" | "herdr") {
 			"-e",
 			DRAINING_CAPTURE_CHILD,
 			"--",
-			new URL("../../maestro/adapters/pi/launch.ts", import.meta.url).href,
+			new URL("../../maestro/adapters/pi/launch-operations.ts", import.meta.url)
+				.href,
 			file,
 			stall,
 		],
