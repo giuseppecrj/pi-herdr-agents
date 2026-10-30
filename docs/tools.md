@@ -165,6 +165,11 @@ subagent({
 | `worktree.base` | string | no | Git revision to branch from. Defaults to the source checkout's committed HEAD. |
 | `fork` | boolean | no | Override the child session mode for this spawn. `true` forces full-context fork; `false` forces standalone. Omit to inherit the agent frontmatter session-mode. |
 | `persistent` | boolean | no | Keep this stable specialist session alive between turn-based tasks. Persistent agents accept follow-up work only through subagent_send. |
+| `accept` | object | no | Optional accept check. The delivery carries `Check: \<verdict>` from the closed set accepted, rejected, error, skipped, none. Only auto-exit, non-persistent children support it. |
+| `accept.run` | string | yes | Shell command run with `sh -c`. Exit 0 passes. The child runs it before it finishes and retries on failure; then the host re-runs it in the child's checkout (the worktree for worktree children) and that run decides the verdict. |
+| `accept.maxRetries` | integer | no | Extra child turns after a failed check, each with the failing output. Default 1. |
+| `accept.timeoutSec` | integer | no | Per-run timeout in seconds. Default 600. A timeout is verdict `error`. |
+| `accept.paths` | string[] | no | Repo-relative check files (for example tests). The delivery reports any the child changed; the verdict is unchanged. |
 | `interactive` | boolean | no | Mark the subagent as interactive (long-running, user drives the conversation in its own pane). When true, the main session is not woken by status transitions (stalled/recovered) for this subagent. If omitted, falls back to the agent's `interactive` frontmatter, otherwise the inverse of `auto-exit` (agents that auto-exit are autonomous and get stall pings; agents that don't are interactive and stay quiet). |
 <!-- generated:subagent-params:end -->
 

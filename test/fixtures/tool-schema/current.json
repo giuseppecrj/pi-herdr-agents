@@ -96,6 +96,35 @@
 						"description": "Keep this stable specialist session alive between turn-based tasks. Persistent agents accept follow-up work only through subagent_send.",
 						"type": "boolean"
 					},
+					"accept": {
+						"description": "Optional accept check. The delivery carries `Check: <verdict>` from the closed set accepted, rejected, error, skipped, none. Only auto-exit, non-persistent children support it.",
+						"type": "object",
+						"required": ["run"],
+						"properties": {
+							"run": {
+								"minLength": 1,
+								"description": "Shell command run with `sh -c`. Exit 0 passes. The child runs it before it finishes and retries on failure; then the host re-runs it in the child's checkout (the worktree for worktree children) and that run decides the verdict.",
+								"type": "string"
+							},
+							"maxRetries": {
+								"minimum": 0,
+								"maximum": 5,
+								"description": "Extra child turns after a failed check, each with the failing output. Default 1.",
+								"type": "integer"
+							},
+							"timeoutSec": {
+								"minimum": 1,
+								"maximum": 3600,
+								"description": "Per-run timeout in seconds. Default 600. A timeout is verdict `error`.",
+								"type": "integer"
+							},
+							"paths": {
+								"description": "Repo-relative check files (for example tests). The delivery reports any the child changed; the verdict is unchanged.",
+								"type": "array",
+								"items": { "minLength": 1, "type": "string" }
+							}
+						}
+					},
 					"interactive": {
 						"description": "Mark the subagent as interactive (long-running, user drives the conversation in its own pane). When true, the main session is not woken by status transitions (stalled/recovered) for this subagent. If omitted, falls back to the agent's `interactive` frontmatter, otherwise the inverse of `auto-exit` (agents that auto-exit are autonomous and get stall pings; agents that don't are interactive and stay quiet).",
 						"type": "boolean"

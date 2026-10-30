@@ -54,6 +54,7 @@ import {
 } from "./launch.ts";
 import type { WorktreeOperations } from "../../core/worktree.ts";
 import { waitForCompletion } from "./completion.ts";
+import { acceptLaunchRefusal } from "../../core/accept.ts";
 import {
 	appendPersistentDeliveryLedger,
 	findObservedSessionRuntime,
@@ -173,6 +174,9 @@ export class PiHarnessAdapter implements HarnessAdapter {
 			opts.behavior?.interactive ??
 			opts.interactive ??
 			(persistent ? false : (defaults?.interactive ?? !autoExit));
+		const acceptRefusal =
+			opts.accept && acceptLaunchRefusal({ persistent, autoExit });
+		if (acceptRefusal) throw new Error(acceptRefusal);
 		const denied = new Set([
 			...(defaults?.denyTools ?? []),
 			...(opts.behavior?.denyTools ?? []),
@@ -202,6 +206,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 				agent: resolved ? resolved.agent : opts.role.name,
 				cwd,
 				worktree: opts.worktreeRequest,
+				accept: opts.accept,
 				// An omitted override must not force lineage-only/default fork to standalone.
 				fork: opts.session
 					? opts.session.mode === "fork"

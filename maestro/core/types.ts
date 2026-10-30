@@ -5,6 +5,7 @@
  * @ephemeralabs/maestro-adapters, @ephemeralabs/maestro-surfaces, @ephemeralabs/maestro-cli, or @ephemeralabs/maestro-tui.
  * See ARCHITECTURE.md. `check-deps` enforces it.
  */
+import type { AcceptSpec, ChildAcceptReport } from "./accept.ts";
 
 /** Coarse agent lifecycle state, deliberately small: every harness adapter
  *  must be able to project its own richer states onto these five. */
@@ -39,6 +40,12 @@ export interface Task {
 	/** When set, the task runs inside an isolated git worktree. */
 	worktree?: WorktreeSpec;
 	timeoutMs?: number;
+	/** Validated accept check; the parent re-check decides the verdict. */
+	// pi-herdr-agents extension
+	accept?: AcceptSpec;
+	/** The caller's raw model request, such as `task:<category>`, for the outcome ledger. */
+	// pi-herdr-agents extension
+	requestedModel?: string;
 	/**
 	 * Extra environment for the agent process, keyed by variable name.
 	 * The CLI merges task-file `env` over `--env` flags (task wins); each
@@ -190,6 +197,8 @@ export interface CompletionResult {
 	ping?: { name: string; message: string };
 	errorMessage?: string;
 	errorSource?: "child" | "host";
+	/** The child's own accept-check report; evidence only, never the verdict. */
+	accept?: ChildAcceptReport;
 }
 
 // pi-herdr-agents extension
@@ -221,6 +230,8 @@ export interface CompletionEvidence {
 	errorMessage?: string;
 	/** Who wrote errorMessage: the child's sidecar, or a host diagnostic. */
 	errorSource?: "child" | "host";
+	/** The child's own accept-check report from its sidecar; evidence only. */
+	accept?: ChildAcceptReport;
 	finalMessage?: { text: string; stopReason?: string; errorMessage?: string };
 	/** Harness session reference; for Pi, the session file path. */
 	// pi-herdr-agents extension

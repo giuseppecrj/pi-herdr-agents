@@ -27,6 +27,7 @@ import {
 import { loadRoleConfig } from "../../maestro/core/config/role-config.ts";
 import { loadPersistentConfig } from "../../maestro/core/config/persistent-config.ts";
 import { loadSpawningConfig } from "../../maestro/core/config/spawning-config.ts";
+import { loadOutcomeLedgerConfig } from "../../maestro/core/config/outcome-ledger-config.ts";
 import { loadPaneConfig } from "../../maestro/core/config/pane-config.ts";
 import { loadGuidelinesConfig } from "../../maestro/core/config/guidelines-config.ts";
 import { loadStatusConfig } from "../../maestro/core/status.ts";
@@ -139,6 +140,10 @@ const persistentConfig = loadPersistentConfig(
 	getSubagentsConfigExamplePath(),
 );
 const spawningConfig = loadSpawningConfig(
+	getSubagentsConfigDir(),
+	getSubagentsConfigExamplePath(),
+);
+const outcomeLedgerConfig = loadOutcomeLedgerConfig(
 	getSubagentsConfigDir(),
 	getSubagentsConfigExamplePath(),
 );
@@ -294,6 +299,7 @@ export default function subagentsExtension(
 			configExamplePath: getSubagentsConfigExamplePath(),
 			roles: [],
 			forcePolling: supervisionConfig.forcePolling,
+			outcomeLedger: outcomeLedgerConfig.enabled,
 			infrastructure: options.infrastructure,
 			getLaunchSnapshot() {
 				const ctx = runtime.latestCtx;

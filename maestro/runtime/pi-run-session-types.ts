@@ -296,6 +296,8 @@ export interface DefaultRunSessionOptions {
 	hooks: PiRunSessionHooks;
 	persistent: PiPersistentHostOperations;
 	forcePolling: boolean;
+	/** Append one outcome-ledger line per model attempt. Default true. */
+	outcomeLedger?: boolean;
 }
 // pi-herdr-agents extension
 export interface PiWorktreeHandoffInput {

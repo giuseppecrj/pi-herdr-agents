@@ -769,6 +769,7 @@ export function createDefaultRunSession(
 							: current.task.systemPrompt,
 						surface: input.surface,
 						worktreeRequest: input.task.worktree,
+						accept: input.task.accept,
 						runtime: { model: plan.model, thinking: plan.thinking },
 						resolvedLaunch: { ...current.resolved, runtimePlan: plan },
 						launchIdentity: {
