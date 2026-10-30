@@ -4,6 +4,12 @@ import {
 	HOST_ERROR_CHARS,
 } from "../../maestro/core/host-text.ts";
 
+/**
+ * An error whose message is already one encoded host line, such as a cleanup
+ * result. The boundary passes its message through instead of encoding twice.
+ */
+export class HostEncodedError extends Error {}
+
 /** Marks a tool `execute` that passed through {@link withEncodedToolErrors}. */
 export const ENCODED_TOOL_ERRORS = Symbol.for(
 	"pi-herdr-agents/encoded-tool-errors",
@@ -24,6 +30,7 @@ export function withEncodedToolErrors(pi: ExtensionAPI): ExtensionAPI {
 			try {
 				return await tool.execute(...args);
 			} catch (error) {
+				if (error instanceof HostEncodedError) throw error;
 				throw new Error(
 					encodedMessage(
 						error instanceof Error ? error.message : String(error),
@@ -42,6 +49,7 @@ export function withEncodedToolErrors(pi: ExtensionAPI): ExtensionAPI {
 				try {
 					return await command.handler(...args);
 				} catch (error) {
+					if (error instanceof HostEncodedError) throw error;
 					throw new Error(
 						encodedMessage(
 							error instanceof Error ? error.message : String(error),

@@ -1,3 +1,4 @@
+import { HostEncodedError } from "./tool-boundary.ts";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
@@ -74,7 +75,7 @@ export function registerWorktreeTools(
 					...params,
 				});
 				if (result.status === "blocked" || result.status === "failed")
-					throw new Error(result.message);
+					throw new HostEncodedError(result.message);
 				return {
 					content: [{ type: "text", text: result.message }],
 					details: result,
