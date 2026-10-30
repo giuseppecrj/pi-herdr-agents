@@ -61,11 +61,13 @@ export function decideDelegation(
 }
 
 /**
- * The depth to export to a child launched from a session with this
- * environment. Throws on an unknown parent depth rather than guessing.
+ * The depth to export from a session with this environment: one more for a
+ * child, the same for a handoff that continues this conversation. Throws on an
+ * unknown parent depth rather than guessing.
  */
 export function childDelegationDepth(
 	rawParentDepth: string | undefined,
+	launch: "child" | "handoff" = "child",
 ): number {
 	const parent = parseDelegationDepth(rawParentDepth);
 	if (parent.kind === "unknown") {
@@ -73,5 +75,5 @@ export function childDelegationDepth(
 			`Cannot launch a child: ${DELEGATION_DEPTH_ENV}=${JSON.stringify(parent.raw)} is not a non-negative integer.`,
 		);
 	}
-	return parent.depth + 1;
+	return launch === "handoff" ? parent.depth : parent.depth + 1;
 }

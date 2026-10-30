@@ -1822,7 +1822,11 @@ describe("Pi launch", () => {
 				operations,
 			);
 
-			assert.match(handoffCommand, /PI_SUBAGENT_DEPTH=\d+ /);
+			assert.match(
+				handoffCommand,
+				new RegExp(`PI_SUBAGENT_DEPTH=${process.env.PI_SUBAGENT_DEPTH ?? 0} `),
+				"a handoff keeps this session's depth",
+			);
 			assert.equal(result.running.worktree?.baseSha, linkedSha);
 			assert.equal(result.running.worktree?.path, worktreePath);
 			assert.equal(
@@ -1966,8 +1970,12 @@ describe("Pi launch", () => {
 			);
 			// A user-driven worktree handoff is a normal interactive Pi session,
 			// not a subagent: it receives no PI_SUBAGENT_ID or child protocol. It
-			// still carries its delegation depth so it cannot reset the count.
-			assert.match(command, / PI_SUBAGENT_DEPTH=1 /);
+			// keeps this session's delegation depth, so it neither resets nor
+			// consumes a level.
+			assert.match(
+				command,
+				new RegExp(` PI_SUBAGENT_DEPTH=${process.env.PI_SUBAGENT_DEPTH ?? 0} `),
+			);
 			assert.doesNotMatch(
 				command.replace("PI_SUBAGENT_DEPTH=", ""),
 				/subagent-done|PI_SUBAGENT_|__SUBAGENT_DONE_/,

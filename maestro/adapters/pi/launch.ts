@@ -899,8 +899,8 @@ function prepareTaskArtifacts(
  * Always set explicitly so a value left in the pane's shell never reaches the
  * child. Throws when this session's own depth is unknown.
  */
-function childDepthAssignment(): string {
-	return `${DELEGATION_DEPTH_ENV}=${childDelegationDepth(process.env[DELEGATION_DEPTH_ENV])}`;
+function childDepthAssignment(launch: "child" | "handoff" = "child"): string {
+	return `${DELEGATION_DEPTH_ENV}=${childDelegationDepth(process.env[DELEGATION_DEPTH_ENV], launch)}`;
 }
 
 function buildPiCommand(
@@ -938,7 +938,7 @@ function buildPiCommand(
 
 	const env = [
 		`${PI_LAUNCH_SESSION_ENV}=${shellQuote(artifacts.sessionFile)}`,
-		childDepthAssignment(),
+		childDepthAssignment(resolved.request.handoff ? "handoff" : "child"),
 	];
 	if (artifacts.localAgentDir) {
 		env.push(`PI_CODING_AGENT_DIR=${shellQuote(artifacts.localAgentDir)}`);
