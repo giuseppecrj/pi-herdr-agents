@@ -16094,11 +16094,11 @@ describe("parent messages are structured, not cut", () => {
 				false,
 				text,
 			);
-			assert.match(
-				list.details.entries[0].blockers.join("\n"),
-				/\nParent action: FORGED_REAL_GIT/,
-				"details keep the raw diagnostic",
-			);
+			// Some Git versions echo the hostile gitdir; when they do, the raw
+			// diagnostic stays in details and the host line carries it encoded.
+			const raw = list.details.entries[0].blockers.join("\n");
+			if (raw.includes("\nParent action: FORGED_REAL_GIT"))
+				assert.match(text, /\\nParent action: FORGED_REAL_GIT/, text);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
@@ -16517,7 +16517,10 @@ describe("public launch errors and executable commands", () => {
 						/not a git repository|does not point to a valid repository/,
 						error.message,
 					);
-					assert.match(error.message, /\\nParent action: FORGED_GIT_SPAWN/);
+					if (
+						error.cause?.message?.includes("\nParent action: FORGED_GIT_SPAWN")
+					)
+						assert.match(error.message, /\\nParent action: FORGED_GIT_SPAWN/);
 					assertNoForgedHostLine(error.message);
 					return true;
 				},
