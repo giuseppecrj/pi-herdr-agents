@@ -941,8 +941,9 @@ function buildPiCommand(
 		env.push(`PI_SUBAGENT_NAME=${shellQuote(request.name)}`);
 		if (request.agent)
 			env.push(`PI_SUBAGENT_AGENT=${shellQuote(request.agent)}`);
-		if (request.agent && request.behavior.selfSpawn)
-			env.push("PI_SUBAGENT_SELF_SPAWN=1");
+		env.push(
+			`PI_SUBAGENT_SELF_SPAWN=${request.agent && request.behavior.selfSpawn ? "1" : "0"}`,
+		);
 		env.push(`PI_SUBAGENT_AUTO_EXIT=${request.behavior.autoExit ? "1" : "0"}`);
 		if (request.behavior.persistent) {
 			env.push("PI_SUBAGENT_PERSISTENT=1");

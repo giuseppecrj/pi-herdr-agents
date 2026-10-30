@@ -202,13 +202,13 @@ describe("PiHarnessAdapter", () => {
 				});
 				return commands.at(-1) ?? "";
 			};
-			assert.doesNotMatch(
+			assert.match(
 				await launch({ autoExit: true }),
-				/PI_SUBAGENT_SELF_SPAWN/,
+				/PI_SUBAGENT_SELF_SPAWN=0/,
 			);
-			assert.doesNotMatch(
+			assert.match(
 				await launch({ autoExit: true, selfSpawn: false }),
-				/PI_SUBAGENT_SELF_SPAWN/,
+				/PI_SUBAGENT_SELF_SPAWN=0/,
 			);
 			const enabled = await launch({ autoExit: true, selfSpawn: true });
 			assert.match(enabled, /PI_SUBAGENT_AGENT='worker'/);
@@ -221,7 +221,7 @@ describe("PiHarnessAdapter", () => {
 				selfSpawn: true,
 				spawning: false,
 			});
-			assert.doesNotMatch(denied, /PI_SUBAGENT_SELF_SPAWN/);
+			assert.match(denied, /PI_SUBAGENT_SELF_SPAWN=0/);
 			assert.match(denied, /PI_DENY_TOOLS='subagent,/);
 		}));
 	it("preserves an already validated host plan without consulting the registry again", async () =>
