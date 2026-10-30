@@ -45,6 +45,8 @@ import {
 	hasWorkingSubagents,
 	shouldDeliverSubagentCompletion,
 	selectCompletionApi,
+	bindLiveApi,
+	releaseHeldDeliveries,
 } from "./state.ts";
 import {
 	buildSubagentRoutingGuidelines,
@@ -233,6 +235,7 @@ export function cleanupSubagentsForShutdown(
 export const __test__ = {
 	borderLine,
 	renderSubagentWidgetLines,
+	updateWidget,
 	loadAgentDefaults,
 	discoverAgentCatalog,
 	resolveEffectiveSessionMode,
@@ -354,7 +357,9 @@ export default function subagentsExtension(
 						: { id: record.id, name: record.name, status: details.status! };
 				},
 				drain(record, io) {
-					if (runtime.pi) drainPersistentTaskEvents(record, runtime.pi, io);
+					// An unread event retries on a later wake once an API is live again.
+					if (runtime.liveApi)
+						drainPersistentTaskEvents(record, runtime.liveApi, io);
 				},
 			},
 		},
@@ -387,6 +392,8 @@ export default function subagentsExtension(
 	// subagents whose watchers survived a reload.
 	pi.on("session_start", async (_event, ctx) => {
 		runtime.latestCtx = ctx;
+		// This load's API is bound now: deliver results held across the gap.
+		bindLiveApi(runtime, pi);
 		if (!roleConfigDeprecationsReported) {
 			roleConfigDeprecationsReported = true;
 			for (const message of roleConfig.deprecations)
@@ -431,6 +438,11 @@ export default function subagentsExtension(
 	pi.on("session_shutdown", async (event, _ctx) => {
 		stopChildBusy();
 		stopRefresh();
+		// Pi invalidates this context and API once shutdown returns. Watchers that
+		// survive a reload must neither read the context nor send through the API;
+		// completions that settle before the next session_start are held.
+		runtime.latestCtx = undefined;
+		runtime.liveApi = undefined;
 
 		const session = runtime.session;
 		const shutdown = session?.shutdown(event.reason);
@@ -440,6 +452,8 @@ export default function subagentsExtension(
 			// Also gate/abort legacy rows retained from a pre-composition reload.
 			// Do not infer ownership or reconstruct their watchers.
 			cleanupSubagentsForShutdown(event.reason, runningSubagents);
+			// No replacement session will start: held completions are suppressed.
+			releaseHeldDeliveries(runtime, undefined);
 			// The coordinator is already closed synchronously. Clear only this owner
 			// before the shutdown await so another in-process host cannot adopt it.
 			if (runtime.session === session) runtime.session = undefined;

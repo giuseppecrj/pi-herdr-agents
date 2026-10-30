@@ -8,7 +8,19 @@ export function createMockExtensionApi(extensionEvents = createEventBus()) {
 	const eventHandlers = new Map<string, Array<Function>>();
 	const sentUserMessages: string[] = [];
 	const sentMessages: Array<any> = [];
+	let stale = false;
+	// Mirrors Pi's assertActive(): a replaced extension API throws on every action.
+	const assertActive = () => {
+		if (stale)
+			throw new Error(
+				"This extension ctx is stale after session replacement or reload.",
+			);
+	};
 	return {
+		/** Invalidate this API the way Pi does after session_shutdown on reload. */
+		invalidate() {
+			stale = true;
+		},
 		registeredTools,
 		registeredCommands,
 		registeredShortcuts,
@@ -39,9 +51,11 @@ export function createMockExtensionApi(extensionEvents = createEventBus()) {
 				registeredShortcuts.push({ key, ...shortcut });
 			},
 			sendUserMessage(message: string) {
+				assertActive();
 				sentUserMessages.push(message);
 			},
 			sendMessage(message: any, options?: any) {
+				assertActive();
 				sentMessages.push({ message, options });
 			},
 			getAllTools() {

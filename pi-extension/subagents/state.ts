@@ -136,12 +136,56 @@ export interface RunningSubagent {
 	cancelState?: "requested" | "confirmed" | "unconfirmed";
 }
 
+/**
+ * A completion that settled while no live parent API was bound. Its running row
+ * stays delivery-pending and RunSession keeps ownership until it is released.
+ */
+export interface HeldDelivery {
+	/** Running-row id of the held completion. */
+	id: string;
+	/** Resume with the replacement's live API, or `undefined` when the parent exits. */
+	release(api: ExtensionAPI | undefined): void;
+}
+
 export interface SubagentRuntime {
 	runningSubagents: Map<string, RunningSubagent>;
 	session?: PiRunSession;
+	/** The latest loaded extension API; it can be unbound or already invalidated. */
 	pi?: ExtensionAPI;
 	latestCtx?: ExtensionContext;
+	/**
+	 * The parent API proven live: bound at session_start and by this load's own
+	 * tool calls, cleared at session_shutdown before Pi invalidates it. Absent
+	 * across a reload or session-replacement gap, when nothing may be sent.
+	 */
+	liveApi?: ExtensionAPI;
+	/** Completions held during a gap, released in settle order. Optional for older slots. */
+	heldDeliveries?: HeldDelivery[];
 	modelCatalog?: string;
+}
+
+/** Bind the live parent API and release every completion held for it. */
+export function bindLiveApi(runtime: SubagentRuntime, api: ExtensionAPI): void {
+	runtime.liveApi = api;
+	releaseHeldDeliveries(runtime, api);
+}
+
+/** Wait for the next live parent API; `undefined` means the parent exited. */
+export function holdDelivery(
+	runtime: SubagentRuntime,
+	id: string,
+): Promise<ExtensionAPI | undefined> {
+	return new Promise((release) => {
+		(runtime.heldDeliveries ??= []).push({ id, release });
+	});
+}
+
+/** Release each held completion exactly once, in settle order. */
+export function releaseHeldDeliveries(
+	runtime: SubagentRuntime,
+	api: ExtensionAPI | undefined,
+): void {
+	for (const held of runtime.heldDeliveries?.splice(0) ?? []) held.release(api);
 }
 
 /**

@@ -1412,6 +1412,145 @@ describe("host adapter migration", () => {
 			assert.equal(f.closed.length, 2);
 			assert.equal(f.registrations(), 2);
 		}));
+	// Builds on #95 by @wayne930242: the replaced context and API are both dead in the gap.
+	it("holds a result that settles in a reload gap and delivers it once to the replacement session", async () =>
+		withAdapterHost(async (f) => {
+			const invoking = invalidatableContext(f.ctx);
+			const early = await f.launch(
+				{ name: "early", task: "bounded" },
+				f.mock,
+				invoking.ctx,
+			);
+			const late = await f.launch(
+				{ name: "late", task: "bounded" },
+				f.mock,
+				invoking.ctx,
+			);
+			for (const child of [early, late])
+				writeFileSync(
+					child.sessionFile,
+					JSON.stringify({
+						type: "message",
+						message: {
+							role: "assistant",
+							content: [{ type: "text", text: `${child.name} result` }],
+						},
+					}) + "\n",
+				);
+			const errors: unknown[] = [];
+			const onException: NodeJS.UncaughtExceptionListener = (error) =>
+				void errors.push(error);
+			const onRejection: NodeJS.UnhandledRejectionListener = (reason) =>
+				void errors.push(reason);
+			process.on("uncaughtException", onException);
+			process.on("unhandledRejection", onRejection);
+			const replacement = createMockExtensionApi();
+			f.apis.push(replacement);
+			try {
+				// Pi order: shutdown, invalidate the old runner, load the replacement
+				// (its actions throw until bound), then emit session_start.
+				for (const shutdown of f.mock.eventHandlers.get("session_shutdown") ??
+					[])
+					await shutdown({ reason: "reload" }, {});
+				invoking.invalidate();
+				f.mock.invalidate();
+				assert.equal(
+					f.runtime.latestCtx,
+					undefined,
+					"the replaced context is dropped at shutdown",
+				);
+				await f.finish(early);
+				assert.doesNotThrow(() => subagentsModule.__test__.updateWidget());
+
+				const reloaded = await import(
+					`../pi-extension/subagents/index.ts?reload-gap-${Date.now()}`
+				);
+				let bound = false;
+				const send = replacement.api.sendMessage;
+				replacement.api.sendMessage = (...args: any[]) => {
+					if (!bound)
+						throw new Error(
+							"Extension runtime not initialized. Action methods cannot be called during extension loading.",
+						);
+					return send(...args);
+				};
+				replacement.api.getThinkingLevel = () => "high";
+				reloaded.default(replacement.api, { infrastructure: f.infrastructure });
+				await f.finish(late);
+				assert.doesNotThrow(() => reloaded.__test__.updateWidget());
+				await f.turn();
+
+				assert.deepEqual(errors, []);
+				assert.equal(f.mock.sentMessages.length, 0, "the old API gets nothing");
+				assert.equal(replacement.sentMessages.length, 0, "nothing before bind");
+				assert.equal(f.closed.length, 0, "panes wait for delivery");
+				assert.ok(f.runtime.runningSubagents.has(early.id));
+				assert.ok(f.runtime.runningSubagents.has(late.id));
+
+				bound = true;
+				for (const start of replacement.eventHandlers.get("session_start") ??
+					[])
+					await start(
+						{ reason: "reload" },
+						{ ...f.ctx, hasUI: false, ui: { notify() {}, setWidget() {} } },
+					);
+				await until(
+					f,
+					() => f.closed.length === 2,
+					"held deliveries to release their panes",
+				);
+				// A second start must not re-deliver.
+				for (const start of replacement.eventHandlers.get("session_start") ??
+					[])
+					await start(
+						{ reason: "reload" },
+						{ ...f.ctx, hasUI: false, ui: { notify() {}, setWidget() {} } },
+					);
+				await f.turn();
+			} finally {
+				process.off("uncaughtException", onException);
+				process.off("unhandledRejection", onRejection);
+			}
+			assert.deepEqual(errors, []);
+			assert.equal(f.mock.sentMessages.length, 0);
+			assert.deepEqual(
+				replacement.sentMessages.map((m: any) => m.message.details.name),
+				["early", "late"],
+				"each held result is delivered exactly once, in settle order",
+			);
+			for (const { message, options } of replacement.sentMessages) {
+				assert.equal(message.customType, "subagent_result");
+				const { name } = message.details;
+				assert.ok(
+					message.content.includes(
+						`<subagent_report from="${name}" kind="result">\n${name} result\n</subagent_report>`,
+					),
+					message.content,
+				);
+				assert.deepEqual(options, { triggerTurn: true, deliverAs: "steer" });
+			}
+			assert.equal(early.lifecycle.delivery, "delivered");
+			assert.equal(late.lifecycle.delivery, "delivered");
+			assert.equal(f.runtime.runningSubagents.size, 0);
+		}));
+	it("suppresses a result held in a reload gap when the parent then quits", async () =>
+		withAdapterHost(async (f) => {
+			const child = await f.launch({ name: "held", task: "bounded" });
+			for (const shutdown of f.mock.eventHandlers.get("session_shutdown") ?? [])
+				await shutdown({ reason: "reload" }, {});
+			f.mock.invalidate();
+			await f.finish(child);
+			assert.equal(child.lifecycle.delivery, "pending");
+			for (const shutdown of f.mock.eventHandlers.get("session_shutdown") ?? [])
+				await shutdown({ reason: "quit" }, {});
+			await until(
+				f,
+				() => child.lifecycle.delivery === "suppressed",
+				"the held result to be suppressed",
+			);
+			assert.equal(f.mock.sentMessages.length, 0);
+			assert.equal(f.runtime.runningSubagents.size, 0);
+		}));
 	for (const cwd of [undefined, "work"])
 		it(`launches a fallback through the replacement parent after reload in the invocation's ${cwd ? "relative tool cwd" : "parent cwd"}`, async () =>
 			withAdapterHost(async (f) => {

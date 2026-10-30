@@ -15,6 +15,7 @@ import {
 	type SubagentRuntime,
 	shouldDeliverSubagentCompletion,
 	selectCompletionApi,
+	holdDelivery,
 } from "./state.ts";
 import {
 	formatElapsed,
@@ -195,16 +196,38 @@ export function createDelivery({
 		result: PiCompletedMetadata,
 		task: Task,
 		io: PiSettlementIO,
-	): "delivered" | "suppressed" {
+	): "delivered" | "suppressed" | Promise<"delivered" | "suppressed"> {
 		const running: RunningSubagent = record;
 		if (running.stopTimeout) clearTimeout(running.stopTimeout);
-		if (!shouldDeliverSubagentCompletion(running)) {
-			running.lifecycle = markDelivery(running.lifecycle, "suppressed");
-			runningSubagents.delete(running.id);
-			updateWidget();
-			return "suppressed";
-		}
-		const api = runtime.pi!;
+		if (!shouldDeliverSubagentCompletion(running)) return suppress(running);
+		const api = runtime.liveApi;
+		if (api) return settle(api, record, result, task, io);
+		// Reload or session-replacement gap: Pi has invalidated the replaced API and
+		// the replacement's session_start has not bound one. Hold the row pending;
+		// RunSession keeps ownership (and the pane) until this settles. A quit
+		// releases it without an API, and a suppression meanwhile still wins.
+		return holdDelivery(runtime, running.id).then((live) =>
+			live && shouldDeliverSubagentCompletion(running)
+				? settle(live, record, result, task, io)
+				: suppress(running),
+		);
+	}
+
+	function suppress(running: RunningSubagent): "suppressed" {
+		running.lifecycle = markDelivery(running.lifecycle, "suppressed");
+		runningSubagents.delete(running.id);
+		updateWidget();
+		return "suppressed";
+	}
+
+	function settle(
+		api: ExtensionAPI,
+		record: PiRunRecord,
+		result: PiCompletedMetadata,
+		task: Task,
+		io: PiSettlementIO,
+	): "delivered" {
+		const running: RunningSubagent = record;
 		if (running.persistent) {
 			// Task sends remain retryable while the process is live. This is the distinct
 			// terminal PROCESS handoff; failed terminal delivery retires runtime ownership.
