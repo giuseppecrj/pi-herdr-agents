@@ -16,7 +16,6 @@ import {
 	formatWorktreeInventory,
 	type CleanupInput,
 } from "../../maestro/core/worktree-cleanup.ts";
-import type { SpawningConfig } from "../../maestro/core/config/spawning-config.ts";
 import type { SubagentRuntime } from "./state.ts";
 import { delegationDepthRefusal } from "./launch-tools.ts";
 import { launchDiagnosticsText } from "./presentation.ts";
@@ -26,7 +25,6 @@ interface WorktreeDeps {
 	parentSession: boolean;
 	cleanupInput: (ctx: ExtensionContext) => CleanupInput;
 	paneConfig: PaneConfig;
-	spawningConfig: SpawningConfig;
 }
 
 /** Parent-only worktree inventory and removal tools. */
@@ -80,13 +78,7 @@ export function registerWorktreeTools(
 /** The /worktree command: fork into a worktree, list, or remove one. */
 export function registerWorktreeCommand(
 	pi: ExtensionAPI,
-	{
-		runtime,
-		parentSession,
-		cleanupInput,
-		paneConfig,
-		spawningConfig,
-	}: WorktreeDeps,
+	{ runtime, parentSession, cleanupInput, paneConfig }: WorktreeDeps,
 ): void {
 	pi.registerCommand("worktree", {
 		description: parentSession
@@ -163,7 +155,9 @@ export function registerWorktreeCommand(
 				);
 				return;
 			}
-			const depthRefusal = delegationDepthRefusal(spawningConfig.maxDepth);
+			// A handoff continues this conversation at the same depth, so only an
+			// unknown depth refuses it.
+			const depthRefusal = delegationDepthRefusal(Number.POSITIVE_INFINITY);
 			if (depthRefusal) {
 				ctx.ui.notify(depthRefusal.message, "error");
 				return;

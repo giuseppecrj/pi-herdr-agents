@@ -514,7 +514,6 @@ export default function subagentsExtension(
 		parentSession,
 		cleanupInput,
 		paneConfig,
-		spawningConfig,
 	});
 
 	registerSubagentCommand(pi);
