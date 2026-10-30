@@ -19,6 +19,7 @@ import {
 	type AcceptCommandResult,
 	type AcceptOutcome,
 	type AcceptRequest,
+	changedCheckFiles,
 } from "../../maestro/core/accept.ts";
 import {
 	renderParentMessage,
@@ -151,6 +152,40 @@ describe("accept parameter", () => {
 		await assert.rejects(
 			launch({ accept: { run: "x", paths: ["../escape"] } }),
 			/Invalid accept check/,
+		);
+	});
+});
+
+describe("changed check files", () => {
+	it("normalizes dot segments in declared paths and in Git paths", () => {
+		const spec = normalizeAcceptSpec({
+			run: "npm test",
+			paths: ["test/./parser.test.ts", "./lib/"],
+		});
+		assert.deepEqual(spec.paths, ["test/parser.test.ts", "lib"]);
+		assert.deepEqual(
+			changedCheckFiles(spec.paths, [
+				"test/parser.test.ts",
+				"./lib/a.ts",
+				"src/other.ts",
+			]),
+			["test/parser.test.ts", "./lib/a.ts"],
+		);
+	});
+
+	it("treats . as the whole checkout", () => {
+		const spec = normalizeAcceptSpec({ run: "npm test", paths: ["."] });
+		assert.deepEqual(spec.paths, ["."]);
+		assert.deepEqual(changedCheckFiles(spec.paths, ["a.ts", "test/b.ts"]), [
+			"a.ts",
+			"test/b.ts",
+		]);
+	});
+
+	it("lists each changed check file once when Git reports it twice", () => {
+		assert.deepEqual(
+			changedCheckFiles(["test"], ["test/new.ts", "test/new.ts"]),
+			["test/new.ts"],
 		);
 	});
 });

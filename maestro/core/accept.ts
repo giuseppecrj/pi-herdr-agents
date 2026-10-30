@@ -8,6 +8,7 @@
  * description, and the outcome-ledger line. Running a command lives in
  * `adapters/pi/accept-runner.ts`.
  */
+import { posix } from "node:path";
 import { createHash } from "node:crypto";
 import { isFiniteNumber, isRecord, isString } from "./config/type-guards.ts";
 
@@ -123,17 +124,11 @@ function boundedInteger(
 
 function normalizeCheckPath(path: string): string {
 	if (!isString(path) || !path.trim()) invalid("paths must be non-empty");
-	const trimmed = path
-		.trim()
-		.replace(/^(\.\/)+/, "")
-		.replace(/\/+$/, "");
-	if (
-		trimmed.startsWith("/") ||
-		trimmed.split("/").some((segment) => segment === "..") ||
-		!trimmed
-	)
+	const raw = path.trim();
+	if (raw.startsWith("/") || raw.split("/").some((segment) => segment === ".."))
 		invalid(`paths must be repo-relative without "..": ${path}`);
-	return trimmed;
+	// "." and "./" select the whole checkout.
+	return posix.normalize(raw).replace(/\/+$/, "") || ".";
 }
 
 /**
@@ -220,10 +215,13 @@ export function changedCheckFiles(
 	files: readonly string[],
 ): string[] {
 	if (!paths.length) return [];
-	return files.filter((file) => {
-		const normalized = file.replace(/^(\.\/)+/, "");
+	return [...new Set(files)].filter((file) => {
+		const normalized = posix.normalize(file);
 		return paths.some(
-			(path) => normalized === path || normalized.startsWith(`${path}/`),
+			(path) =>
+				path === "." ||
+				normalized === path ||
+				normalized.startsWith(`${path}/`),
 		);
 	});
 }
