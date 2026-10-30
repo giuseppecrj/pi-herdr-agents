@@ -10,6 +10,12 @@
     "verbatimModuleSyntax": true,
     "erasableSyntaxOnly": true
   },
-  "include": ["pi-extension/**/*.ts", "maestro/**/*.ts", "scripts/**/*.ts"],
-  "exclude": ["test", "node_modules"]
+  "include": [
+    "pi-extension/**/*.ts",
+    "maestro/**/*.ts",
+    "scripts/**/*.ts",
+    "test/**/*.ts",
+    ".pi/skills/**/*.ts"
+  ],
+  "exclude": ["node_modules"]
 }
