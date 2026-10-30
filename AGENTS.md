@@ -88,7 +88,7 @@ When behavior changes, update every affected surface in the same commit:
 - worktree behavior, handoff, recovery, or cleanup → `docs/worktree-subagents.md`
 - role prompts, `/plan`, and review-workflow methodology → the owning role pack, not this repository
 - the `PI_SUBAGENT_ID` child-context hint → `docs/tools.md` and `CONTEXT.md`
-- contributor/release verification → this file, `docs/development.md`, `.pi/skills/run-integration-tests/SKILL.md`, or `RELEASING.md`
+- contributor/release verification → this file, `docs/development.md`, `.pi/skills/verify-pi-herdr-agents/SKILL.md`, `.pi/skills/run-integration-tests/SKILL.md`, or `RELEASING.md`
 - domain terminology → `CONTEXT.md`
 - hard-to-reverse orchestration trade-offs → the relevant ADR; do not create an ADR for every design question
 - architectural evidence and alternatives only → research docs, clearly marked when later decisions supersede them
@@ -96,6 +96,8 @@ When behavior changes, update every affected surface in the same commit:
 Do not copy the full worktree guide into every role prompt. Keep canonical detail in the guide and add only the role-specific rule an agent needs while running.
 
 ## Verification
+
+Use [`.pi/skills/verify-pi-herdr-agents/SKILL.md`](.pi/skills/verify-pi-herdr-agents/SKILL.md) for which gates each kind of change needs, a real parent-Pi drive in an isolated Herdr lab, refactor behavior pins, and how to judge an integration failure.
 
 For normal changes:
 
