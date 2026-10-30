@@ -30,6 +30,7 @@ import { FakeSurfaceProvider } from "../maestro/surfaces/fake/fake-surface-provi
 import type { SurfaceProvider } from "../maestro/core/surface-provider.ts";
 import { WorktreeProvisioningError } from "../maestro/core/surface-provider.ts";
 import {
+	findStoredSessionModel,
 	readSubagentSessionPolicy,
 	writeSubagentSessionPolicy,
 } from "../maestro/adapters/pi/session.ts";
@@ -197,6 +198,81 @@ function providerWithOverrides(
 		...overrides,
 	};
 }
+
+describe("session model scope", () => {
+	it("reads the stored model from the active branch, not the last line of the file", () => {
+		assert.deepEqual(
+			findStoredSessionModel([
+				{ type: "session", id: "h" },
+				{
+					type: "model_change",
+					id: "m1",
+					parentId: "h",
+					provider: "fake",
+					modelId: "in-scope",
+				},
+				{
+					type: "model_change",
+					id: "m2",
+					parentId: "m1",
+					provider: "fake",
+					modelId: "abandoned-branch",
+				},
+				{ type: "label", id: "leaf", parentId: "m1" },
+			]),
+			{ provider: "fake", modelId: "in-scope" },
+		);
+		assert.deepEqual(
+			findStoredSessionModel([
+				{ type: "session", id: "h" },
+				{
+					type: "message",
+					id: "a",
+					parentId: "h",
+					message: { role: "assistant", provider: "fake", model: "answered" },
+				},
+			]),
+			{ provider: "fake", modelId: "answered" },
+			"without a model_change, the latest assistant response names the model",
+		);
+		assert.equal(
+			findStoredSessionModel([{ type: "session", id: "h" }]),
+			undefined,
+		);
+	});
+
+	it("refuses an out-of-scope fresh plan or an unrepresentable scope before creating a pane", async () => {
+		await withFixture(async ({ request }) => {
+			const operations: PiLaunchOperations = {
+				createPane() {
+					throw new Error("must not create a pane");
+				},
+				createWorktree() {
+					throw new Error("must not create a worktree");
+				},
+				async waitForShellReady() {},
+				runScript() {
+					throw new Error("must not run");
+				},
+				closePane() {},
+			};
+			await assert.rejects(
+				launchPiSubagent(
+					{ ...request, modelScope: ["fake/other"] },
+					operations,
+				),
+				/model "fake\/worker" is outside this session's model scope \(--models \/ enabledModels: fake\/other\)/,
+			);
+			await assert.rejects(
+				launchPiSubagent(
+					{ ...request, modelScope: ["fake/worker", "fake/a,b"] },
+					operations,
+				),
+				/Cannot pass the session model scope to the child: "fake\/a,b" contains a comma/,
+			);
+		});
+	});
+});
 
 describe("Pi launch", () => {
 	it("launchOperationsFromSurface maps createPane to the provider's grouped placement", async () => {
@@ -1818,6 +1894,7 @@ describe("Pi launch", () => {
 					cwd: linkedCwd,
 					worktree: { branch: "handoff/59" },
 					handoff: { leafId: "assistant-1" },
+					modelScope: ["fake/worker", "fake/other"],
 				},
 				operations,
 			);
@@ -1826,6 +1903,11 @@ describe("Pi launch", () => {
 				handoffCommand,
 				new RegExp(`PI_SUBAGENT_DEPTH=${process.env.PI_SUBAGENT_DEPTH ?? 0} `),
 				"a handoff keeps this session's depth",
+			);
+			assert.match(
+				handoffCommand,
+				/--model 'fake\/worker' --thinking 'high' --models 'fake\/worker,fake\/other'/,
+				"a worktree handoff carries the parent's model scope",
 			);
 			assert.equal(result.running.worktree?.baseSha, linkedSha);
 			assert.equal(result.running.worktree?.path, worktreePath);

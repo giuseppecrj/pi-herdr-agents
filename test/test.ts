@@ -1698,6 +1698,179 @@ describe("host adapter migration", () => {
 			assert.equal(f.surface.listSurfaces().length, 0);
 			assert.equal(f.runtime.runningSubagents.size, 0);
 		}));
+	function scopedContext(ctx: any, refs: string[]) {
+		return {
+			...ctx,
+			scopedModels: refs.map((ref) => {
+				const [provider, id] = ref.split("/");
+				return { model: { provider, id, reasoning: true } };
+			}),
+		};
+	}
+	for (const persistent of [false, true])
+		it(`refuses to inherit an out-of-scope parent model for a${persistent ? " persistent" : "n ordinary"} launch before creating resources`, async () =>
+			withAdapterHost(async (f) => {
+				const ctx = scopedContext(f.ctx, ["fake/worker", "fake/other"]);
+				await assert.rejects(
+					f.launch(
+						{ name: "inherit", task: "bounded", persistent },
+						f.mock,
+						ctx,
+					),
+					/the parent model "fake\/parent" is outside this session's model scope \(--models \/ enabledModels: fake\/worker, fake\/other\), so a subagent cannot inherit it\. Pass model with an in-scope exact provider\/model-id or a task: category, set model in the role definition, or switch the parent to an in-scope model with \/model/,
+				);
+				assert.equal(f.commands.length, 0);
+				assert.equal(f.surface.listSurfaces().length, 0);
+				assert.equal(f.runtime.runningSubagents.size, 0);
+			}));
+	it("/worktree refuses to hand off an out-of-scope parent model before creating resources", async () =>
+		withAdapterHost(async (f) => {
+			const worktree = f.mock.registeredCommands.find(
+				(command: any) => command.name === "worktree",
+			);
+			const notifications: string[] = [];
+			const ctx = {
+				...scopedContext(f.ctx, ["fake/worker"]),
+				waitForIdle: async () => {},
+				sessionManager: { ...f.ctx.sessionManager, getLeafId: () => "leaf" },
+				ui: { notify: (message: string) => notifications.push(message) },
+			};
+			await worktree.handler("scoped-branch", ctx);
+			assert.equal(notifications.length, 1);
+			assert.match(
+				notifications[0],
+				/^Worktree launch failed: the parent model "fake\/parent" is outside this session's model scope \(--models \/ enabledModels: fake\/worker\)/,
+			);
+			assert.equal(f.commands.length, 0);
+			assert.equal(f.surface.listSurfaces().length, 0);
+		}));
+	it("carries the session model scope to an in-scope child as --models", async () =>
+		withAdapterHost(async (f) => {
+			const ctx = scopedContext(f.ctx, ["fake/parent", "fake/o'brien"]);
+			const child = await f.launch(
+				{ name: "scoped", task: "bounded" },
+				f.mock,
+				ctx,
+			);
+			assert.equal(f.commands.length, 1);
+			assert.match(f.commands[0], /--model 'fake\/parent' --thinking 'high'/);
+			assert.ok(
+				f.commands[0].includes(`--models 'fake/parent,fake/o'\\''brien'`),
+				f.commands[0],
+			);
+			await f.finish(child);
+		}));
+	it("leaves an unscoped session's child unscoped", async () =>
+		withAdapterHost(async (f) => {
+			const child = await f.launch({ name: "unscoped", task: "bounded" });
+			assert.doesNotMatch(f.commands[0], /--models/);
+			await f.finish(child);
+		}));
+	it("re-checks a fallback candidate against the live scope and skips one the scope dropped", async () =>
+		withAdapterHost(async (f) => {
+			const ctx = scopedContext(f.ctx, [
+				"fake/first",
+				"fake/second",
+				"fake/third",
+			]);
+			const first = await f.launch(
+				{
+					name: "fallback",
+					task: "bounded",
+					model: "fake/first, fake/second, fake/third",
+				},
+				f.mock,
+				ctx,
+			);
+			// The scope shrinks after planning; the cached second plan is stale.
+			ctx.scopedModels = scopedContext(f.ctx, [
+				"fake/first",
+				"fake/third",
+			]).scopedModels;
+			await f.finish(first, {
+				type: "error",
+				errorMessage: "first account rejected",
+			});
+			await until(f, () => f.commands.length === 2, "the third launch");
+			assert.match(f.commands[1], /--model 'fake\/third' --thinking 'high'/);
+			assert.match(f.commands[1], /--models 'fake\/first,fake\/third'/);
+			const next = f.runtime.runningSubagents.get(first.id);
+			assert.equal(next.runtimePlan.model, "fake/third");
+			await f.finish(next);
+			const details = f.mock.sentMessages.at(-1).message.details;
+			assert.deepEqual(details.fallbackAttempts, [
+				"fake/first",
+				"fake/second",
+				"fake/third",
+			]);
+			assert.deepEqual(details.fallbackFailures, [
+				{ model: "fake/first", error: "first account rejected" },
+				{
+					model: "fake/second",
+					error:
+						'model "fake/second" is outside this session\'s model scope (--models / enabledModels: fake/first, fake/third); pick an in-scope exact provider/model-id',
+				},
+			]);
+		}));
+	function writeScopedResumeSession(path: string, cwd: string, model: string) {
+		const [provider, modelId] = model.split("/");
+		writeFileSync(
+			path,
+			[
+				{ type: "session", version: 3, id: "saved", cwd },
+				{
+					type: "model_change",
+					id: "m1",
+					parentId: "saved",
+					provider,
+					modelId,
+				},
+			]
+				.map((entry) => JSON.stringify(entry) + "\n")
+				.join(""),
+		);
+		writeSubagentSessionPolicy(path, { owner: "public", deniedTools: [] });
+	}
+	async function resume(f: any, path: string, ctx: any) {
+		return f.mock.registeredTools
+			.find((t: any) => t.name === "subagent_resume")
+			.execute(
+				"resume",
+				{ name: "resumed", sessionPath: path },
+				new AbortController().signal,
+				undefined,
+				ctx,
+			);
+	}
+	it("refuses to resume a session whose stored model is outside the scope", async () =>
+		withAdapterHost(async (f) => {
+			const path = join(f.projectDir, "saved.jsonl");
+			writeScopedResumeSession(path, f.projectDir, "fake/other");
+			await assert.rejects(
+				resume(f, path, scopedContext(f.ctx, ["fake/parent"])),
+				/the resumed session's stored model "fake\/other" is outside this session's model scope \(--models \/ enabledModels: fake\/parent\); resume keeps a session's model, so launch a new subagent with an in-scope model instead/,
+			);
+			assert.equal(f.commands.length, 0);
+			assert.equal(f.surface.listSurfaces().length, 0);
+		}));
+	it("pins an in-scope stored model and carries the scope on resume", async () =>
+		withAdapterHost(async (f) => {
+			const path = join(f.projectDir, "saved.jsonl");
+			writeScopedResumeSession(path, f.projectDir, "fake/worker");
+			const started = await resume(
+				f,
+				path,
+				scopedContext(f.ctx, ["fake/parent", "fake/worker"]),
+			);
+			assert.equal(f.commands.length, 1);
+			assert.ok(
+				f.commands[0].includes(
+					`--session '${path}' --model 'fake/worker' --models 'fake/parent,fake/worker' `,
+				),
+				f.commands[0],
+			);
+			await f.finish(f.runtime.runningSubagents.get(started.details.id));
+		}));
 	for (const accepted of [true, false])
 		it(`ordinary completion ${accepted ? "closes only after accepted delivery" : "retains the pane after rejected delivery"}`, async () =>
 			withAdapterHost(async (f) => {

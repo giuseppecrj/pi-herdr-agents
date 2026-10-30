@@ -60,6 +60,7 @@ import {
 import { FileWakeRegistry } from "../core/wake.ts";
 import { SupervisionCoordinator } from "../core/supervision.ts";
 import {
+	assertModelInScope,
 	isThinkingLevel,
 	resolveRuntimePlan,
 	resolveRuntimePlans,
@@ -1039,6 +1040,10 @@ export function createDefaultRunSession(
 						throw new Error(
 							"Pi attempt preparation changed the invocation identity, prompt or worktree.",
 						);
+					// A candidate was authorized at planning time; the scope may have
+					// changed since. Re-check it against this attempt's snapshot, which
+					// prepareAttempt rebuilds from the live parent for every attempt.
+					assertModelInScope(plan.model, current.snapshot.modelRegistry);
 					const owner = adapter(current.snapshot);
 					const handle = await owner.spawn({
 						name: input.task.name,
@@ -1170,6 +1175,7 @@ export function createDefaultRunSession(
 					handoff: { leafId: input.leafId },
 					parent: { ...snapshot.parent },
 					runtimePlan: input.runtimePlan,
+					modelScope: snapshot.modelRegistry.scope,
 					behavior: {
 						deniedTools: [],
 						autoExit: false,

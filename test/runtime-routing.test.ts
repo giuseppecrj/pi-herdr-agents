@@ -676,6 +676,33 @@ describe("runtime routing", () => {
 			"parent-inherit resolution stays available for the in-scope parent model",
 		);
 	});
+
+	it("refuses to inherit an out-of-scope parent model with an actionable error", () => {
+		const scoped = scopeModelRegistryAdapter(
+			registry([model("fake", "parent"), model("zai", "glm-5.3")]),
+			new Set(["zai/glm-5.3"]),
+		);
+		for (const thinking of [undefined, "low" as const])
+			assert.throws(
+				() => resolveRuntimePlans({ thinking }, {}, parent, scoped),
+				{
+					name: "RuntimeResolutionError",
+					message:
+						'the parent model "fake/parent" is outside this session\'s model scope (--models / enabledModels: zai/glm-5.3), so a subagent cannot inherit it. Pass model with an in-scope exact provider/model-id or a task: category, set model in the role definition, or switch the parent to an in-scope model with /model',
+				},
+			);
+		assert.equal(
+			resolveRuntimePlans({ model: "zai/glm-5.3" }, {}, parent, scoped)[0]
+				?.model,
+			"zai/glm-5.3",
+			"an explicit in-scope model still launches from an out-of-scope parent",
+		);
+		assert.equal(
+			resolveRuntimePlan({}, {}, parent, registry([]))?.model,
+			"fake/parent",
+			"an unscoped session keeps inheriting an unlisted parent model",
+		);
+	});
 	it("keeps the selected source when agent defaults provide fallbacks", () => {
 		const plans = resolveRuntimePlans(
 			{},
