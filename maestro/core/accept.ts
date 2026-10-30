@@ -27,6 +27,8 @@ export const ACCEPT_DEFAULT_TIMEOUT_SEC = 600;
 export const ACCEPT_MAX_TIMEOUT_SEC = 3600;
 /** SIGTERM to the check's process group, then SIGKILL after this grace. */
 export const ACCEPT_KILL_GRACE_MS = 5_000;
+/** The shorter SIGKILL grace when the check's owner shuts down. */
+export const ACCEPT_SHUTDOWN_GRACE_MS = 1_000;
 /** Combined output kept while a check runs. */
 export const ACCEPT_CAPTURE_CHARS = 64 * 1024;
 /** Failing output the child receives as its retry message. */

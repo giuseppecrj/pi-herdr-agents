@@ -535,3 +535,38 @@ test("a confirmed cancel while the check's pipes drain wins: skipped, cancelled 
 			await session.shutdown("quit");
 		}
 	}));
+
+test("parent shutdown terminates a TERM-ignoring re-check within the bound", () =>
+	fixture(async (f) => {
+		const started = join(f.dir, "check.pid");
+		const input = f.input({
+			run: `trap '' TERM; echo $$ > ${started}; sleep 30`,
+		});
+		const handle = await f.session.spawnPi(input);
+		const record = f.session.getRecord(input.task.id)!;
+		const wait = f.session.supervise(handle, f.session.getTask(input.task.id)!);
+		f.complete(record);
+		await until(
+			() => existsSync(started) && readPid(started) > 0,
+			"the parent re-check never started",
+		);
+		const pgid = readPid(started);
+		const began = Date.now();
+		try {
+			await f.session.shutdown("quit");
+			// SIGTERM grace plus settle margin, with slack for reaping.
+			await until(
+				() => groupGone(pgid),
+				"the re-check's group outlived parent shutdown",
+				Math.max(0, 2_500 - (Date.now() - began)),
+			);
+			await wait;
+			assert.deepEqual(f.settled, [], "a suppressed run delivers nothing");
+		} finally {
+			try {
+				process.kill(-pgid, "SIGKILL");
+			} catch {
+				/* already gone */
+			}
+		}
+	}));

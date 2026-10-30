@@ -411,10 +411,12 @@ export default function (pi: ExtensionAPI) {
 		recorder.toolExecutionEnd(event.toolCallId, event.toolName);
 	});
 
-	pi.on("session_shutdown", (event) => {
+	pi.on("session_shutdown", async (event) => {
 		if (inboxPoller) clearInterval(inboxPoller);
 		doneNudge?.cancel();
 		recorder.sessionShutdown(event.reason);
+		// A check still running belongs to this session: stop it, bounded.
+		await acceptLoop?.shutdown();
 	});
 
 	pi.registerTool({

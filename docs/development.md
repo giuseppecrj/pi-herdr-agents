@@ -53,7 +53,10 @@ provider; fakes are for conformance tests only.
   `maestro/core/accept.ts` (spec validation, the closed verdict set, the
   `Check:` detail text, and the outcome-ledger line),
   `maestro/adapters/pi/accept-runner.ts` (`sh -c` with a timeout and
-  process-group termination), `maestro/adapters/pi/child/accept-check.ts` (the
+  process-group termination), `maestro/adapters/pi/accept-groups.ts` (the
+  process-wide registry of running check groups, terminated by their owner at
+  shutdown and killed by an `exit` hook),
+  `maestro/adapters/pi/child/accept-check.ts` (the
   child's `agent_before_settle` retry loop), and
   `maestro/runtime/accept-recheck.ts` (the parent re-check `finalize` runs and
   the outcome-ledger append).

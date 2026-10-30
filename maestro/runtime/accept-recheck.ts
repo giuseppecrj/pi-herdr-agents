@@ -17,6 +17,7 @@ import {
 import type { CompletionEvidence, RunResult } from "../core/types.ts";
 import type { WorktreeHandoff } from "../core/worktree.ts";
 import type { AcceptRunner } from "../adapters/pi/accept-runner.ts";
+import type { AcceptCheckOwner } from "../adapters/pi/accept-groups.ts";
 import type { FinalizeControl } from "./run-session.ts";
 
 /** Why a requested check did not run; undefined when the run completed naturally. */
@@ -46,6 +47,8 @@ export interface ParentAcceptInput {
 	worktree: WorktreeHandoff | undefined;
 	control: FinalizeControl;
 	runner: AcceptRunner;
+	/** Stops this check at shutdown (`accept-groups.ts`). */
+	owner?: AcceptCheckOwner;
 }
 
 /**
@@ -69,6 +72,7 @@ export async function runParentAcceptCheck(
 						cwd,
 						timeoutMs: spec.timeoutSec * 1000,
 						signal,
+						owner: input.owner,
 					}),
 				)
 			: { kind: "cwd-missing" as const, output: "" };

@@ -74,6 +74,10 @@ import {
 	runParentAcceptCheck,
 } from "./accept-recheck.ts";
 import { runAcceptCommand } from "../adapters/pi/accept-runner.ts";
+import {
+	terminateAcceptChecks,
+	type AcceptCheckOwner,
+} from "../adapters/pi/accept-groups.ts";
 import type {
 	DefaultRunSessionOptions,
 	PiCompletedMetadata,
@@ -134,6 +138,8 @@ interface PiSessionOwner {
 	worktreeOperations: WorktreeOperations;
 	/** Absent outside Herdr: without a socket nothing can be marked. */
 	markers?: DelegatedMarkers;
+	/** Owns this composition's parent re-checks; a quit terminates them. */
+	acceptChecks?: AcceptCheckOwner;
 }
 
 // A detached close can outlive settlement without capturing a child, metadata,
@@ -435,6 +441,9 @@ export function createDefaultRunSession(
 	if (adopted) resumePi = state.resumePi;
 	// Live markers and their sequence survive a reload with their runs.
 	state.markers ??= createDelegatedMarkers(options.infrastructure);
+	const acceptChecks = (state.acceptChecks ??= {
+		label: "parent run session",
+	});
 
 	function prune(id: string) {
 		if (!state.kernel.getTask(id)) state.entries.delete(id);
@@ -652,6 +661,7 @@ export function createDefaultRunSession(
 							worktree,
 							control,
 							runner: state.infrastructure.acceptRunner ?? runAcceptCommand,
+							owner: acceptChecks,
 						})
 					: undefined;
 				// A cancel that won during the re-check, with termination confirmed,
@@ -971,6 +981,8 @@ export function createDefaultRunSession(
 				]))
 					facade.suppress(id);
 				state.infrastructure.supervision.close();
+				// Suppression aborted their re-checks; finish what ignores SIGTERM.
+				await terminateAcceptChecks(acceptChecks);
 			}
 		},
 	};

@@ -17,6 +17,7 @@ import {
 	type ChildAcceptReport,
 } from "../../../core/accept.ts";
 import { runAcceptCommand, type AcceptRunner } from "../accept-runner.ts";
+import { terminateAcceptChecks } from "../accept-groups.ts";
 
 function failureText(result: AcceptCommandResult, spec: AcceptSpec): string {
 	switch (result.kind) {
@@ -60,6 +61,8 @@ export interface ChildAcceptLoop {
 		event: Pick<AgentBeforeSettleEvent, "outcome" | "entries">,
 		signal?: AbortSignal,
 	): Promise<AgentBeforeSettleEventResult | undefined>;
+	/** At session shutdown: terminate a running check, bounded and awaited. */
+	shutdown(): Promise<void>;
 }
 
 export function createChildAcceptLoop(options: {
@@ -71,8 +74,10 @@ export function createChildAcceptLoop(options: {
 	const runner = options.runner ?? runAcceptCommand;
 	let tries = 0;
 	let report: ChildAcceptReport | undefined;
+	const owner = { label: "child accept loop" };
 	return {
 		report: () => report,
+		shutdown: () => terminateAcceptChecks(owner),
 		async beforeSettle(event, signal) {
 			if (event.outcome !== "completed") return undefined;
 			const result = await runner({
@@ -80,6 +85,7 @@ export function createChildAcceptLoop(options: {
 				cwd,
 				timeoutMs: spec.timeoutSec * 1000,
 				signal,
+				owner,
 			});
 			// A user abort during the check is no verdict and no try.
 			if (result.kind === "aborted") return undefined;
