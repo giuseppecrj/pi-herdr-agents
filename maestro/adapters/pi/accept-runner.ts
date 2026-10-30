@@ -7,6 +7,7 @@ import {
 	type AcceptCommandResult,
 	type AcceptSpec,
 } from "../../core/accept.ts";
+import { trackAcceptCheck, type AcceptCheckOwner } from "./accept-groups.ts";
 
 export interface AcceptCommandOptions {
 	run: string;
@@ -17,6 +18,8 @@ export interface AcceptCommandOptions {
 	/** SIGTERM to the process group, then SIGKILL after this grace. */
 	killGraceMs?: number;
 	env?: NodeJS.ProcessEnv;
+	/** Stops this check at its shutdown (`accept-groups.ts`). */
+	owner?: AcceptCheckOwner;
 }
 
 /** Runs one accept check; injectable so tests need no real commands. */
@@ -58,7 +61,8 @@ function signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
  * of combined output. A timeout or abort sends SIGTERM to the process group
  * and SIGKILL after the grace; whatever is left of the group is killed once
  * the shell exits. After the shell exits, the check waits briefly for
- * inherited pipes to close; a timeout or abort then ends it at once.
+ * inherited pipes to close; a timeout or abort then ends it at once. The
+ * group is tracked under `owner` until it is killed (`accept-groups.ts`).
  */
 export const runAcceptCommand: AcceptRunner = (options) =>
 	new Promise((resolve) => {
@@ -95,19 +99,31 @@ export const runAcceptCommand: AcceptRunner = (options) =>
 			| undefined;
 		let done = false;
 		const timers: NodeJS.Timeout[] = [];
-		const stop = (reason: "timeout" | "aborted") => {
-			if (stopped || done) return;
-			stopped = reason;
+		// A later stop (an owner's shutdown) only brings the SIGKILL forward.
+		const stop = (
+			reason: "timeout" | "aborted",
+			graceMs = options.killGraceMs ?? ACCEPT_KILL_GRACE_MS,
+		) => {
+			if (done) return;
+			const first = !stopped;
+			stopped ??= reason;
 			// The shell is gone; its group may still hold the pipes: kill it now.
 			if (exit) return finish(fromExit());
-			signalGroup(child, "SIGTERM");
-			timers.push(
-				setTimeout(
-					() => signalGroup(child, "SIGKILL"),
-					options.killGraceMs ?? ACCEPT_KILL_GRACE_MS,
-				),
-			);
+			if (first) signalGroup(child, "SIGTERM");
+			timers.push(setTimeout(() => signalGroup(child, "SIGKILL"), graceMs));
 		};
+		let settle = () => {};
+		const untrack =
+			child.pid === undefined
+				? () => {}
+				: trackAcceptCheck({
+						pgid: child.pid,
+						owner: options.owner,
+						terminate: (graceMs) => stop("aborted", graceMs),
+						finished: new Promise<void>((resolve) => {
+							settle = resolve;
+						}),
+					});
 		const onAbort = () => stop("aborted");
 		const finish = (result: AcceptCommandResult) => {
 			if (done) return;
@@ -116,6 +132,8 @@ export const runAcceptCommand: AcceptRunner = (options) =>
 			options.signal?.removeEventListener("abort", onAbort);
 			// A bounded check leaves nothing running behind it.
 			signalGroup(child, "SIGKILL");
+			untrack();
+			settle();
 			child.stdout?.destroy();
 			child.stderr?.destroy();
 			resolve(result);

@@ -49,6 +49,11 @@ configuration directory.
    (`FinalizeControl.interruption`): verdict `skipped`, manifest
    `cancelled`, and ledger `cancelled`, even when the check finished on its
    own first. Cancellation is never inferred from the check's output.
+   A running check is owned and never outlives its owner. Each process tracks
+   its check process groups (`maestro/adapters/pi/accept-groups.ts`). The
+   child's `session_shutdown` and the parent's quit terminate their own
+   checks: SIGTERM, then SIGKILL after 1 second, awaited. A synchronous
+   `exit` hook SIGKILLs any group still tracked.
 6. A rejected verdict is a completed negative result: it starts no model
    fallback and changes neither the sidebar status nor the worktree manifest
    state. The verdict appears in the delivery, its details, and the ledger.

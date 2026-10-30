@@ -455,7 +455,7 @@ local host evidence, not part of the delivery.
 ## Conformance
 
 A host conforms to v0.1 when a test suite can verify each item below. Items 1
-to 14 are v0; items 15 to 19 are the v0.1 verdicts. The tests listed are this
+to 14 are v0; items 15 to 20 are the v0.1 verdicts. The tests listed are this
 repository's checks. Unless noted, they are in `test/test.ts`.
 
 | # | Requirement | Tests in this repository |
@@ -479,12 +479,13 @@ repository's checks. Unless noted, they are in `test/test.ts`.
 | 17 | The parent re-check alone decides `accepted`, `rejected`, or `error`; a timeout is `error`; skipped runs and unchecked runs get `skipped` and `none`; a rejected verdict starts no fallback and leaves the manifest state. | In `test/maestro/accept-recheck.test.ts`, "the parent re-check accepts a completed run and writes one ledger line", "the parent re-check is authoritative over the child's reported pass", "a re-check timeout is verdict error, not rejected", "help requests, provider errors and failed exits skip the re-check", "a rejected verdict never starts a model fallback", "worktree re-check runs in the worktree, reports changed check files and leaves the manifest state" |
 | 18 | A cancel during the parent re-check stops it and delivers one cancelled result with verdict `skipped`; a confirmed cancel is authoritative over the check's own result, the manifest, and the ledger. | In `test/maestro/accept-recheck.test.ts`, "a cancel during the parent re-check stops it and delivers a cancelled, skipped result" and "a confirmed cancel while the check's pipes drain wins: skipped, cancelled manifest and ledger, one delivery"; in `test/maestro/accept-check.test.ts`, "honors an abort while inherited pipes keep it running after the shell exits" |
 | 19 | The `Check:` line sits in the head outside the envelope, reads `none` without a check, and survives the size budget; check output and changed file names are encoded and cannot forge a host line; the ledger has only its listed keys and an off switch. | In `test/maestro/accept-check.test.ts`, the "Check delivery line" suite, "builds a ledger line with only the listed keys", "is on by default and accepts only a boolean"; in `test/maestro/accept-recheck.test.ts`, "an unchecked run has no verdict and logs verdict none; the off switch writes nothing"; and in `test/integration/subagent-lifecycle.test.ts`, "delivers an accept-check verdict (success) with one retry and one outcome-ledger line" and its `(reject)` twin |
+| 20 | A running check never outlives its owner: the child's shutdown and the parent's quit terminate their own checks (SIGTERM, then SIGKILL after 1 second, awaited), and a process exit kills any group still tracked. | In `test/maestro/accept-shutdown.test.ts`, "the child's session_shutdown terminates its running check within the bound" and "an owner that aborts its check and exits at once leaves no group behind"; in `test/maestro/accept-recheck.test.ts`, "parent shutdown terminates a TERM-ignoring re-check within the bound" |
 
 Another host can port these tests against its own delivery function. Items 1
 to 5 and 9, and item 11 apart from its renderer check, need only the message
 text. Items 6, 7, 12, and 13 need the host's evidence and records, item 8
 needs a schema snapshot of its own tools, items 10 and 11 need the host's
-renderer, and item 14 needs its other sinks. Items 15 to 19 need the host's
+renderer, and item 14 needs its other sinks. Items 15 to 20 need the host's
 request validation, child protocol, and re-check; item 19's message checks
 need only the message text.
 
