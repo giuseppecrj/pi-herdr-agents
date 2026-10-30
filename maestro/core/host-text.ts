@@ -28,6 +28,8 @@ const UNSAFE_JSON_CHAR = /[\u007f-\u009f\u2028\u2029\p{Bidi_Control}<]/gu;
 const DISPLAY_LINE_BREAK = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/;
 const DISPLAY_CONTROL = /[\p{Cc}\p{Bidi_Control}]/gu;
 const SHELL_WORD = /^[A-Za-z0-9_@%+=:,./-]+$/;
+// Non-global twin of REPORT_DELIMITER for a stateless test.
+const REPORT_DELIMITER_TEST = /<\/?subagent_report/i;
 
 function escapeChar(char: string): string {
 	return `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
@@ -96,11 +98,18 @@ export function jsonArgument(value: string): string {
 
 /**
  * A shell word that a POSIX shell reads back as exactly `value`, or undefined
- * when no one-line form is safe to show (a line break or other control).
+ * when no one-line form is safe to show: a line break or other control, or a
+ * literal report delimiter, which shell quoting would keep verbatim and so
+ * forge a second envelope tag in the parent message.
  */
 export function shellArgument(value: string): string | undefined {
 	if (SHELL_WORD.test(value)) return value;
-	if (!value || UNSAFE_HOST_CHAR_TEST.test(value)) return undefined;
+	if (
+		!value ||
+		UNSAFE_HOST_CHAR_TEST.test(value) ||
+		REPORT_DELIMITER_TEST.test(value)
+	)
+		return undefined;
 	return shellQuote(value);
 }
 

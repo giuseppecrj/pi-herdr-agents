@@ -305,17 +305,33 @@ export function splitChildReport(text: string): ChildReportParts {
 	};
 }
 
+/**
+ * The resume command, only in an exact one-line shell form: omitted when the
+ * path has a control or a report delimiter, or exceeds the command bound.
+ */
+function resumeField(sessionFile: string): HostField {
+	const resume = shellArgument(sessionFile);
+	return resume && resume.length <= HOST_PATH_CHARS
+		? hostLine`Resume: pi --session ${command(resume)}`
+		: hostText(
+				"Resume: omitted (no exact one-line shell form is safe to show; details.sessionFile keeps the path)",
+			);
+}
+
+/**
+ * The serialized Resume line exactly as the model-facing message carries it.
+ * Renderers show this line; they never rebuild a command from display text.
+ */
+export function resumeCommandLine(sessionFile: string): string {
+	return renderField(resumeField(sessionFile));
+}
+
 /** Session lines; the resume command appears only in an exact one-line form. */
 export function sessionFields(sessionFile: string | undefined): HostField[] {
 	if (!sessionFile) return [];
-	const resume = shellArgument(sessionFile);
 	return [
 		hostLine`Session: ${value(sessionFile, HOST_PATH_CHARS)}`,
-		resume && resume.length <= HOST_PATH_CHARS
-			? hostLine`Resume: pi --session ${command(resume)}`
-			: hostText(
-					"Resume: omitted (no exact one-line shell form fits; details.sessionFile keeps the path)",
-				),
+		resumeField(sessionFile),
 	];
 }
 

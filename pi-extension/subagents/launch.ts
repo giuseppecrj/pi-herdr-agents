@@ -1,7 +1,3 @@
-import {
-	encodeHostValue,
-	HOST_ERROR_CHARS,
-} from "../../maestro/core/host-text.ts";
 import { randomUUID } from "node:crypto";
 import type {
 	PiLaunchSnapshot,
@@ -77,10 +73,9 @@ export function createLaunchPlanner({
 			const diagnostic = discoverAgentCatalog(runtime.pi).diagnostics.find(
 				(candidate) => candidate.agentName === params.agent,
 			);
+			// Raw here: the public tool boundary and the delivery serializer encode.
 			throw new Error(
-				diagnostic
-					? encodeHostValue(diagnostic.message, HOST_ERROR_CHARS)
-					: missingRoleMessage(params.agent),
+				diagnostic ? diagnostic.message : missingRoleMessage(params.agent),
 			);
 		}
 		if (!ctx.model)
@@ -158,10 +153,9 @@ export function createLaunchPlanner({
 			const diagnostic = discoverAgentCatalog(runtime.pi).diagnostics.find(
 				(candidate) => candidate.agentName === params.agent,
 			);
+			// Raw here: the public tool boundary and the delivery serializer encode.
 			throw new Error(
-				diagnostic
-					? encodeHostValue(diagnostic.message, HOST_ERROR_CHARS)
-					: missingRoleMessage(params.agent),
+				diagnostic ? diagnostic.message : missingRoleMessage(params.agent),
 			);
 		}
 		if (!ctx.model)

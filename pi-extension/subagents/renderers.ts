@@ -6,7 +6,11 @@ import {
 	isString,
 } from "../../maestro/core/config/type-guards.ts";
 import { displayLines, encodeHostValue } from "../../maestro/core/host-text.ts";
-import { formatElapsed, splitChildReport } from "./presentation.ts";
+import {
+	formatElapsed,
+	resumeCommandLine,
+	splitChildReport,
+} from "./presentation.ts";
 
 /**
  * The human view of a delivered message: host lines unprefixed, the child's
@@ -157,11 +161,9 @@ export function registerMessageRenderers(pi: ExtensionAPI): void {
 								`Session: ${displayValue(String(details.sessionFile))}`,
 							),
 						);
+						// The serialized command the model sees: shell-quoted, or omitted.
 						contentLines.push(
-							theme.fg(
-								"dim",
-								`Resume:  pi --session ${displayValue(String(details.sessionFile))}`,
-							),
+							theme.fg("dim", resumeCommandLine(String(details.sessionFile))),
 						);
 					}
 				} else {

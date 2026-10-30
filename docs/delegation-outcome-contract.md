@@ -188,7 +188,10 @@ The raw values stay in structured details (`errorMessage`, `fallbackFailures`,
 #### Executable commands
 
 A command the parent may run is not display text, so it is never encoded or
-abbreviated (`presentation.ts` `cleanupCommandFields`, `sessionFields`):
+abbreviated (`presentation.ts` `cleanupCommandFields`, `sessionFields`). An
+argument is serialized losslessly or the command is omitted; a command never
+carries a literal report delimiter (`<subagent_report` or `</subagent_report`,
+in any case):
 
 - `worktree_remove({ target: … })` takes `jsonArgument(path)`: a JSON string
   literal whose separators, bidi controls, and `<` are `\uXXXX` escapes.
@@ -200,8 +203,15 @@ abbreviated (`presentation.ts` `cleanupCommandFields`, `sessionFields`):
   only for a workspace ID that both read back unchanged
   (`[A-Za-z0-9._:@+-]`, at most 200 characters).
 - `Resume: pi --session <path>` uses `shellArgument`: the bare path when it is a
-  plain shell word, a single-quoted word otherwise, and an `omitted` note when
-  the path has a line break or control or exceeds 1,000 characters.
+  plain shell word, a single-quoted word otherwise, and the note
+  `Resume: omitted (no exact one-line shell form is safe to show; details.sessionFile keeps the path)`
+  when the path has a line break or control, contains a report delimiter, or
+  exceeds 1,000 characters. Shell quoting keeps a delimiter verbatim, so a
+  quoted path would forge a second envelope tag; `details.sessionFile` keeps the
+  exact path. The `Session:` line still shows the path, encoded.
+- The human renderer shows the same serialized Resume line
+  (`presentation.ts` `resumeCommandLine`, `renderers.ts`); it never rebuilds a
+  command from a display value.
 
 #### Persistent task issuance
 
@@ -241,7 +251,12 @@ delivery messages, with the raw value kept in `details`:
   `control-tools.ts`), and launch and resume acknowledgements
   (`launch-tools.ts`, `launch.ts`);
 - control replies that echo a name, an ID, or an error (`controls.ts`,
-  `control-tools.ts`, `persistent.ts`).
+  `control-tools.ts`, `persistent.ts`);
+- errors thrown by the public `subagent` and `subagent_resume` tools. Routing,
+  adapter, Git, and worktree failures carry raw paths, role models, and Git
+  output, so the tool boundary encodes the thrown message once, as one line
+  bounded at 4,000 characters, and keeps the raw error as its `cause`
+  (`launch-tools.ts` `registerEncodedTool`). Inner layers throw raw text.
 
 ### Size bounds
 
@@ -292,7 +307,7 @@ file, and any worktree handoff.
 
 | Evidence | Message text | Structured details |
 | --- | --- | --- |
-| Session file | `Session: <path>` and `Resume: pi --session <shell word>` (`presentation.ts` `sessionFields`) | `sessionFile` |
+| Session file | `Session: <path>` and `Resume: pi --session <shell word>`, or the [omitted note](#executable-commands) (`presentation.ts` `sessionFields`) | `sessionFile` |
 | Model provenance | `Requested model:`, `Models attempted:` when more than one, `Model used:`, and `Model failures (raw errors, encoded, in attempt order):` (`resolveResultPresentation`) | `fallbackAttempts`, `fallbackFailures`, `runtimePlan` |
 | Runtime mismatch | `Runtime warning: <text>` | `runtimePlan.runtimeMismatch` |
 | Provider error | `Error: <encoded error>` in the head | `errorMessage` (raw) |
@@ -386,15 +401,16 @@ listed are this repository's checks. Unless noted, they are in `test/test.ts`.
 | 8 | No released tool schema changes in a breaking way. | In `test/maestro/tool-schema.test.ts`, "has no breaking change against the last released schema", "keeps the contract pstack depends on", and the "tool schema compatibility rules" suite |
 | 9 | No child-controlled value forges a host line: outside the block, the only `Parent action:` line is the host's continuation, and no `Model used:` or `Worktree result retained for review:` line comes from the child, at any truncation length. Help requests use the parent-owned name. | The "host lines resist child-controlled text" suite: "encodes an .exit sidecar errorMessage as one host line", "encodes a transcript assistant errorMessage and records child provenance", "encodes fallback failure errors from a failed attempt", "names a ping by the parent-owned run name, not the sidecar's name", "encodes a transcript-reported model in Model used and the runtime warning", "encodes ledger task strings in persistent crash notices", "encodes worktree filenames that contain newlines"; and in "parent messages are structured, not cut", "never yields a forged host line outside the envelope at any truncation length", "encodes U+061C and every other bidi control" |
 | 10 | A human view of a result or help request keeps a visible boundary between the child report and host evidence: child text is split on every line separator and its terminal controls are escaped before each line is prefixed. | "labels child text distinctly from host evidence in the rendered result", "fences a ping's child text in the rendered help request", "renders a persistent help request from its bounded envelope", "normalizes every line separator and neutralizes terminal controls before prefixing" |
-| 11 | Executable cleanup commands round-trip the exact path, and an oversized path command is omitted for the workspace-ID form. | "serializes the cleanup command losslessly, so the exact path round-trips", "omits an oversized path command and offers the workspace-ID form instead" |
+| 11 | Executable commands round-trip the exact argument or are omitted: an oversized cleanup path command is omitted for the workspace-ID form, a resume command whose path contains a report delimiter is omitted, the message keeps exactly one opening and one closing tag, and the human renderer shows the same serialized command. | "serializes the cleanup command losslessly, so the exact path round-trips", "omits an oversized path command and offers the workspace-ID form instead", and in "public launch errors and executable commands", "omits the resume command when the session path contains a report delimiter", "keeps exactly one envelope for hostile session and cleanup paths together", "renders the expanded Resume line from the serialized command, never from display text" |
 | 12 | Persistent task issuance comes from parent memory. An event for a task the parent did not issue changes no accounting, claims no idle state, and yields at most one encoded notice that does not start a turn. | "does not let a forged ledger dispatched entry make an unknown task look issued", "ignores an unknown persistent task ID with one encoded notice" |
 | 13 | Error provenance is explicit: host diagnostics stay `host`, and only text the child wrote is `child-error`. | "marks host-generated completion errors as host and child-written ones as child", "encodes a transcript assistant errorMessage and records child provenance" |
-| 14 | Other parent-facing sinks encode every variable value. | "encodes a U+2028 activity label at the widget and recovery-status sinks", "encodes a malformed .git newline path in worktree_list", "encodes inspection errors in worktree_list, worktree_remove and /worktree list", "encodes every launch diagnostic", "encodes names echoed by control tool replies", "encodes role-definition values in subagents_list rows" |
+| 14 | Other parent-facing sinks encode every variable value, including errors thrown by the public `subagent` and `subagent_resume` tools. | "encodes a U+2028 activity label at the widget and recovery-status sinks", "encodes a malformed .git newline path in worktree_list", "encodes inspection errors in worktree_list, worktree_remove and /worktree list", "encodes every launch diagnostic", "encodes names echoed by control tool replies", "encodes role-definition values in subagents_list rows", and in "public launch errors and executable commands", "encodes a malformed .git worktree failure thrown by the public subagent tool", "encodes a role model with U+2028 in the public subagent routing error", "encodes a hostile session path in the public subagent_resume failure" |
 
 Another host can port these tests against its own delivery function. Items 1
-to 5, 9, and 11 need only the message text. Items 6, 7, 12, and 13 need the
-host's evidence and records, item 8 needs a schema snapshot of its own tools,
-item 10 needs the host's renderer, and item 14 needs its other sinks.
+to 5 and 9, and item 11 apart from its renderer check, need only the message
+text. Items 6, 7, 12, and 13 need the host's evidence and records, item 8
+needs a schema snapshot of its own tools, items 10 and 11 need the host's
+renderer, and item 14 needs its other sinks.
 
 ## Versioning
 
