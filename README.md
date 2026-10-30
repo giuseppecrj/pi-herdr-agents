@@ -253,7 +253,7 @@ The optional [Pi Herdr Agents Sidebar](plugins/sidebar/README.md) Herdr plugin a
 - A `pi-herdr-agents` release newer than `3.3.1`, which marks children with no setting. Releases `3.2.0` through `3.3.1` also need `"sidebar": { "enabled": true }` in `config.json`, and macOS needs a release newer than `3.2.1`.
 - Linux or macOS
 - Herdr's Pi integration (`herdr integration install pi`), which reports each child's session to Herdr. The extension marks a child only while Herdr reports that child's own session.
-- Herdr `0.9.0` or later, the first release with the agent view API. Tested on `0.9.1` and `0.9.2-preview.2026-09-29-8e78f929d8f0`; other builds are untested.
+- Herdr `0.9.0` or later, the first release with the agent view API. Tested on `0.9.1`, `0.9.2-preview.2026-09-29-8e78f929d8f0`, and `0.9.5`; other builds are untested.
 - `node` on the `PATH` of the Herdr server
 
 1. Install the Herdr plugin. Herdr shows the manifest and commands for review:
@@ -272,7 +272,7 @@ The optional [Pi Herdr Agents Sidebar](plugins/sidebar/README.md) Herdr plugin a
 
 Focus replaces the server-wide Agents view, including any filter set by another tool. Because Herdr keeps one view, the plugin also replaces another tool's view whenever it detects an agent, unless you chose All. All clears only this plugin's view and leaves another tool's view untouched.
 
-Focus is display only. Hidden children keep running and still raise notifications. Blocked children and children with unknown status stay visible. The marker follows the pane and is cleared within about 5 seconds after the child exits or is suspended, so an agent you start by hand in a delegated pane can stay hidden that long. See [Sidebar markers](docs/configuration.md#sidebar-markers) and the plugin's [limits](plugins/sidebar/README.md#reusing-a-delegated-pane).
+Focus is display only. Hidden children keep running and still raise notifications. Blocked children and children with unknown status stay visible. The marker follows the pane and is cleared within about 5 seconds after the child exits, so an agent you start by hand in a delegated pane can stay hidden that long. With Herdr 0.9.4 or later, a suspended child stays marked until it resumes, exits, or another Pi takes its pane, and a non-Pi program started at that pane's shell meanwhile can stay hidden until then. See [Sidebar markers](docs/configuration.md#sidebar-markers) and the plugin's [limits](plugins/sidebar/README.md#reusing-a-delegated-pane).
 
 ## Configuration
 
