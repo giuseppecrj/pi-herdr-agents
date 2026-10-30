@@ -319,8 +319,7 @@ It renews the token on supervision checks, each time only after Herdr still
 reports that session. Herdr learns each Pi's session from its own Pi
 integration (`herdr integration install pi`), and drops it when that Pi exits,
 so without the integration nothing is marked. With Herdr 0.9.4 or later, a Pi
-suspended with Ctrl-Z keeps its session until it resumes, exits, or another Pi
-takes the pane. The parent clears the token when the run finalizes or is suppressed, or
+suspended with Ctrl-Z keeps its session until it resumes or exits. The parent clears the token when the run finalizes or is suppressed, or
 when Herdr no longer reports the child's session. A `/worktree` handoff session
 is never marked.
 
@@ -334,8 +333,8 @@ up to 15 seconds after the last write Herdr applied. A marker belongs to the
 pane, so after the child exits, an agent started by hand in that pane can stay
 hidden by Focus until the next renewal clears the marker, usually within 5
 seconds. With Herdr 0.9.4 or later, a suspended child stays marked until it
-resumes, exits, or another Pi takes its pane; a non-Pi program started at that
-pane's shell meanwhile can stay hidden until then. See
+resumes or exits; a non-Pi program started at that pane's shell meanwhile can
+stay hidden until then. See
 [what a marker proves](../plugins/sidebar/README.md#what-a-marker-proves) and
 [reusing a delegated pane](../plugins/sidebar/README.md#reusing-a-delegated-pane).
 

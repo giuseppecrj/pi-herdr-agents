@@ -183,8 +183,7 @@ session occupies the pane when Herdr draws the row.
 Herdr's Pi integration reports each Pi's session file for its pane. Herdr
 drops that session when Pi releases the pane or exits, and replaces it when
 another agent reports its own session. With Herdr 0.9.4 or later, a Pi
-suspended with Ctrl-Z keeps its session until it resumes, exits, or another Pi
-takes the pane.
+suspended with Ctrl-Z keeps its session until it resumes or exits.
 The parent Pi session writes the marker once Herdr reports the session file
 the parent assigned to the child, waiting up to 15 seconds after launch. It
 renews the marker every 4 to 5 seconds, and only after Herdr still reports
@@ -215,8 +214,8 @@ Some leftover markers still occur:
   during that window stays hidden by Focus until the clear arrives or the
   marker expires.
 - With Herdr 0.9.4 or later, a suspended child stays marked until it resumes,
-  exits, or another Pi takes its pane. A non-Pi program started at that pane's
-  shell meanwhile can stay hidden by Focus until then.
+  or exits. A non-Pi program started at that pane's shell meanwhile can stay
+  hidden by Focus until then.
 - If the parent restarts while the same Herdr server keeps running, and the
   system clock has moved backwards, the new parent's sequence numbers can fall
   behind the last ones Herdr applied. Herdr then ignores its writes until the
@@ -236,11 +235,9 @@ after the last write Herdr accepted if the clear is lost. A cleared marker
 never returns.
 
 With Herdr 0.9.4 or later, a child you suspend with Ctrl-Z keeps its session,
-so its marker stays live until it resumes with `fg`, exits, or another Pi takes
-the pane. When another Pi takes the pane, Herdr replaces the session, the
-parent retires the old marker, and the new Pi is shown under Focus. A non-Pi
-program you start at that pane's shell in the meantime can stay hidden by
-Focus until then; run All to see it.
+so its marker stays live until it resumes with `fg` or exits. A non-Pi program
+you start at that pane's shell in the meantime can stay hidden by Focus until
+then; run All to see it.
 
 ## Limits
 
