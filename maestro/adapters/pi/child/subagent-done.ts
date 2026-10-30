@@ -27,11 +27,18 @@ export function shouldMarkUserTookOver(agentStarted: boolean): boolean {
 export function shouldAutoExitOnAgentEnd(
 	_userTookOver: boolean,
 	messages: any[] | undefined,
+	runAborted = false,
 ): boolean {
 	// Manual input should not strand an auto-exit subagent. If the latest agent
 	// turn completed normally, close the session. Escape/abort still leaves it
 	// open for inspection or another prompt.
 	//
+	// Pi's agent_settled reports the abort itself (`aborted`). Trust it over the
+	// stop reason: Escape during a tool lets Pi start one more provider request
+	// on the aborted signal, and that request is recorded as stopReason "error"
+	// ("This operation was aborted"), not "aborted".
+	if (runAborted) return false;
+
 	// stopReason: "error" (e.g. exhausted retries on a provider overload) also
 	// returns true — we want to shut down so the parent is woken up — but we
 	// pair this with findLatestAssistantError() so the parent learns it was an
@@ -258,7 +265,8 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("agent_settled", (_event, ctx) => {
+	pi.on("agent_settled", (event, ctx) => {
+		const runAborted = event?.aborted === true;
 		if (persistent && !completionFinalized) {
 			let messages = latestAgentMessages;
 			try {
@@ -271,7 +279,10 @@ export default function (pi: ExtensionAPI) {
 			} catch {
 				// Fall back to the latest low-level run when session evidence is unavailable.
 			}
-			if (currentTask && shouldAutoExitOnAgentEnd(userTookOver, messages)) {
+			if (
+				currentTask &&
+				shouldAutoExitOnAgentEnd(userTookOver, messages, runAborted)
+			) {
 				appendPersistentTaskEvent(
 					process.env.PI_SUBAGENT_SESSION ?? "",
 					buildPersistentTaskEvent(currentTask, generation),
@@ -293,7 +304,7 @@ export default function (pi: ExtensionAPI) {
 			// Fall back to the latest low-level run when session evidence is unavailable.
 		}
 
-		if (!shouldAutoExitOnAgentEnd(userTookOver, messages)) return;
+		if (!shouldAutoExitOnAgentEnd(userTookOver, messages, runAborted)) return;
 		completionFinalized = true;
 
 		// Surface a settled stopReason: "error" to the parent via the .exit
