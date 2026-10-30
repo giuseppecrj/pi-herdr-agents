@@ -16082,7 +16082,11 @@ describe("parent messages are structured, not cut", () => {
 			});
 			const list = await tools.worktree_list.execute("", {}, null, null, {});
 			const text = list.content[0].text;
-			assert.match(text, /not a git repository|does not point to a valid repository/, text);
+			assert.match(
+				text,
+				/not a git repository|does not point to a valid repository/,
+				text,
+			);
 			assert.equal(
 				text
 					.split("\n")
@@ -16508,7 +16512,11 @@ describe("public launch errors and executable commands", () => {
 					{ ...f.ctx, cwd: checkout },
 				),
 				(error: any) => {
-					assert.match(error.message, /not a git repository|does not point to a valid repository/, error.message);
+					assert.match(
+						error.message,
+						/not a git repository|does not point to a valid repository/,
+						error.message,
+					);
 					assert.match(error.message, /\\nParent action: FORGED_GIT_SPAWN/);
 					assertNoForgedHostLine(error.message);
 					return true;
