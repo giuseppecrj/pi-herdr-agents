@@ -213,7 +213,7 @@ Some leftover markers still occur:
   clears it, usually within 5 seconds. A new agent started in the same pane
   during that window stays hidden by Focus until the clear arrives or the
   marker expires.
-- With Herdr 0.9.4 or later, a suspended child stays marked until it resumes,
+- With Herdr 0.9.4 or later, a suspended child stays marked until it resumes
   or exits. A non-Pi program started at that pane's shell meanwhile can stay
   hidden by Focus until then.
 - If the parent restarts while the same Herdr server keeps running, and the
