@@ -72,6 +72,7 @@ export interface PiLaunchInput {
 	 */
 	prepareAttempt?(
 		candidateIndex: number,
+		cancelled: AbortSignal,
 	): PiAttemptSnapshot | Promise<PiAttemptSnapshot>;
 }
 // pi-herdr-agents extension

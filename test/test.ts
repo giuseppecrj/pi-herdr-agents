@@ -1717,6 +1717,78 @@ describe("host adapter migration", () => {
 			assert.deepEqual(f.runtime.heldDeliveries ?? [], []);
 			assert.equal(f.runtime.runningSubagents.size, 0);
 		}));
+	it("ends a fallback's wait for the replacement session when its run is cancelled, delivering one cancelled result", async () =>
+		withAdapterHost(async (f) => {
+			const invoking = invalidatableContext(f.ctx);
+			const first = await f.launch(
+				{
+					name: "fallback",
+					task: "bounded",
+					model: "fake/first, fake/second, fake/third",
+				},
+				f.mock,
+				invoking.ctx,
+			);
+			for (const shutdown of f.mock.eventHandlers.get("session_shutdown") ?? [])
+				await shutdown({ reason: "reload" }, {});
+			invoking.invalidate();
+			f.mock.invalidate();
+			const reloaded = await import(
+				`../pi-extension/subagents/index.ts?reload-gap-cancel-${Date.now()}`
+			);
+			const replacement = createMockExtensionApi();
+			f.apis.push(replacement);
+			replacement.api.getThinkingLevel = () => "high";
+			reloaded.default(replacement.api, { infrastructure: f.infrastructure });
+
+			await f.finish(first, {
+				type: "error",
+				errorMessage: "first account rejected",
+			});
+			await f.turn();
+			assert.equal(f.commands.length, 1, "nothing launches during the gap");
+			assert.equal(f.runtime.heldDeliveries?.length, 1, "the fallback waits");
+
+			const report = await replacement.registeredTools
+				.find((tool: any) => tool.name === "subagent_cancel")
+				.execute(
+					"cancel",
+					{ id: first.id },
+					new AbortController().signal,
+					undefined,
+					f.ctx,
+				);
+			assert.equal(report.details.status, "requested");
+			await until(
+				f,
+				() => (f.runtime.heldDeliveries ?? []).length === 0,
+				"the cancelled run to end its wait",
+			);
+			assert.equal(
+				replacement.sentMessages.length,
+				0,
+				"held until the replacement starts",
+			);
+
+			for (const start of replacement.eventHandlers.get("session_start") ?? [])
+				await start(
+					{ reason: "reload" },
+					{ ...f.ctx, hasUI: false, ui: { notify() {}, setWidget() {} } },
+				);
+			await until(
+				f,
+				() => replacement.sentMessages.length > 0,
+				"the cancelled result delivery",
+			);
+			await f.turn();
+			assert.equal(f.commands.length, 1, "no fallback launches");
+			assert.equal(f.mock.sentMessages.length, 0);
+			assert.equal(replacement.sentMessages.length, 1);
+			const { details } = replacement.sentMessages[0].message;
+			assert.equal(details.cancellation.termination, "confirmed");
+			assert.deepEqual(details.fallbackAttempts, ["fake/first"]);
+			assert.equal(f.runtime.runningSubagents.size, 0);
+		}));
 	for (const cwd of [undefined, "work"])
 		it(`launches a fallback through the replacement parent after reload in the invocation's ${cwd ? "relative tool cwd" : "parent cwd"}`, async () =>
 			withAdapterHost(async (f) => {

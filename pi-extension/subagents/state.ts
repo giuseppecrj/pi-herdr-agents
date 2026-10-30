@@ -190,19 +190,41 @@ export function bindLiveApi(runtime: SubagentRuntime, api: ExtensionAPI): void {
 export async function awaitLiveContext(
 	runtime: SubagentRuntime,
 	id: string,
+	cancelled?: AbortSignal,
 ): Promise<ExtensionContext | undefined> {
 	if (runtime.latestCtx || !runtime.reloadGap) return runtime.latestCtx;
 	// session_start and tool calls set latestCtx before bindLiveApi releases.
-	return (await holdDelivery(runtime, id)) ? runtime.latestCtx : undefined;
+	return (await holdDelivery(runtime, id, cancelled))
+		? runtime.latestCtx
+		: undefined;
 }
 
-/** Wait for the next live parent API; `undefined` means the parent exited. */
+/**
+ * Wait for the next live parent API; `undefined` means the parent exited or
+ * `cancelled` aborted, which ends the wait at once and leaves the queue.
+ */
 export function holdDelivery(
 	runtime: SubagentRuntime,
 	id: string,
+	cancelled?: AbortSignal,
 ): Promise<ExtensionAPI | undefined> {
-	return new Promise((release) => {
-		(runtime.heldDeliveries ??= []).push({ id, release });
+	return new Promise((resolve) => {
+		const held: HeldDelivery = {
+			id,
+			release(api) {
+				cancelled?.removeEventListener("abort", onCancel);
+				resolve(api);
+			},
+		};
+		const onCancel = () => {
+			const queue = runtime.heldDeliveries;
+			const at = queue?.indexOf(held) ?? -1;
+			if (at >= 0) queue?.splice(at, 1);
+			held.release(undefined);
+		};
+		if (cancelled?.aborted) return resolve(undefined);
+		cancelled?.addEventListener("abort", onCancel, { once: true });
+		(runtime.heldDeliveries ??= []).push(held);
 	});
 }
 

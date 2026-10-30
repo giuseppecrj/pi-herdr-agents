@@ -728,13 +728,14 @@ export function createDefaultRunSession(
 				input.role.defaults?.persistent ??
 				false,
 			candidates: input.plans,
-			async spawnAttempt(_spawn: SpawnOptions, index) {
+			async spawnAttempt(_spawn: SpawnOptions, index, cancelled) {
 				const plan = input.plans[index];
 				attempts.push(plan.model);
 				const acquisition = { taskId: input.task.id, suppressed: false };
 				state.pending.add(acquisition);
+				let spawning = false;
 				try {
-					const current = (await input.prepareAttempt?.(index)) ?? {
+					const current = (await input.prepareAttempt?.(index, cancelled)) ?? {
 						...input,
 						snapshot: (capturedSnapshot ??= state.options.getLaunchSnapshot()),
 					};
@@ -752,6 +753,7 @@ export function createDefaultRunSession(
 					// prepareAttempt rebuilds from the live parent for every attempt.
 					assertModelInScope(plan.model, current.snapshot.modelRegistry);
 					const owner = adapter(current.snapshot);
+					spawning = true;
 					const handle = await owner.spawn({
 						name: input.task.name,
 						task: input.task.prompt,
@@ -788,6 +790,11 @@ export function createDefaultRunSession(
 						acquisition.suppressed,
 					);
 				} catch (error) {
+					if (cancelled.aborted && !spawning) {
+						// Cancelled while preparing: the candidate neither launched nor failed.
+						attempts.pop();
+						throw error;
+					}
 					failures.push({
 						model: plan.model,
 						error: error instanceof Error ? error.message : String(error),
