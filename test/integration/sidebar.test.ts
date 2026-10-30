@@ -517,7 +517,7 @@ describe("sidebar plugin on isolated Herdr", {
 		}
 	});
 
-	it("retires when the child's Pi exits or another Pi takes the pane; a suspended child stays marked", async () => {
+	it("retires once the child's Pi exits; a suspended child stays marked until it exits", async () => {
 		const live = panes.get("child-live") ?? "";
 		const occupant = occupants.find((entry) => entry.pane === live);
 		assert.ok(occupant);
@@ -560,9 +560,8 @@ describe("sidebar plugin on isolated Herdr", {
 		assert.equal(await paneToken(live), undefined);
 
 		// Herdr 0.9.4 and later keep a suspended Pi as the pane's agent session
-		// until it resumes, exits, or another Pi takes the pane. So the marker
-		// stays live while the child is suspended, and retires once a
-		// replacement Pi owns the pane.
+		// until it resumes or exits. So the marker stays live while the child is
+		// suspended, and retires once the stopped Pi is killed.
 		const suspended = await startPi(live, "child-suspends");
 		const second = markers.attach({
 			surface: live,
@@ -588,20 +587,20 @@ describe("sidebar plugin on isolated Herdr", {
 			"suspended child still hidden under Focus",
 		);
 
-		const replacement = await startPi(live, "child-replaces");
+		// Killing the stopped Pi makes Herdr clear the session a few seconds later.
+		await killPi(suspended);
+		await waitForSession(live, undefined);
 		clock.now += DELEGATED_MARKER_RENEW_MS;
 		second.renew();
 		await second.settled();
 		assert.equal(second.kind, "retired");
 		await waitForToken(live, undefined);
+		await startOccupant(live, "child-reuse", "working");
 		await waitForRendered(
-			(lines) => header(lines) === "focus" && shows(lines, "pi"),
-			"replacement Pi visible under Focus",
+			(lines) => header(lines) === "focus" && shows(lines, "child-reuse"),
+			"replacement occupant visible under Focus",
 		);
-
-		await killPi(replacement);
-		await killPi(suspended);
-		assert.equal(ownsPi(suspended), false);
+		assert.equal(await paneToken(live), undefined);
 		assert.equal((await invoke("all")).exit_code, 0);
 	});
 
