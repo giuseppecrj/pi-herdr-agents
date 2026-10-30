@@ -8,7 +8,7 @@ import {
 	isPlainObject,
 	isString,
 } from "../../maestro/core/config/type-guards.ts";
-import type { SubagentRuntime } from "./state.ts";
+import { bindLiveApi, type SubagentRuntime } from "./state.ts";
 import {
 	SubagentParams,
 	discoverAgentCatalog,
@@ -188,6 +188,8 @@ export function registerSubagentTool(
 					parentThinking,
 				);
 				runtime.latestCtx = ctx;
+				// A running tool proves this load's API is live.
+				bindLiveApi(runtime, pi);
 				const id = randomUUID();
 				const attempt = {
 					id,
@@ -426,6 +428,8 @@ export function registerResumeTool(
 				}
 
 				runtime.latestCtx = ctx;
+				// A running tool proves this load's API is live.
+				bindLiveApi(runtime, pi);
 				const controlTaskId = randomUUID();
 				const session = runtime.session!;
 				const handle = await session.resumePi({
