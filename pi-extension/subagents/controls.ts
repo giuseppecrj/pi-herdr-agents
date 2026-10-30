@@ -5,7 +5,7 @@ import type {
 } from "../../maestro/runtime/index.ts";
 import { markInterruptRequested } from "../../maestro/core/lifecycle.ts";
 import type { RunningSubagent, SubagentRuntime } from "./state.ts";
-import { ensureLifecycle, type Observation } from "./observation.ts";
+import type { Observation } from "./observation.ts";
 import {
 	encodeHostValue,
 	HOST_ERROR_CHARS,
@@ -163,7 +163,7 @@ export function createControls({
 			};
 		}
 
-		running.lifecycle = markInterruptRequested(ensureLifecycle(running), now);
+		running.lifecycle = markInterruptRequested(running.lifecycle, now);
 		updateWidget();
 
 		return {

@@ -162,6 +162,11 @@ import type { SubagentActivityState } from "../maestro/core/types.ts";
 import type { TaskPreferences } from "../maestro/core/config/task-model-types.ts";
 import type { WorktreeHandoff } from "../maestro/core/worktree.ts";
 import type { RunningSubagent } from "../pi-extension/subagents/state.ts";
+import {
+	type AdoptedRow,
+	isNormalized,
+	normalizeAdoptedRows,
+} from "../pi-extension/subagents/observation.ts";
 import { projectActivity } from "../maestro/core/activity.ts";
 import subagentDoneExtension, {
 	shouldMarkUserTookOver,
@@ -341,12 +346,11 @@ const SESSION_HEADER: SessionEntry = {
 	id: "sess-001",
 	version: 3,
 };
-// Pi writes `parentId: null` on a root entry, which SessionEntry's
-// `parentId?: string` does not admit, so the entry is parsed from its JSONL
-// form like the session reader receives it.
-const MODEL_CHANGE: SessionEntry = JSON.parse(
-	'{"type":"model_change","id":"mc-001","parentId":null}',
-);
+const MODEL_CHANGE: SessionEntry = {
+	type: "model_change",
+	id: "mc-001",
+	parentId: null,
+};
 const USER_MSG: SessionEntry = {
 	type: "message",
 	id: "user-001",
@@ -1308,6 +1312,7 @@ describe("host adapter migration", () => {
 				name: "specialist",
 				task: "first",
 				persistent: true,
+				lifecycle: createLifecycle(1_000),
 			});
 			assert.ok(f.handle(child));
 			assert.equal(
@@ -2824,6 +2829,7 @@ describe("subagent_cancel public tool", { timeout: 20_000 }, () => {
 				name: "specialist",
 				task: "bounded",
 				persistent: true,
+				lifecycle: createLifecycle(1_000),
 			});
 			const response = await cancel(f, { name: "specialist" });
 			assert.match(
@@ -11733,11 +11739,6 @@ describe("subagent parent lifecycle", () => {
 			lifecycle: { ...createLifecycle(1_000), delivery: "suppressed" as const },
 		};
 		assert.equal(shouldDeliverSubagentCompletion(suppressed), false);
-
-		// Pre-lifecycle fixtures without a lifecycle field still default to pending.
-		// SAFETY: intentionally simulates legacy data missing the (typed as
-		// required) `lifecycle` field; the implementation reads it optionally.
-		assert.equal(shouldDeliverSubagentCompletion({} as any), true);
 	});
 
 	it("delivers completion through the reloaded extension API", () => {
@@ -11766,7 +11767,7 @@ describe("Task15 unowned host activity", () => {
 				});
 				recorder.sessionStart();
 				recorder.toolExecutionStart("tool", "bash");
-				// SAFETY: a seeded legacy presentation row intentionally has no lifecycle before ensureLifecycle.
+				// A seeded legacy presentation row has no lifecycle until adopted.
 				const row: any = {
 					id: "unowned",
 					name: "legacy",
@@ -11778,6 +11779,7 @@ describe("Task15 unowned host activity", () => {
 					runtimePlan: undefined,
 					activityFile: file,
 				};
+				normalizeAdoptedRows([row]);
 				hostModule.__test__.observeRunningSubagent(row, 200);
 				assert.equal(projectLifecycle(row.lifecycle, 200).kind, "active");
 				assert.equal(row.lifecycle.activityDetail.label, "bash");
@@ -11820,6 +11822,7 @@ describe("Task15 unowned host activity", () => {
 				] as const) {
 					delete row.lifecycle;
 					row.statusState = statusState;
+					normalizeAdoptedRows([row]);
 					hostModule.__test__.observeRunningSubagent(row, 500);
 					assert.equal(projectLifecycle(row.lifecycle, 500).kind, kind);
 				}
@@ -12445,6 +12448,7 @@ describe("persistent delivery batch ledger", () => {
 		id: "batch",
 		name: "Batch",
 		sessionFile,
+		lifecycle: createLifecycle(1_000),
 		persistent: true,
 		generationId: "generation",
 		logicalId: "logical",
@@ -14796,23 +14800,22 @@ describe("subagents widget rendering", () => {
 		const originalNow = Date.now;
 		Date.now = () => 30_000;
 		try {
-			const lines = testApi.renderSubagentWidgetLines(
-				[
-					// SAFETY: a pre-lifecycle runtime entry has no `lifecycle`; the widget
-					// hydrates it from `statusState`, which RunningSubagent does not allow.
-					{
-						id: "legacy",
-						name: "Legacy",
-						task: "",
-						surface: "s1",
-						startTime: 5_000,
-						sessionFile: "sess1",
-						statusState: legacyDone,
-						interactive: false,
-					} as RunningSubagent,
-				],
-				64,
-			);
+			// A pre-lifecycle runtime entry is hydrated from `statusState` when its
+			// slot is adopted.
+			const legacy: AdoptedRow = {
+				id: "legacy",
+				name: "Legacy",
+				task: "",
+				surface: "s1",
+				startTime: 5_000,
+				sessionFile: "sess1",
+				statusState: legacyDone,
+				interactive: false,
+				runtimePlan: undefined,
+			};
+			normalizeAdoptedRows([legacy]);
+			assert.ok(isNormalized(legacy));
+			const lines = testApi.renderSubagentWidgetLines([legacy], 64);
 			assert.match(lines[1], /waiting/);
 			assert.doesNotMatch(lines[1], /finalizing/);
 		} finally {
@@ -15632,6 +15635,7 @@ describe("host lines resist child-controlled text", () => {
 					name: "Batch",
 					sessionFile: join(dir, `${type}.jsonl`),
 					persistent: true,
+					lifecycle: createLifecycle(1_000),
 					generationId: "generation",
 					logicalId: "logical",
 					policyHash: "a".repeat(64),
@@ -15668,6 +15672,7 @@ describe("host lines resist child-controlled text", () => {
 				name: "Batch",
 				sessionFile: join(dir, "crash.jsonl"),
 				persistent: true,
+				lifecycle: createLifecycle(1_000),
 				generationId: "generation",
 				logicalId: "logical",
 				policyHash: "a".repeat(64),
@@ -15947,6 +15952,7 @@ describe("parent messages are structured, not cut", () => {
 				name: "Batch",
 				sessionFile: join(dir, "crash.jsonl"),
 				persistent: true,
+				lifecycle: createLifecycle(1_000),
 				generationId: "generation",
 				logicalId: "logical",
 				policyHash: "a".repeat(64),
@@ -15981,6 +15987,7 @@ describe("parent messages are structured, not cut", () => {
 				name: "Batch",
 				sessionFile: join(dir, "forged.jsonl"),
 				persistent: true,
+				lifecycle: createLifecycle(1_000),
 				generationId: "generation",
 				logicalId: "logical",
 				policyHash: "a".repeat(64),
@@ -16285,6 +16292,7 @@ describe("parent messages are structured, not cut", () => {
 				name: "Batch",
 				sessionFile: join(dir, "help.jsonl"),
 				persistent: true,
+				lifecycle: createLifecycle(1_000),
 				generationId: "generation",
 				logicalId: "logical",
 				policyHash: "a".repeat(64),

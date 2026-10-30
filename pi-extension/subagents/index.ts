@@ -69,6 +69,7 @@ import { registerMessageRenderers } from "./renderers.ts";
 import {
 	createObservation,
 	formatNoProgressAdvisoryLine,
+	normalizeAdoptedRows,
 } from "./observation.ts";
 import { createControls } from "./controls.ts";
 import {
@@ -167,6 +168,8 @@ const runtime: SubagentRuntime = readGlobalSlot<SubagentRuntime>(
 ) ?? {
 	runningSubagents: new Map<string, RunningSubagent>(),
 };
+// A slot from a version before lifecycle rows may hold rows without one.
+normalizeAdoptedRows(runtime.runningSubagents.values());
 writeGlobalSlot(RUNTIME_KEY, runtime);
 const runningSubagents = runtime.runningSubagents;
 const { observeRunningSubagent, evaluateNoProgressAdvisory } =
@@ -229,9 +232,7 @@ export function cleanupSubagentsForShutdown(
 	if (shouldPreserveSubagentsOnShutdown(reason)) return;
 
 	for (const agent of agents.values()) {
-		if (agent.lifecycle) {
-			agent.lifecycle = markDelivery(agent.lifecycle, "suppressed");
-		}
+		agent.lifecycle = markDelivery(agent.lifecycle, "suppressed");
 		agent.abortController?.abort();
 	}
 	agents.clear();

@@ -15,7 +15,6 @@ import {
 	type SubagentRuntime,
 	selectCompletionApi,
 } from "./state.ts";
-import { ensureLifecycle } from "./observation.ts";
 import type { Controls } from "./controls.ts";
 import {
 	encodeHostValue,
@@ -39,10 +38,7 @@ export function asPiRecord(running: RunningSubagent): PiRunRecord {
 export function persistentSpecialistState(
 	running: RunningSubagent,
 ): "idle" | "working" | "stalled" | "stopped" {
-	const projection = projectLifecycle(
-		ensureLifecycle(running),
-		Date.now(),
-	).kind;
+	const projection = projectLifecycle(running.lifecycle, Date.now()).kind;
 	if (running.stopState === "failed") return "stalled";
 	if (running.stopState)
 		return projection === "stalled" ? "stalled" : "working";
@@ -100,8 +96,7 @@ export function persistentSpecialistFacts(
 			outcome: entry.outcome,
 		})),
 		sessionFile: running.sessionFile,
-		lastObservedPhase: projectLifecycle(ensureLifecycle(running), Date.now())
-			.kind,
+		lastObservedPhase: projectLifecycle(running.lifecycle, Date.now()).kind,
 	};
 	if (worktree) facts.worktree = worktree;
 	return facts;

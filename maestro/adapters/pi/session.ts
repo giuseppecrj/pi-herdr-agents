@@ -32,7 +32,7 @@ import {
 export interface SessionEntry {
 	type: string;
 	id: string;
-	parentId?: string;
+	parentId?: string | null;
 	[key: string]: JsonValue | undefined;
 }
 

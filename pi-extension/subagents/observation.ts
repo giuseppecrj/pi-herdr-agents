@@ -26,7 +26,28 @@ import type {
 	SubagentRuntime,
 } from "./state.ts";
 
-export function ensureLifecycle(running: RunningSubagent): SubagentLifecycle {
+/**
+ * A row as an older version's runtime slot may hold it: it predates the
+ * lifecycle model and carries at most a `statusState` snapshot.
+ */
+export type AdoptedRow = Omit<RunningSubagent, "lifecycle"> & {
+	lifecycle?: SubagentLifecycle;
+};
+
+/**
+ * Give every row of an adopted runtime slot a `lifecycle`, hydrating it from
+ * the legacy `statusState`. After this, `RunningSubagent.lifecycle` holds.
+ */
+export function normalizeAdoptedRows(rows: Iterable<AdoptedRow>): void {
+	for (const row of rows) hydrateLifecycle(row);
+}
+
+/** Whether an adopted row has been normalized to a full running row. */
+export function isNormalized(row: AdoptedRow): row is RunningSubagent {
+	return row.lifecycle !== undefined;
+}
+
+function hydrateLifecycle(running: AdoptedRow): SubagentLifecycle {
 	if (running.lifecycle) return running.lifecycle;
 	let lifecycle = createLifecycle(running.startTime);
 	const state = running.statusState;
@@ -119,7 +140,7 @@ export function createObservation(runtime: SubagentRuntime) {
 			{
 				id: running.id,
 				activityFile: running.activityFile,
-				lifecycle: ensureLifecycle(running),
+				lifecycle: running.lifecycle,
 			},
 			observedAt,
 		);
