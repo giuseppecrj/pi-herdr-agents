@@ -14,6 +14,12 @@ import {
 	shellArgument,
 } from "../../maestro/core/host-text.ts";
 import { isString } from "../../maestro/core/config/type-guards.ts";
+import {
+	ACCEPT_PARENT_OUTPUT_CHARS,
+	describeAcceptVerdict,
+	outputTail,
+	type AcceptOutcome,
+} from "../../maestro/core/accept.ts";
 import type { ModelFailure, SubagentResult } from "./state.ts";
 
 export function getFirstText(
@@ -420,6 +426,34 @@ export function worktreeHandoffFields(worktree: WorktreeHandoff): HostField[] {
 	return fields;
 }
 
+/**
+ * The verdict line, directly under the status line in the head. Unchecked
+ * runs read `Check: none`. Changed check files are child-controlled names.
+ */
+export function checkField(accept: AcceptOutcome | undefined): HostField {
+	const parts: HostPart[] = [
+		{ kind: "text", text: "Check: " },
+		value(describeAcceptVerdict(accept), HOST_PATH_CHARS),
+	];
+	if (accept?.sharedCheckout)
+		parts.push({ kind: "text", text: " · shared checkout" });
+	if (accept?.changedCheckFiles?.length)
+		parts.push(
+			{ kind: "text", text: " · check files changed by the child: " },
+			list(accept.changedCheckFiles, "files", HOST_PATH_CHARS),
+		);
+	return { parts };
+}
+
+/** The re-check's output is child-influenced data: encoded, bounded, outside the envelope. */
+function checkOutputFields(accept: AcceptOutcome | undefined): HostField[] {
+	if (!accept?.output) return [];
+	const tail = outputTail(accept.output, ACCEPT_PARENT_OUTPUT_CHARS);
+	return [
+		hostLine`Check output (last ${ACCEPT_PARENT_OUTPUT_CHARS.toLocaleString("en-US")} characters, encoded): ${value(tail, 2 * ACCEPT_PARENT_OUTPUT_CHARS)}`,
+	];
+}
+
 export interface SubagentResultDetails {
 	name: string;
 	task?: string;
@@ -437,6 +471,8 @@ export interface SubagentResultDetails {
 	worktree?: WorktreeHandoff;
 	runtimePlan?: ResolvedRuntimePlan;
 	cancellation?: RunCancellation;
+	/** The verdict and its evidence; absent means no check (`none`). */
+	accept?: AcceptOutcome;
 }
 
 export interface SubagentPingDetails {
@@ -447,6 +483,7 @@ export interface SubagentPingDetails {
 	agent?: string;
 	sessionFile: string;
 	worktree?: WorktreeHandoff;
+	accept?: AcceptOutcome;
 }
 
 /** Send one delivery message; its content always comes from the serializer. */
@@ -533,6 +570,7 @@ export function resolveResultPresentation(
 		| "fallbackFailures"
 		| "runtimePlan"
 		| "worktree"
+		| "accept"
 	>,
 	name: string,
 	runtimeMismatch?: string,
@@ -556,6 +594,7 @@ export function resolveResultPresentation(
 			head: [
 				[
 					hostLine`Sub-agent "${name}" failed after ${elapsed} (provider/agent error).`,
+					checkField(result.accept),
 				],
 				[hostLine`Error: ${value(result.errorMessage, HOST_ERROR_CHARS)}`],
 				[hostText(PROVIDER_ERROR_NEXT_ACTION)],
@@ -573,6 +612,7 @@ export function resolveResultPresentation(
 					result.exitCode === 0
 						? hostLine`Sub-agent "${name}" completed (${elapsed}).`
 						: hostLine`Sub-agent "${name}" failed (exit code ${String(result.exitCode)}).`,
+					checkField(result.accept),
 				],
 				...summary.head,
 			],
@@ -598,6 +638,7 @@ export function resolveResultPresentation(
 			),
 		);
 	message.evidence = [
+		checkOutputFields(result.accept),
 		models,
 		result.worktree ? worktreeHandoffFields(result.worktree) : [],
 		sessionFields(result.sessionFile),
@@ -617,7 +658,7 @@ export function resolveResultPresentation(
 export function resolveCancelledPresentation(
 	result: Pick<
 		SubagentResult,
-		"elapsed" | "sessionFile" | "fallbackAttempts" | "worktree"
+		"elapsed" | "sessionFile" | "fallbackAttempts" | "worktree" | "accept"
 	>,
 	name: string,
 	cancellation: RunCancellation,
@@ -630,6 +671,7 @@ export function resolveCancelledPresentation(
 				cancellation.termination === "confirmed"
 					? hostLine`Sub-agent "${name}" was cancelled by the parent after ${elapsed}. Termination was confirmed before this result; no model fallback, retry, or recovery was started.`
 					: hostLine`Sub-agent "${name}" was cancelled by the parent after ${elapsed}. Termination is unconfirmed (${value(cancellation.error ?? "unknown", HOST_PATH_CHARS)}); no model fallback, retry, or recovery was started.`,
+				checkField(result.accept),
 			],
 		],
 		evidence: [
