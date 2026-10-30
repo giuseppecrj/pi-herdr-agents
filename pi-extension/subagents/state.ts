@@ -233,8 +233,7 @@ export function shouldDeliverSubagentCompletion(
 	running: Pick<RunningSubagent, "lifecycle">,
 ): boolean {
 	// Authoritative gate: only pending deliveries may be sent.
-	// Missing lifecycle (pre-migration fixtures) defaults to pending/true.
-	return (running.lifecycle?.delivery ?? "pending") === "pending";
+	return running.lifecycle.delivery === "pending";
 }
 
 export function selectCompletionApi<T>(previous: T, current: T | undefined): T {

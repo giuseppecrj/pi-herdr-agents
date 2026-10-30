@@ -22,7 +22,6 @@ import {
 	type SubagentRuntime,
 } from "./state.ts";
 import {
-	ensureLifecycle,
 	type Observation,
 	formatNoProgressAdvisoryLine,
 } from "./observation.ts";
@@ -170,7 +169,7 @@ export function createWidgetController({
 		const now = Date.now();
 		const rendered = agents.map((agent) => ({
 			agent,
-			projection: projectLifecycle(ensureLifecycle(agent), now),
+			projection: projectLifecycle(agent.lifecycle, now),
 		}));
 		const activeCount = rendered.filter(
 			({ projection }) =>
@@ -276,7 +275,7 @@ export function createWidgetController({
 			for (const running of runningSubagents.values()) {
 				// Dual-writes lifecycle + statusState for reload hydration; steers use lifecycle only.
 				observeRunningSubagent(running, now);
-				const projection = projectLifecycle(ensureLifecycle(running), now);
+				const projection = projectLifecycle(running.lifecycle, now);
 				const transition = lifecycleTransition(
 					running.lastProjectedKind,
 					projection.kind,
