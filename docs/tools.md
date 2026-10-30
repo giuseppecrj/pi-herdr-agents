@@ -188,8 +188,11 @@ Before launching a new group, choose a short task slug and label each new child
 `<task>-<role>[-n]`, such as `login-api` or `login-test2`. Roles are `plan`,
 `research`, `ui`, `api`, `build`, `test`, `review`, `browser`, `security`,
 `perf`, and `merge`. Leave existing labels unchanged. After the final launch,
-print `name | agent kind | role | model | worktree` and use each name in
-prompts, handoffs, and results.
+print a markdown table with the header row `| name | agent kind | role | model |
+worktree |`, a separator row, and one row per child (worktree `none` when there
+is none), and use each name in prompts, handoffs, and results. Set
+[`guidelines.launchRoster`](configuration.md#launch-roster) to `false` to drop
+the table instruction while keeping the rest of this naming guidance.
 
 ### Isolated worktree runs
 

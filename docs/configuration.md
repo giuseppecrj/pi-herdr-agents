@@ -29,11 +29,14 @@ Create it by copying the installed package's `config.json.example`, or run
     "mode": "grouped",
     "direction": "right",
     "maxPerTab": 4
+  },
+  "guidelines": {
+    "launchRoster": true
   }
 }
 ```
 
-If `config.json` is absent, status, role, pane, and persistent-specialist settings fall back to `config.json.example`.
+If `config.json` is absent, status, role, pane, persistent-specialist, supervision, and guidelines settings fall back to `config.json.example`.
 Model routing does not read the example: no model overrides apply until a real
 `config.json` exists.
 
@@ -214,6 +217,32 @@ after writing preferences.
 ## Persistent specialist limit
 
 Set `persistent.maxAgents` to the maximum concurrently retained persistent specialists. It defaults to `3`; a persistent spawn at the cap is rejected before Herdr creates a pane or workspace, and no specialist is evicted.
+
+## Launch roster
+
+The `subagent` tool injects coordination guidelines into the parent's system
+prompt. One of them asks the parent, after the final launch of a group, to print
+a markdown table with a header row (`| name | agent kind | role | model |
+worktree |`), a separator row, and one row per child, writing `none` when a
+child has no worktree. Markdown clients render it as a table, and terminals
+still show readable pipe-separated rows.
+
+Set `guidelines.launchRoster` to `false` to drop only that sentence. The rest
+of the naming guidance, including `<task>-<role>[-n]` labels and using each name
+in prompts, handoffs, and results, stays in the prompt. It defaults to `true`.
+Any value other than `true` or `false`, and any other key under `guidelines`, is
+a configuration error.
+
+```json
+{
+  "guidelines": {
+    "launchRoster": false
+  }
+}
+```
+
+The setting is read when the extension loads, so run `/reload` after changing
+it.
 
 ## Deprecated `roles.bundled`
 

@@ -13,9 +13,13 @@ import { THINKING_LEVELS } from "../../maestro/core/routing.ts";
 import type { TaskPreferences } from "../../maestro/core/config/task-model-types.ts";
 import { getAgentConfigDir } from "./config-path.ts";
 
+const LAUNCH_ROSTER_RULE =
+	"After the final launch, print a markdown table with the header row `| name | agent kind | role | model | worktree |`, the separator row `|---|---|---|---|---|`, and one row per child (worktree `none` when there is none), then use each name in prompts, handoffs, and results.";
+
 export function buildSubagentRoutingGuidelines(
 	catalog?: string,
 	authenticatedTaskPreferences?: TaskPreferences,
+	options: { launchRoster?: boolean } = {},
 ): string[] {
 	return [
 		"Act as the coordinator: decompose the work, give each child one bounded outcome — goal, allowed files, verification, and whether to commit — and keep dependent writes sequential; parallelize only independent tasks.",
@@ -30,7 +34,10 @@ export function buildSubagentRoutingGuidelines(
 				]),
 		"For ordinary review, prefer a different authenticated model family. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback. Use an exact authenticated provider/model-id from the live catalog below, never an alias or fuzzy name.",
 		"Omitting model and thinking still inherits the parent runtime, but this is a discouraged fallback for orchestrated children.",
-		"Before launching a new group of subagents, choose a short task slug and name each new child <task>-<role>[-n], for example login-api or login-test2. Use only plan, research, ui, api, build, test, review, browser, security, perf, or merge as roles; leave existing names unchanged. After the final launch, print name | agent kind | role | model | worktree (if any), then use each name in prompts, handoffs, and results.",
+		"Before launching a new group of subagents, choose a short task slug and name each new child <task>-<role>[-n], for example login-api or login-test2. Use only plan, research, ui, api, build, test, review, browser, security, perf, or merge as roles; leave existing names unchanged. " +
+			(options.launchRoster === false
+				? "Use each name in prompts, handoffs, and results."
+				: LAUNCH_ROSTER_RULE),
 		catalog ??
 			"Authenticated subagent model catalog becomes available after session start.",
 	];

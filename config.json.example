@@ -16,5 +16,8 @@
     "mode": "grouped",
     "direction": "right",
     "maxPerTab": 4
+  },
+  "guidelines": {
+    "launchRoster": true
   }
 }

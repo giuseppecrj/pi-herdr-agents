@@ -285,6 +285,7 @@ The durable configuration file is `$PI_CODING_AGENT_DIR/herdr-agents/config.json
 | `persistent.maxAgents` | `3` | How many persistent specialists can stay open. |
 | `supervision.forcePolling`, `supervision.hangWarningMinutes` | `false`, `15` | Supervision transport and no-progress advisories. |
 | `panes.mode`, `panes.direction`, `panes.maxPerTab` | `"grouped"`, `"right"`, `4` | Where child panes open. |
+| `guidelines.launchRoster` | `true` | Whether the parent is asked to print a markdown roster table after launching a group. |
 
 See [Configuration](docs/configuration.md) for every key, the task-model writer, and the events other extensions can use during `/subagents-init`.
 
