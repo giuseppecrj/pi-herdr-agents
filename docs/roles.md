@@ -123,6 +123,42 @@ Omitting `tools` intentionally leaves the role unrestricted. Likewise, `skills`
 names must already be discoverable by Pi; this package does not install role
 prerequisites.
 
+#### How declared skills reach the child
+
+The host reads each declared skill's `SKILL.md` and writes its instructions,
+in the `<skill>` block Pi uses for `/skill:name`, at the top of the child's
+first task, always through the task artifact file, never on the command line
+(fork launches included). Names are matched exactly against the skills found
+on disk. A name is never turned into a path, so `../x` or an absolute path
+matches nothing. Repeated names are delivered once.
+
+Discovery only reads files. It never loads extensions, installs packages or
+starts processes. It searches the directories Pi searches, in Pi's order (the
+first skill with a name wins):
+
+1. plain-path `skills` entries in `<cwd>/.pi/settings.json`;
+2. `<cwd>/.pi/skills`, and `.agents/skills` in the child's cwd and each
+   parent folder up to the Git root;
+3. plain-path `skills` entries in `<agentDir>/settings.json`;
+4. `<agentDir>/skills` and `~/.agents/skills`;
+5. skills of configured `packages` that are already installed under Pi's
+   install folders (`npm/node_modules/<name>`, `git/<host>/<path>`, or a local
+   path). A package that is not installed there is skipped, never installed.
+
+`<cwd>` and `<agentDir>` are the child's own, so a worktree child sees its
+checkout's skills. Project sources (1, 2 and project packages) count only when
+Pi would trust the project without asking: no trust-requiring project files,
+a saved trust decision, or `defaultProjectTrust: "always"`. Settings patterns
+(`!`, `+`, `-`, globs) are not expanded.
+
+A declared skill that is not found does not stop the launch, which matches
+Pi's own handling of an unknown `/skill:name`. The launch acknowledgement
+lists it under launch diagnostics, together with any project or package that
+was not searched, and the task tells the child it was not loaded. A skill whose
+`SKILL.md` is over 64 KiB, or declared skills totalling over 256 KiB, refuse
+the launch with an error that names them. To fix it, shorten the skill (move
+detail into files it references) or declare fewer skills.
+
 ### 3. Verify and launch
 
 ```text
@@ -247,7 +283,7 @@ Compare definitions against the reference below and verify them with
 | `thinking`    | string  | Optional Pi thinking default (`off` through `max`); omit to inherit the parent                                                                                                                                   |
 | `system-prompt` | string | `append` passes the agent body through Pi's appended system prompt; `replace` replaces Pi's default system prompt. Without this field, the body is included in the task wrapper                                                                                                                                                                                                                                 |
 | `tools`       | string  | One non-empty inline comma-separated Pi `--tools` allowlist under the exact unquoted key `tools:`; may contain any registered built-in, extension, or custom tool name. Omit to leave unrestricted. YAML lists, containers, multiline values, quotes, comments, noncanonical keys, and duplicates are rejected. |
-| `skills`      | string  | Comma-separated installed skill names to auto-load. Use this plural form for new definitions; legacy project/global definitions using singular `skill` remain compatible. |
+| `skills`      | string  | Comma-separated installed skill names delivered at the top of the child's first task (see [How declared skills reach the child](#how-declared-skills-reach-the-child)); not found skills are reported, oversize ones refuse the launch. Use this plural form for new definitions; legacy project/global definitions using singular `skill` remain compatible. |
 | `session-mode` | string | Default child-session mode: `standalone`, `lineage-only`, or `fork` |
 | `spawning`    | boolean | Set exactly `false` to deny all subagent-spawning tools under the exact unquoted key `spawning:`. Only one `true` or `false` declaration is accepted. |
 | `deny-tools`  | string  | One non-empty inline comma-separated `pi-herdr-agents` tool list to suppress under the exact unquoted key `deny-tools:`; this is not a universal cross-extension deny list. YAML lists, containers, multiline values, quotes, comments, noncanonical keys, and duplicates are rejected. |
