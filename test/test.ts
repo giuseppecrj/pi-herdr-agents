@@ -1138,14 +1138,6 @@ describe("host adapter migration", () => {
 		withAdapterHost(async (f) => {
 			const roleCwd = join(f.globalDir, "role-folder");
 			mkdirSync(join(roleCwd, ".pi", "agent"), { recursive: true });
-			for (const name of ["one", "two"]) {
-				const skillDir = join(roleCwd, ".pi", "agent", "skills", name);
-				mkdirSync(skillDir, { recursive: true });
-				writeFileSync(
-					join(skillDir, "SKILL.md"),
-					`---\nname: ${name}\ndescription: ${name} skill\n---\nskill-body-${name}\n`,
-				);
-			}
 			writeAgentFile(
 				f.projectAgentsDir,
 				"host-role",
@@ -1172,13 +1164,10 @@ describe("host adapter migration", () => {
 					`PI_CODING_AGENT_DIR='${join(roleCwd, ".pi", "agent")}'`,
 				),
 			);
+			// The call's skills override the role's; the child's Pi resolves them.
+			assert.match(f.commands[0], / PI_SUBAGENT_SKILLS='\["one","two"\]' /);
 			assert.doesNotMatch(f.commands[0], /\/skill:/);
-			const taskPath = f.commands[0].match(/'@([^']+\.md)'/)?.[1];
-			assert.ok(taskPath, "expected artifact-backed task delivery");
-			assert.match(
-				readFileSync(taskPath, "utf8"),
-				/^<skill name="one"[\s\S]*skill-body-one[\s\S]*<skill name="two"[\s\S]*skill-body-two/,
-			);
+			assert.match(f.commands[0], /'@[^']+\.md'/);
 			assert.ok(!f.commands[0].includes("PI_SUBAGENT_AUTO_EXIT=1"));
 			const identityPath = f.commands[0].match(
 				/--system-prompt '([^']+)'/,
@@ -7707,6 +7696,44 @@ describe("subagent-done.ts", () => {
 		} finally {
 			restoreEnvVar("PI_SUBAGENT_AGENT", previousAgent);
 			restoreEnvVar("PI_DENY_TOOLS", previousDenyTools);
+		}
+	});
+
+	it("injects the declared skills its own Pi loaded on the first run only", async () => {
+		const dir = createTestDir();
+		const previous = process.env.PI_SUBAGENT_SKILLS;
+		process.env.PI_SUBAGENT_SKILLS = '["tdd","absent"]';
+		try {
+			const filePath = join(dir, "tdd", "SKILL.md");
+			mkdirSync(dirname(filePath), { recursive: true });
+			writeFileSync(
+				filePath,
+				"---\nname: tdd\ndescription: d\n---\nTDD body.\n",
+			);
+			const { api, eventHandlers } = createMockExtensionApi();
+			subagentDoneExtension(api);
+			const run = async () => {
+				const results = [];
+				for (const handler of eventHandlers.get("before_agent_start") ?? [])
+					results.push(
+						await handler({
+							systemPromptOptions: {
+								skills: [{ name: "tdd", filePath, baseDir: dirname(filePath) }],
+							},
+						}),
+					);
+				return results.filter(Boolean);
+			};
+			const [first] = await run();
+			assert.match(
+				first.message.content,
+				/^<skill name="tdd"[\s\S]*TDD body\./,
+			);
+			assert.match(first.message.content, /not loaded by Pi: absent/);
+			assert.deepEqual(await run(), [], "later runs inject nothing");
+			assert.equal(process.env.PI_SUBAGENT_SKILLS, undefined);
+		} finally {
+			restoreEnvVar("PI_SUBAGENT_SKILLS", previous);
 		}
 	});
 

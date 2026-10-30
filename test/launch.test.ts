@@ -5,7 +5,6 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
-	realpathSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -97,25 +96,6 @@ function withFixture(
 	return Promise.resolve(run(value)).finally(() => {
 		rmSync(value.root, { recursive: true, force: true });
 	});
-}
-
-function writeSkill(dir: string, name: string, body: string): string {
-	const skillDir = join(dir, name);
-	mkdirSync(skillDir, { recursive: true });
-	const file = join(skillDir, "SKILL.md");
-	writeFileSync(
-		file,
-		`---\nname: ${name}\ndescription: ${name} skill\n---\n\n${body}\n`,
-	);
-	return file;
-}
-
-function trustProject(agentDir: string, project: string): void {
-	mkdirSync(agentDir, { recursive: true });
-	writeFileSync(
-		join(agentDir, "trust.json"),
-		JSON.stringify({ [realpathSync(project)]: true }),
-	);
 }
 
 function initializeGitRepository(cwd: string): void {
@@ -710,12 +690,6 @@ describe("Pi launch", () => {
 		await withFixture(async ({ request, project, agentDir }) => {
 			const projectAgentDir = join(project, ".pi", "agent");
 			mkdirSync(projectAgentDir, { recursive: true });
-			const skillFile = writeSkill(
-				join(project, ".pi", "skills"),
-				"tdd",
-				"# TDD\nWrite the failing test first.",
-			);
-			trustProject(agentDir, project);
 			const events: string[] = [];
 			const closed: string[] = [];
 			let command = "";
@@ -777,23 +751,20 @@ describe("Pi launch", () => {
 					`${PI_LAUNCH_SESSION_ENV}=${expectedShellQuote(running.sessionFile)}`,
 				),
 			);
+			// The child's own Pi resolves declared skills: the parent names them
+			// and sends no `/skill:` args and no skill bodies.
+			assert.match(command, / PI_SUBAGENT_SKILLS='\["tdd"\]' /);
 			assert.doesNotMatch(command, /\/skill:/);
 			assert.match(command, /--tools 'read,bash,caller_ping' '@[^']+\.md';/);
 
 			const taskPath = command.match(/'@([^']+\.md)'/)?.[1];
 			assert.ok(taskPath, "expected artifact-backed task delivery");
 			const taskArtifact = readFileSync(taskPath, "utf8");
-			assert.ok(
-				taskArtifact.startsWith(
-					`<skill name="tdd" location="${skillFile}">\nReferences are relative to ${join(project, ".pi", "skills", "tdd")}.\n\n# TDD\nWrite the failing test first.\n</skill>`,
-				),
-				"the declared skill arrives in the first request",
-			);
+			assert.doesNotMatch(taskArtifact, /<skill/);
 			assert.match(
 				taskArtifact,
-				/<\/skill>[\s\S]*Complete your task autonomously\.[\s\S]*Implement the bounded change\./,
+				/Complete your task autonomously\.[\s\S]*Implement the bounded change\./,
 			);
-			assert.equal(running.launchDiagnostics, undefined);
 			const systemPromptPath = command.match(
 				/--append-system-prompt '([^']+\.md)'/,
 			)?.[1];
@@ -1279,16 +1250,18 @@ describe("Pi launch", () => {
 		});
 	});
 
-	it("delivers a fork's declared skills through the task artifact, never argv", async () => {
-		await withFixture(async ({ request, agentDir }) => {
-			const body = `Large skill body marker. ${"z".repeat(60 * 1024)}`;
-			writeSkill(join(agentDir, "skills"), "tdd", body);
+	it("names a fork's declared skills to the child and keeps direct task delivery", async () => {
+		await withFixture(async ({ request }) => {
 			let command = "";
 			await launchPiSubagent(
 				{
 					...request,
 					task: "Forked task.",
-					behavior: { ...request.behavior, sessionMode: "fork" },
+					behavior: {
+						...request.behavior,
+						skills: "tdd, review-notes,tdd",
+						sessionMode: "fork",
+					},
 				},
 				{
 					createPane: () => "pane-fork-skills",
@@ -1304,31 +1277,28 @@ describe("Pi launch", () => {
 				},
 			);
 
-			assert.ok(
-				command.length < 4096,
-				`fork command line stays small (${command.length} bytes)`,
+			assert.match(
+				command,
+				/ PI_SUBAGENT_SKILLS='\["tdd","review-notes"\]' /,
+				"declared once each, in order, as a quoted JSON array",
 			);
-			assert.doesNotMatch(command, /Large skill body marker/);
 			assert.doesNotMatch(command, /\/skill:/);
-			const taskPath = command.match(/'@([^']+\.md)'/)?.[1];
-			assert.ok(taskPath, "a fork with skills uses the task artifact");
-			const taskArtifact = readFileSync(taskPath, "utf8");
-			assert.match(taskArtifact, /^<skill name="tdd" location="[^"]+">/);
-			assert.match(taskArtifact, /Large skill body marker/);
-			assert.match(taskArtifact, /<\/skill>\n\nForked task\.$/);
+			assert.doesNotMatch(
+				command,
+				/'@[^']+\.md'/,
+				"a fork keeps direct delivery",
+			);
+			assert.match(command, / 'Forked task\.'; echo /);
 		});
 	});
 
-	it("launches without a declared skill that is not found and reports it", async () => {
+	it("sets an empty skill list explicitly when the role declares none", async () => {
 		await withFixture(async ({ request }) => {
 			let command = "";
-			const running = await launchPiSubagent(
+			await launchPiSubagent(
+				{ ...request, behavior: { ...request.behavior, skills: undefined } },
 				{
-					...request,
-					behavior: { ...request.behavior, skills: "no-such-skill-anywhere" },
-				},
-				{
-					createPane: () => "pane-missing-skill",
+					createPane: () => "pane-no-skills",
 					createWorktree: () => {
 						throw new Error("unexpected worktree creation");
 					},
@@ -1340,44 +1310,50 @@ describe("Pi launch", () => {
 					closePane: () => {},
 				},
 			);
-
-			assert.match(
-				running.launchDiagnostics?.join("\n") ?? "",
-				/"no-such-skill-anywhere" was not found/,
-			);
-			const taskPath = command.match(/'@([^']+\.md)'/)?.[1];
-			assert.ok(taskPath);
-			assert.match(
-				readFileSync(taskPath, "utf8"),
-				/not found: no-such-skill-anywhere/,
-			);
+			assert.match(command, / PI_SUBAGENT_SKILLS='\[\]' /);
 		});
 	});
 
-	it("refuses a launch whose declared skill exceeds the per-skill limit", async () => {
-		await withFixture(async ({ request, agentDir }) => {
-			writeSkill(join(agentDir, "skills"), "tdd", "x".repeat(65 * 1024));
-			const closed: string[] = [];
-			let ran = false;
-			await assert.rejects(
-				launchPiSubagent(request, {
-					createPane: () => "pane-oversize",
-					createWorktree: () => {
-						throw new Error("unexpected worktree creation");
-					},
-					waitForShellReady: async () => {},
-					runScript: (_surface, _value, options) => {
-						ran = true;
-						return options.scriptPath;
-					},
-					closePane: (pane) => {
-						closed.push(pane);
-					},
-				}),
-				/Skill "tdd" .* over the 64 KiB per-skill limit/,
-			);
-			assert.equal(ran, false, "Pi never starts");
-			assert.deepEqual(closed, ["pane-oversize"]);
+	it("refuses a declared skill name outside Pi's skill-name rules before creating a pane", async () => {
+		await withFixture(async ({ request }) => {
+			const operations: PiLaunchOperations = {
+				createPane() {
+					throw new Error("must not create a pane");
+				},
+				createWorktree() {
+					throw new Error("must not create a worktree");
+				},
+				async waitForShellReady() {},
+				runScript() {
+					throw new Error("must not run");
+				},
+				closePane() {},
+			};
+			for (const name of [
+				"../tdd",
+				"/abs/tdd",
+				"TDD",
+				"t d d",
+				"tdd_x",
+				"-tdd",
+				"tdd-",
+				"t--dd",
+				"t'dd",
+				"a".repeat(65),
+			]) {
+				await assert.rejects(
+					launchPiSubagent(
+						{ ...request, behavior: { ...request.behavior, skills: name } },
+						operations,
+					),
+					(error: Error) =>
+						error.message.includes(
+							`Invalid skill name ${JSON.stringify(name)}`,
+						) &&
+						/lowercase letters, digits and single hyphens/.test(error.message),
+					name,
+				);
+			}
 		});
 	});
 
@@ -1515,6 +1491,9 @@ describe("Pi launch", () => {
 				// inherits one left in the pane's shell.
 				assert.match(command, / PI_SUBAGENT_SELF_SPAWN=0 /);
 				assert.match(command, / PI_SUBAGENT_MODEL_SCOPE='' /);
+				// A resumed session already holds its skills; one left in the pane's
+				// shell must never be injected again.
+				assert.match(command, / PI_SUBAGENT_SKILLS='\[\]' /);
 				assert.doesNotMatch(command, /--model|--thinking|^cd /);
 				const messagePath = command.match(/'@([^']+\.md)'/)?.[1];
 				assert.ok(messagePath, "expected artifact-backed follow-up message");
@@ -1732,6 +1711,11 @@ describe("Pi launch", () => {
 			);
 			assert.ok(
 				command.startsWith(`cd ${expectedShellQuote(worktreePath)} && `),
+			);
+			assert.match(
+				command,
+				/ PI_SUBAGENT_SKILLS='\["tdd"\]' /,
+				"a worktree child's own Pi resolves its declared skills",
 			);
 			const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
 			assert.equal(manifest.state, "running");
