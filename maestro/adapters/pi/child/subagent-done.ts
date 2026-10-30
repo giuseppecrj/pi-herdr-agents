@@ -15,6 +15,7 @@ import {
 } from "../session.ts";
 import { createSubagentActivityRecorder } from "../activity-file.ts";
 import { createDoneNudge } from "./done-nudge.ts";
+import { registerDeclaredSkills } from "./declared-skills.ts";
 import { isChildBusy } from "../../../core/child-busy.ts";
 import {
 	readOwnProcessIdentity,
@@ -187,6 +188,8 @@ export default function (pi: ExtensionAPI) {
 		activityFile: process.env.PI_SUBAGENT_ACTIVITY_FILE,
 	});
 	recordProcessIdentity(process.env.PI_SUBAGENT_ID, sessionFile);
+	// The role's declared skills, as this child's own Pi loaded them.
+	registerDeclaredSkills(pi);
 
 	function renderWidget(ctx: { ui: { setWidget: Function } }, _theme: any) {
 		ctx.ui.setWidget(

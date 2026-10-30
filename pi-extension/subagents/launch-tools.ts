@@ -255,15 +255,6 @@ export function registerSubagentTool(
 				const handle = await session.spawnPi(input);
 				const running = session.getRecord(id)!;
 				const startedDetails = session.getStarted(id)!;
-				// The record is the adapter's child, which carries launch diagnostics
-				// such as declared skills that were not found.
-				const launchDiagnostics = [
-					...(running.worktree?.diagnostics ?? []),
-					...("launchDiagnostics" in running &&
-					Array.isArray(running.launchDiagnostics)
-						? running.launchDiagnostics.filter(isString)
-						: []),
-				];
 				// The tool's signal is not a producer signal. Delivery belongs to RunSession.
 				void session.supervise(handle, session.getTask(id)!).catch(() => {
 					// Delivery failure retains manual panes; no second send or cleanup producer.
@@ -281,7 +272,7 @@ export function registerSubagentTool(
 								(running.worktree
 									? ` in worktree ${running.worktree.path} on branch ${running.worktree.branch}. `
 									: ". ") +
-								launchDiagnosticsText(launchDiagnostics, "", " ") +
+								launchDiagnosticsText(running.worktree?.diagnostics, "", " ") +
 								`Do NOT generate or assume any results — you have no idea what the sub-agent will do or produce. ` +
 								`The results will be delivered to you automatically as a steer message when the sub-agent finishes. ` +
 								`Until then, move on to other work or tell the user you're waiting.`,

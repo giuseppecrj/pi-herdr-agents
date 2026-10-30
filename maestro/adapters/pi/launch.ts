@@ -4,13 +4,6 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { getSubagentActivityFile } from "./activity-file.ts";
 import {
-	formatMissingSkillsNote,
-	formatSkillBlocks,
-	parseDeclaredSkills,
-	resolveDeclaredSkills,
-	type SkillResolver,
-} from "./skills.ts";
-import {
 	createLifecycle,
 	type SubagentLifecycle,
 } from "../../core/lifecycle.ts";
@@ -27,6 +20,11 @@ import {
 	childDelegationDepth,
 	DELEGATION_DEPTH_ENV,
 } from "../../core/delegation-depth.ts";
+import {
+	DECLARED_SKILLS_ENV,
+	formatDeclaredSkillsEnv,
+	parseDeclaredSkills,
+} from "../../core/declared-skills.ts";
 import { shellQuote } from "../../core/shell.ts";
 import type {
 	SurfaceProvider,
@@ -188,8 +186,6 @@ export interface PiRunningChild {
 	/** Settles when launch-readiness capture verifies or gives up; never rejects. */
 	processIdentityCapture?: Promise<PiProcessIdentity | undefined>;
 	processIdentityError?: string;
-	/** Host diagnostics from this launch, such as declared skills not found. */
-	launchDiagnostics?: string[];
 }
 
 /** What a captured identity must match: this run, its session, and its pane. */
@@ -238,11 +234,6 @@ export interface PiLaunchOperations {
 		expected: ProcessIdentityExpectation,
 		options?: { timeoutMs?: number },
 	): Promise<PiProcessIdentity>;
-	/**
-	 * Resolve a role's declared skills for the first task. Defaults to the
-	 * read-only on-disk discovery in `skills.ts`; never runs project code.
-	 */
-	resolveSkills?: SkillResolver;
 }
 
 function placementFromPaneConfig(config: PaneConfig) {
@@ -490,12 +481,6 @@ interface PreparedArtifacts extends PreparedSession {
 	systemPromptFile?: string;
 }
 
-/** Declared skills to prepend to the first task, plus parent diagnostics. */
-interface SkillDelivery {
-	prefix: string;
-	diagnostics: string[];
-}
-
 /**
  * Launch one validated Pi-backed request. Lifecycle watching and parent
  * delivery begin only after this transaction returns the running child.
@@ -510,6 +495,8 @@ export async function launchPiSubagent(
 	// scope, and the scope must be representable as the child's --models.
 	assertModelInScope(request.runtimePlan.model, { scope: request.modelScope });
 	modelScopeArgs(request.modelScope);
+	// Declared skill names must follow Pi's rules; a handoff carries none.
+	if (!request.handoff) parseDeclaredSkills(request.behavior.skills);
 	return launchFreshPiSubagent(request, operations);
 }
 
@@ -552,15 +539,13 @@ async function launchFreshPiSubagent(
 
 	try {
 		surface = await prepareLaunchSurface(resolved, operations);
-		const skills = await resolveSkillDelivery(resolved, surface, operations);
 		const session = prepareChildSession(resolved, surface, operations);
 		const handoffArtifacts = request.handoff
-			? prepareTaskArtifacts(resolved, session, operations, skills)
+			? prepareTaskArtifacts(resolved, session, operations)
 			: undefined;
 		await confirmShellReady(session, operations);
 		const artifacts =
-			handoffArtifacts ??
-			prepareTaskArtifacts(resolved, session, operations, skills);
+			handoffArtifacts ?? prepareTaskArtifacts(resolved, session, operations);
 		const command = buildPiCommand(resolved, artifacts);
 		const launchScriptFile = await startPiProcess(
 			resolved,
@@ -585,9 +570,6 @@ async function launchFreshPiSubagent(
 			}
 		}
 		const running = createRunningChild(resolved, artifacts, launchScriptFile);
-		if (skills.diagnostics.length > 0) {
-			running.launchDiagnostics = skills.diagnostics;
-		}
 		startProcessIdentityCapture(running, operations);
 		return running;
 	} catch (error) {
@@ -828,38 +810,10 @@ function buildWorktreeHandoffMessage(
 	].join("\n");
 }
 
-/**
- * Resolve the declared skills for the child's own cwd and agent directory, so
- * worktree children see the checkout's skills. A handoff carries none.
- */
-async function resolveSkillDelivery(
-	resolved: ResolvedLaunch,
-	surface: PreparedSurface,
-	operations: PiLaunchOperations,
-): Promise<SkillDelivery> {
-	const names = parseDeclaredSkills(resolved.request.behavior.skills);
-	if (resolved.request.handoff || names.length === 0) {
-		return { prefix: "", diagnostics: [] };
-	}
-	const resolver = operations.resolveSkills ?? resolveDeclaredSkills;
-	const resolution = await resolver(names, {
-		cwd: surface.targetCwd,
-		agentDir: surface.effectiveAgentDir,
-	});
-	const prefix = [
-		formatSkillBlocks(resolution.skills),
-		formatMissingSkillsNote(resolution.missing),
-	]
-		.filter(Boolean)
-		.join("\n\n");
-	return { prefix, diagnostics: resolution.diagnostics };
-}
-
 function prepareTaskArtifacts(
 	resolved: ResolvedLaunch,
 	session: PreparedSession,
 	operations: PiLaunchOperations,
-	skills: SkillDelivery,
 ): PreparedArtifacts {
 	const { request } = resolved;
 	if (request.handoff) {
@@ -909,18 +863,13 @@ function prepareTaskArtifacts(
 	const summaryInstruction = request.behavior.autoExit
 		? "Your FINAL assistant message should summarize what you accomplished."
 		: "Your FINAL assistant message (before calling subagent_done or before the user exits) should summarize what you accomplished.";
-	const forkTask = [skills.prefix, request.task].filter(Boolean).join("\n\n");
 	const fullTask = request.handoff
 		? request.task
 		: resolved.sessionMode === "fork"
-			? forkTask
-			: `${skills.prefix}${roleBlock}\n\n${modeHint}\n\n${request.task}\n\n${summaryInstruction}`;
+			? request.task
+			: `${roleBlock}\n\n${modeHint}\n\n${request.task}\n\n${summaryInstruction}`;
 	let taskArg = fullTask;
-	// Skill bodies never go on the command line, so a fork with skills also
-	// delivers its task through the artifact.
-	const useArtifact =
-		resolved.taskDelivery === "artifact" || skills.prefix !== "";
-	if (useArtifact && !request.handoff) {
+	if (resolved.taskDelivery === "artifact" && !request.handoff) {
 		const artifactPath = join(
 			resolved.artifactDir,
 			`context/${safeName(request.name) || "subagent"}-${timestampForFile(false)}.md`,
@@ -981,7 +930,6 @@ function buildPiCommand(
 		request.behavior.autoExit,
 	);
 	if (toolAllowlist) parts.push("--tools", shellQuote(toolAllowlist));
-	// Declared skills travel inside the task artifact, never as `/skill:` args.
 	if (!request.handoff) parts.push(shellQuote(artifacts.taskArg));
 
 	const env = [
@@ -1009,6 +957,10 @@ function buildPiCommand(
 		if (request.agent)
 			env.push(`PI_SUBAGENT_AGENT=${shellQuote(request.agent)}`);
 		env.push(`PI_SUBAGENT_AUTO_EXIT=${request.behavior.autoExit ? "1" : "0"}`);
+		// Names only, always set: the child's own Pi decides which skills exist.
+		env.push(
+			`${DECLARED_SKILLS_ENV}=${shellQuote(formatDeclaredSkillsEnv(parseDeclaredSkills(request.behavior.skills)))}`,
+		);
 		if (request.behavior.persistent) {
 			env.push("PI_SUBAGENT_PERSISTENT=1");
 			env.push(
@@ -1204,6 +1156,8 @@ async function launchResumedPiSubagent(
 			modelScopeAssignment(request.modelScope),
 			// The saved session policy records no self-spawn opt-in.
 			"PI_SUBAGENT_SELF_SPAWN=0",
+			// A resumed session already holds its skills; never inject them again.
+			`${DECLARED_SKILLS_ENV}=${shellQuote(formatDeclaredSkillsEnv([]))}`,
 			`PI_SUBAGENT_NAME=${shellQuote(request.name)}`,
 			`PI_SUBAGENT_SESSION=${shellQuote(request.sessionFile)}`,
 			`PI_SUBAGENT_ID=${shellQuote(id)}`,

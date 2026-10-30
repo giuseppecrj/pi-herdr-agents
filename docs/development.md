@@ -36,10 +36,9 @@ provider; fakes are for conformance tests only.
   schema/state, handoff types, and cleanup eligibility/formatting.
 - `maestro/adapters/pi/` — Pi launch, completion, session I/O, activity files,
   model SDK glue, and registry projection behind `PiHarnessAdapter`;
-  `skills.ts` discovers a role's declared skills by reading files only (no
-  extension loading or package installs), enforces their size caps and formats
-  the blocks written into the child's first task artifact;
-  `child/subagent-done.ts` implements the child protocol.
+  `child/subagent-done.ts` implements the child protocol, and
+  `child/declared-skills.ts` injects the declared skills the child's own Pi
+  loaded on its first run (names come from `maestro/core/declared-skills.ts`).
 - `maestro/surfaces/herdr/` — `HerdrSurfaceProvider`, Herdr CLI driver,
   terminal scripts/placement, and `herdr-socket.ts`, the bounded socket
   client for pane metadata.

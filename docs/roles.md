@@ -125,49 +125,33 @@ prerequisites.
 
 #### How declared skills reach the child
 
-The host reads each declared skill's `SKILL.md` and writes its instructions,
-in the `<skill>` block Pi uses for `/skill:name`, at the top of the child's
-first task, always through the task artifact file, never on the command line
-(fork launches included). Names are matched exactly against the skills found
-on disk. A name is never turned into a path, so `../x` or an absolute path
-matches nothing. Repeated names are delivered once.
+The parent only names the skills; Pi in the child decides which exist. The
+host validates each declared name against Pi's skill-name rules (1-64
+lowercase letters, digits and single hyphens) and refuses the launch, before
+it creates a pane, with an error that names the rejected name. It passes the
+names to the child as a JSON array in `PI_SUBAGENT_SKILLS`, set explicitly on
+every fresh launch (fork and worktree launches included, `[]` when the role
+declares none). The parent never reads a skill file, never sends `/skill:`
+arguments and never writes skill text into the task.
 
-Discovery only reads files. It never loads extensions, installs packages or
-starts processes. It searches the directories Pi searches, in Pi's order (the
-first skill with a name wins):
+The child protocol extension, running inside the child's Pi, handles the
+first `before_agent_start` of the launch. It looks each declared name up, by
+exact name, in the skills that Pi loaded for that child (its own trust
+checks, ignore files, settings and package filters already applied). It
+reads each match and returns one message with the `<skill>` blocks Pi writes
+for `/skill:name`. Pi sends that message with the task in the child's first
+model request. A name is never turned into a path, so `../x` matches
+nothing. The child's own cwd and agent directory decide what Pi loads, so a
+worktree child sees its checkout's skills.
 
-1. `skills` entries in `<cwd>/.pi/settings.json`;
-2. `<cwd>/.pi/skills`, and `.agents/skills` in the child's cwd and each
-   parent folder up to the Git root;
-3. `skills` entries in `<agentDir>/settings.json`;
-4. `<agentDir>/skills` and `~/.agents/skills`;
-5. skills of configured `packages` that are already installed under Pi's
-   install folders (`npm/node_modules/<name>`, `git/<host>/<path>`, or a local
-   path). A package that is not installed there is skipped, never installed.
-
-`<cwd>` and `<agentDir>` are the child's own, so a worktree child sees its
-checkout's skills. Project sources (1, 2 and project packages) count only when
-Pi would trust the project without asking: no trust-requiring project files,
-a saved trust decision, or `defaultProjectTrust: "always"`.
-
-Filters narrow what is delivered as they narrow what Pi loads: settings
-`skills` overrides (`!`, `+`, `-`), a package manifest's own overrides, and a
-`packages` entry's `skills` allowlist. A project entry for a package replaces
-the user's entry for the same package. A package entry with
-`autoload: false` contributes no skills. Where the host cannot evaluate a
-filter exactly it delivers less, never more: a glob that would include a skill
-includes nothing, and a glob that would exclude one excludes every file it
-could match. Ignore files inside skill folders are not consulted. A skill file
-over the size limit is never read whole: the host reads only its head, to
-learn its name.
-
-A declared skill that is not found does not stop the launch, which matches
-Pi's own handling of an unknown `/skill:name`. The launch acknowledgement
-lists it under launch diagnostics, together with any project or package that
-was not searched, and the task tells the child it was not loaded. A skill whose
-`SKILL.md` is over 64 KiB, or declared skills totalling over 256 KiB, refuse
-the launch with an error that names them. To fix it, shorten the skill (move
-detail into files it references) or declare fewer skills.
+A declared skill that Pi did not load does not stop the child. The message
+ends with a host note, `declared skills not loaded by Pi: <names>`. Reads are
+bounded: the child checks each file's size first. A `SKILL.md` over 64 KiB,
+or a skill that would push the total past 256 KiB, is skipped and named in the
+note, because the launch is already running. To fix it, shorten the skill
+(move detail into files it references) or declare fewer skills. Later turns
+inject nothing. A resumed session already holds its skills and gets
+`PI_SUBAGENT_SKILLS=[]`.
 
 ### 3. Verify and launch
 
@@ -293,7 +277,7 @@ Compare definitions against the reference below and verify them with
 | `thinking`    | string  | Optional Pi thinking default (`off` through `max`); omit to inherit the parent                                                                                                                                   |
 | `system-prompt` | string | `append` passes the agent body through Pi's appended system prompt; `replace` replaces Pi's default system prompt. Without this field, the body is included in the task wrapper                                                                                                                                                                                                                                 |
 | `tools`       | string  | One non-empty inline comma-separated Pi `--tools` allowlist under the exact unquoted key `tools:`; may contain any registered built-in, extension, or custom tool name. Omit to leave unrestricted. YAML lists, containers, multiline values, quotes, comments, noncanonical keys, and duplicates are rejected. |
-| `skills`      | string  | Comma-separated installed skill names delivered at the top of the child's first task (see [How declared skills reach the child](#how-declared-skills-reach-the-child)); not found skills are reported, oversize ones refuse the launch. Use this plural form for new definitions; legacy project/global definitions using singular `skill` remain compatible. |
+| `skills`      | string  | Comma-separated skill names. The child's own Pi resolves them and they arrive with its first task (see [How declared skills reach the child](#how-declared-skills-reach-the-child)). Names outside Pi's skill-name rules refuse the launch; names Pi did not load are noted to the child. Use this plural form for new definitions; legacy project/global definitions using singular `skill` remain compatible. |
 | `session-mode` | string | Default child-session mode: `standalone`, `lineage-only`, or `fork` |
 | `spawning`    | boolean | Set exactly `false` to deny all subagent-spawning tools under the exact unquoted key `spawning:`. Only one `true` or `false` declaration is accepted. |
 | `self-spawn`  | boolean | Set exactly `true` under the exact unquoted key `self-spawn:` to let a child of this role launch another instance of the same role. Absent or `false` keeps the default, which blocks it. `spawning: false` still denies all spawning and wins. Only one `true` or `false` declaration is accepted. |
