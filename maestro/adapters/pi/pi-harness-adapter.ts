@@ -218,6 +218,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 						this.parentRuntime(opts),
 						this.options.modelRegistry,
 					),
+				modelScope: this.options.modelRegistry.scope,
 				behavior: {
 					tools: resolved
 						? resolved.tools
@@ -298,6 +299,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 				sessionFile: opts.sessionId,
 				message: opts.message,
 				parent: this.options.parent,
+				modelScope: this.options.modelRegistry.scope,
 				behavior: { autoExit: opts.autoExit },
 			},
 			this.operations,

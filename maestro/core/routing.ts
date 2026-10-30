@@ -54,6 +54,10 @@ export interface ModelRegistryAdapter {
 	supportedThinkingLevels(model: RoutingModel): ThinkingLevel[];
 	// pi-herdr-agents extension
 	clampThinkingLevel(model: RoutingModel, level: ThinkingLevel): ThinkingLevel;
+	// pi-herdr-agents extension
+	/** Exact `provider/model-id` refs of the session's model scope (`--models` /
+	 * `enabledModels`). Absent or empty means the session is unscoped. */
+	scope?: readonly string[];
 }
 
 export interface ResolvedRuntimePlan {
@@ -182,6 +186,7 @@ export function scopeModelRegistryAdapter(
 	scopedRefs: ReadonlySet<string>,
 ): ModelRegistryAdapter {
 	return {
+		scope: [...scopedRefs],
 		find(provider, modelId) {
 			return scopedRefs.has(`${provider}/${modelId}`)
 				? registry.find(provider, modelId)
@@ -197,6 +202,31 @@ export function scopeModelRegistryAdapter(
 		clampThinkingLevel: (model, level) =>
 			registry.clampThinkingLevel(model, level),
 	};
+}
+
+// pi-herdr-agents extension
+/** The session's model scope, or undefined when the session is unscoped. */
+export function modelScopeOf(
+	registry: Pick<ModelRegistryAdapter, "scope">,
+): readonly string[] | undefined {
+	return registry.scope && registry.scope.length > 0
+		? registry.scope
+		: undefined;
+}
+
+// pi-herdr-agents extension
+/** Refuse a model outside a scoped session's model set; unscoped sessions pass. */
+export function assertModelInScope(
+	model: string,
+	registry: Pick<ModelRegistryAdapter, "scope">,
+	what = "model",
+	hint = "pick an in-scope exact provider/model-id",
+): void {
+	const scope = modelScopeOf(registry);
+	if (!scope || scope.includes(model)) return;
+	throw new RuntimeResolutionError(
+		`${what} ${JSON.stringify(model)} is outside this session's model scope (--models / enabledModels: ${scope.join(", ")}); ${hint}`,
+	);
 }
 
 function formatSupported(
@@ -245,6 +275,17 @@ export function resolveRuntimePlan(
 	let provider = parent.provider;
 	let modelId = parent.modelId;
 	let selectedModel = registry.find(provider, modelId);
+
+	const scope = modelScopeOf(registry);
+	if (
+		!modelSelection.value &&
+		scope &&
+		!scope.includes(`${provider}/${modelId}`)
+	) {
+		throw new RuntimeResolutionError(
+			`the parent model ${JSON.stringify(`${provider}/${modelId}`)} is outside this session's model scope (--models / enabledModels: ${scope.join(", ")}), so a subagent cannot inherit it. Pass model with an in-scope exact provider/model-id or a task: category, set model in the role definition, or switch the parent to an in-scope model with /model`,
+		);
+	}
 
 	if (modelSelection.value) {
 		const parsed = parseExactModelRef(modelSelection.value);

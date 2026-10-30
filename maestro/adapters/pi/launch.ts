@@ -14,7 +14,11 @@ import {
 	createLifecycle,
 	type SubagentLifecycle,
 } from "../../core/lifecycle.ts";
-import type { ResolvedRuntimePlan } from "../../core/routing.ts";
+import {
+	assertModelInScope,
+	modelScopeOf,
+	type ResolvedRuntimePlan,
+} from "../../core/routing.ts";
 import type { PaneConfig } from "../../core/config/pane-config.ts";
 import { isNonEmptyString } from "../../core/config/type-guards.ts";
 import {
@@ -44,6 +48,7 @@ import {
 } from "./process-identity.ts";
 import {
 	createWorktreeSessionFork,
+	findStoredSessionModel,
 	getNewEntries,
 	readSubagentSessionPolicy,
 	seedSubagentSessionFile,
@@ -74,6 +79,9 @@ export interface FreshPiLaunchRequest {
 		agentDir?: string;
 	};
 	runtimePlan: ResolvedRuntimePlan;
+	/** The parent session's model scope (exact provider/model-id refs). The
+	 * child receives it as `--models`; absent or empty leaves it unscoped. */
+	modelScope?: readonly string[];
 	behavior: {
 		tools?: string;
 		skills?: string;
@@ -103,10 +111,26 @@ export interface ResumePiLaunchRequest {
 		sessionId: string;
 		sessionDir: string;
 	};
+	/** The parent session's model scope. When set, the stored model must be in
+	 * it and is pinned with `--model`; the child receives it as `--models`. */
+	modelScope?: readonly string[];
 	behavior?: {
 		autoExit?: boolean;
 		interactive?: boolean;
 	};
+}
+
+/** `--models <patterns>` for a scoped parent, or nothing when unscoped. */
+function modelScopeArgs(modelScope: readonly string[] | undefined): string[] {
+	const scope = modelScopeOf({ scope: modelScope });
+	if (!scope) return [];
+	// Pi splits --models on commas; a ref containing one cannot be carried.
+	const unrepresentable = scope.find((ref) => ref.includes(","));
+	if (unrepresentable)
+		throw new Error(
+			`Cannot pass the session model scope to the child: ${JSON.stringify(unrepresentable)} contains a comma`,
+		);
+	return ["--models", shellQuote(scope.join(","))];
 }
 
 export type PiLaunchRequest = FreshPiLaunchRequest | ResumePiLaunchRequest;
@@ -461,9 +485,13 @@ export async function launchPiSubagent(
 	request: PiLaunchRequest,
 	operations: PiLaunchOperations,
 ): Promise<PiRunningChild> {
-	return request.kind === "resume"
-		? launchResumedPiSubagent(request, operations)
-		: launchFreshPiSubagent(request, operations);
+	if (request.kind === "resume")
+		return launchResumedPiSubagent(request, operations);
+	// Last checks before any resource exists: the plan must be in the live
+	// scope, and the scope must be representable as the child's --models.
+	assertModelInScope(request.runtimePlan.model, { scope: request.modelScope });
+	modelScopeArgs(request.modelScope);
+	return launchFreshPiSubagent(request, operations);
 }
 
 export async function launchPiWorktreeHandoff(
@@ -919,6 +947,7 @@ function buildPiCommand(
 		shellQuote(request.runtimePlan.model),
 		"--thinking",
 		shellQuote(request.runtimePlan.thinking),
+		...modelScopeArgs(request.modelScope),
 	];
 	if (artifacts.systemPromptFile) {
 		parts.push(
@@ -1107,6 +1136,26 @@ async function launchResumedPiSubagent(
 		(entry) => entry.type === "session",
 	);
 	const cwd = isNonEmptyString(header?.cwd) ? header.cwd : process.cwd();
+	// A scoped parent pins the stored model after checking it, so Pi cannot
+	// restore an out-of-scope model on resume.
+	const scopeArgs = modelScopeArgs(request.modelScope);
+	let pinnedModel: string | undefined;
+	if (scopeArgs.length > 0) {
+		const stored = findStoredSessionModel(
+			getNewEntries(request.sessionFile, 0),
+		);
+		if (!stored)
+			throw new Error(
+				`Cannot resume ${request.sessionFile} in a scoped session: it records no model to check against the scope (--models / enabledModels).`,
+			);
+		pinnedModel = `${stored.provider}/${stored.modelId}`;
+		assertModelInScope(
+			pinnedModel,
+			{ scope: request.modelScope },
+			"the resumed session's stored model",
+			"resume keeps a session's model, so launch a new subagent with an in-scope model instead",
+		);
+	}
 	const surface = await operations.createPane(request.name, cwd);
 	try {
 		await operations.waitForShellReady(surface);
@@ -1147,6 +1196,8 @@ async function launchResumedPiSubagent(
 			"pi",
 			"--session",
 			shellQuote(request.sessionFile),
+			...(pinnedModel ? ["--model", shellQuote(pinnedModel)] : []),
+			...scopeArgs,
 			...(toolAllowlist ? ["--tools", shellQuote(toolAllowlist)] : []),
 			"-e",
 			shellQuote(join(SUBAGENTS_DIR, "child", "subagent-done.ts")),

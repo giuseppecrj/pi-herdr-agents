@@ -1578,6 +1578,44 @@ test("running normalization failures retain complete attempted plans and raw err
 		]);
 	}));
 
+test("a fallback planned before the scope shrank is re-checked against the live scope and skipped", () =>
+	fixture(async (f) => {
+		const input = f.input();
+		input.plans = [
+			input.plans[0],
+			{ ...input.plans[0], model: "test/two", modelId: "two" },
+		];
+		// The live parent's scope shrinks after planning (index 0 launches first).
+		input.prepareAttempt = (index) => {
+			const live = f.options.getLaunchSnapshot();
+			return {
+				...input,
+				snapshot:
+					index === 0
+						? live
+						: {
+								...live,
+								modelRegistry: { ...live.modelRegistry, scope: ["test/one"] },
+							},
+			};
+		};
+		const h = await f.session.spawnPi(input);
+		const r = f.latest()!;
+		const wait = f.session.supervise(h, input.task);
+		f.complete(r, { type: "error", errorMessage: "prior error" });
+		await wait;
+		assert.equal(f.commands.length, 1, "the stale candidate must not launch");
+		assert.deepEqual(f.settled[0].fallbackAttempts, ["test/one", "test/two"]);
+		assert.deepEqual(f.settled[0].fallbackFailures, [
+			{ model: "test/one", error: "prior error" },
+			{
+				model: "test/two",
+				error:
+					'model "test/two" is outside this session\'s model scope (--models / enabledModels: test/one); pick an in-scope exact provider/model-id',
+			},
+		]);
+	}));
+
 test("public, control, logical specialist, generation and inbox namespaces remain distinct across actual retries", () =>
 	fixture(async (f) => {
 		const input = f.input();

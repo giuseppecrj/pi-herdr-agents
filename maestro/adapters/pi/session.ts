@@ -843,6 +843,42 @@ export function findObservedSessionRuntime(
 	return observed;
 }
 
+/**
+ * The model Pi restores when this session is resumed without `--model`: the
+ * latest `model_change` on the active branch (leaf = last entry, followed
+ * through `parentId`), else the latest assistant response's model.
+ */
+export function findStoredSessionModel(
+	entries: SessionEntry[],
+): { provider: string; modelId: string } | undefined {
+	const byId = new Map(entries.map((entry) => [entry.id, entry]));
+	const branch: SessionEntry[] = [];
+	const seen = new Set<string>();
+	for (
+		let entry: SessionEntry | undefined = entries.at(-1);
+		entry && !seen.has(entry.id);
+		entry = entry.parentId ? byId.get(entry.parentId) : undefined
+	) {
+		seen.add(entry.id);
+		branch.unshift(entry);
+	}
+	const observed = findObservedSessionRuntime(branch);
+	if (observed.provider && observed.modelId)
+		return { provider: observed.provider, modelId: observed.modelId };
+	for (let index = branch.length - 1; index >= 0; index--) {
+		const message = branch[index].message;
+		if (
+			branch[index].type === "message" &&
+			isRecord(message) &&
+			message.role === "assistant" &&
+			isString(message.provider) &&
+			isString(message.model)
+		)
+			return { provider: message.provider, modelId: message.model };
+	}
+	return undefined;
+}
+
 export interface FinalAssistantMessage {
 	text: string | null;
 	contentLength: number;
