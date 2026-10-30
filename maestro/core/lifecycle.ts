@@ -1,3 +1,4 @@
+import { encodeHostValue } from "./host-text.ts";
 import type {
 	ActivityReadResult,
 	CompletionResult,
@@ -503,13 +504,15 @@ export function lifecycleTransition(
 }
 
 export function formatLifecycleTransitionLine(
-	name: string,
+	displayName: string,
 	projection: LifecycleProjection,
 	transition: Exclude<LifecycleTransition, null>,
 	now: number,
 	startedAt: number,
 	formatElapsed: (ms: number) => string,
 ): string {
+	// The name and the child-written activity label are encoded values.
+	const name = encodeHostValue(displayName);
 	const runtime = formatElapsed(Math.max(0, now - startedAt));
 	const duration =
 		projection.stateDurationSince == null
@@ -523,7 +526,7 @@ export function formatLifecycleTransitionLine(
 	}
 	if (projection.kind === "active") {
 		const detail = projection.label
-			? ` (${projection.label}${duration})`
+			? ` (${encodeHostValue(projection.label)}${duration})`
 			: duration;
 		return `${name} running ${runtime}, recovered; active${detail}.`;
 	}

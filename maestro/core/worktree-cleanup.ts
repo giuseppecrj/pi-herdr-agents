@@ -7,6 +7,11 @@ import {
 	type PrimaryWorkspaceClaim,
 } from "./opened-primary-workspace.ts";
 import type { WorktreeSurfaceInfo } from "./surface-provider.ts";
+import {
+	encodeHostValue,
+	HOST_ERROR_CHARS,
+	HOST_PATH_CHARS,
+} from "./host-text.ts";
 
 export interface CleanupGitState {
 	branch: string;
@@ -89,6 +94,12 @@ export interface WorktreeRemovalResult {
 function message(error: any): string {
 	return error instanceof Error ? error.message : String(error);
 }
+
+// Parent-facing text: paths, Git output, diagnostics, blockers and warnings
+// are encoded values. Entries and results keep the raw strings.
+const shownPath = (path: string) => encodeHostValue(path, HOST_PATH_CHARS);
+const shownList = (items: Iterable<string>) =>
+	[...items].map((item) => encodeHostValue(item, HOST_ERROR_CHARS)).join("; ");
 function contained(root: string, path: string): boolean {
 	const rel = relative(root, path);
 	return (
@@ -239,7 +250,7 @@ export function formatWorktreeInventory(
 			)
 			.map(
 				(row) =>
-					`${row.branch ?? "unknown branch"} — ${row.path}\nSource: ${row.sourceRepo ?? "unknown"} · workspace: ${row.workspaceId ?? "none"} · manifest: ${row.manifest.length ? row.manifest.map(({ value }) => value.state ?? "unknown").join(", ") : "absent"}\n${row.classification} · Git: ${row.git ? `${row.git.dirtyFiles} dirty, ${row.git.untrackedFiles} untracked, ${row.git.ignoredFiles} ignored, ${row.git.conflicts} conflicts` : "unknown"}${row.blockers.length ? ` · ${row.blockers.join("; ")}` : " · clean"}${row.warnings.length ? `\nWarning: ${row.warnings.join("; ")}` : ""}`,
+					`${row.branch == null ? "unknown branch" : encodeHostValue(row.branch)} — ${shownPath(row.path)}\nSource: ${row.sourceRepo == null ? "unknown" : shownPath(row.sourceRepo)} · workspace: ${encodeHostValue(row.workspaceId ?? "none")} · manifest: ${row.manifest.length ? row.manifest.map(({ value }) => encodeHostValue(isString(value.state) ? value.state : "unknown")).join(", ") : "absent"}\n${row.classification} · Git: ${row.git ? `${row.git.dirtyFiles} dirty, ${row.git.untrackedFiles} untracked, ${row.git.ignoredFiles} ignored, ${row.git.conflicts} conflicts` : "unknown"}${row.blockers.length ? ` · ${shownList(row.blockers)}` : " · clean"}${row.warnings.length ? `\nWarning: ${shownList(row.warnings)}` : ""}`,
 			)
 			.join("\n\n") || "No managed worktrees found."
 	);
@@ -262,9 +273,7 @@ export async function removeContainedWorktree(
 		warnings: [...observedWarnings],
 		message:
 			result.message +
-			(observedWarnings.size
-				? ` Warning: ${[...observedWarnings].join("; ")}`
-				: ""),
+			(observedWarnings.size ? ` Warning: ${shownList(observedWarnings)}` : ""),
 	});
 	const ignoredNotice = () =>
 		ignoredFiles
@@ -316,7 +325,9 @@ export async function removeContainedWorktree(
 					: rows.some((row) => row.classification === "unknown")
 						? `Target could not be resolved because inventory inspection failed: ${rows
 								.filter((row) => row.classification === "unknown")
-								.map((row) => `${row.path}: ${row.blockers.join("; ")}`)
+								.map(
+									(row) => `${shownPath(row.path)}: ${shownList(row.blockers)}`,
+								)
 								.join("; ")}`
 						: "Target not found in managed inventory; nothing removed.",
 			});
@@ -341,7 +352,7 @@ export async function removeContainedWorktree(
 			return finish({
 				status: "blocked",
 				entry,
-				message: entry.blockers.join("; ") + ignoredNotice(),
+				message: shownList(entry.blockers) + ignoredNotice(),
 			});
 		if (entry.git && (entry.git.dirtyFiles || entry.git.untrackedFiles)) {
 			preservationAttempted = true;
@@ -365,7 +376,7 @@ export async function removeContainedWorktree(
 					status: "blocked",
 					entry,
 					preservationSha,
-					message: `Preserved ${preservationSha}, but reinspection blocks removal: ${entry.blockers.join("; ") || "identity changed"}${ignoredNotice()}`,
+					message: `Preserved ${encodeHostValue(preservationSha)}, but reinspection blocks removal: ${shownList(entry.blockers) || "identity changed"}${ignoredNotice()}`,
 				});
 		}
 		ignoredFiles = entry.git?.ignoredFiles ?? ignoredFiles;
@@ -389,7 +400,8 @@ export async function removeContainedWorktree(
 					entry.sourceRepo,
 					claims,
 				);
-				if (report?.note) primaryNote = ` ${report.note}`;
+				if (report?.note)
+					primaryNote = ` ${encodeHostValue(report.note, HOST_ERROR_CHARS)}`;
 				if (report?.releasedClaims.length)
 					forgetOpenedPrimaryWorkspaceClaims(report.releasedClaims);
 			} catch (error) {
@@ -412,14 +424,14 @@ export async function removeContainedWorktree(
 			status: "removed",
 			entry,
 			preservationSha,
-			message: `Removed ${entry.path}. Branch ${entry.branch} and its commits retained.${preservationSha ? ` Preservation commit: ${preservationSha}.` : ""}${ignoredNotice()}${primaryNote}${warnings.length ? ` Warning: ${warnings.join("; ")}` : entry.manifest.length ? " Manifest marked removed." : " No reachable manifest (orphan)."}`,
+			message: `Removed ${shownPath(entry.path)}. Branch ${encodeHostValue(entry.branch ?? "unknown")} and its commits retained.${preservationSha ? ` Preservation commit: ${encodeHostValue(preservationSha)}.` : ""}${ignoredNotice()}${primaryNote}${warnings.length ? ` Warning: ${shownList(warnings)}` : entry.manifest.length ? " Manifest marked removed." : " No reachable manifest (orphan)."}`,
 		});
 	} catch (error) {
 		return finish({
 			status: "failed",
 			entry,
 			preservationSha,
-			message: `Removal failed: ${message(error)}${preservationSha ? `; preserved commit ${preservationSha}` : ""}${ignoredNotice()}`,
+			message: `Removal failed: ${encodeHostValue(message(error), HOST_ERROR_CHARS)}${preservationSha ? `; preserved commit ${encodeHostValue(preservationSha)}` : ""}${ignoredNotice()}`,
 		});
 	}
 }

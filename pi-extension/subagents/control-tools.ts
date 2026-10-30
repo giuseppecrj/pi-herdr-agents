@@ -10,6 +10,10 @@ import {
 } from "./catalog.ts";
 import { getFirstText } from "./presentation.ts";
 import {
+	encodeHostValue,
+	HOST_ERROR_CHARS,
+} from "../../maestro/core/host-text.ts";
+import {
 	SUBAGENT_CANCEL_DESCRIPTION,
 	type SubagentCancelDetails,
 	type Controls,
@@ -86,7 +90,7 @@ export function registerControlTools(
 				const text =
 					"error" in details
 						? details.error
-						: `Task ${details.task} dispatched to persistent specialist "${target.running.name}".`;
+						: `Task ${encodeHostValue(details.task)} dispatched to persistent specialist "${encodeHostValue(target.running.name)}".`;
 				return { content: [{ type: "text", text }], details };
 			},
 		});
@@ -124,8 +128,8 @@ export function registerControlTools(
 					"error" in details
 						? details.error
 						: details.status === "stop_pending"
-							? `Stop pending for persistent specialist "${target.running.name}"; its active task will settle first.`
-							: `Stop requested for persistent specialist "${target.running.name}".`;
+							? `Stop pending for persistent specialist "${encodeHostValue(target.running.name)}"; its active task will settle first.`
+							: `Stop requested for persistent specialist "${encodeHostValue(target.running.name)}".`;
 				return { content: [{ type: "text", text }], details };
 			},
 		});
@@ -304,15 +308,23 @@ export function registerControlTools(
 						a.source === "package" && a.provider
 							? `package:${a.provider}`
 							: a.source;
-					const badge = theme.fg("accent", ` (${source})`);
+					// Definitions may be child-writable files: encode every value.
+					const badge = theme.fg("accent", ` (${encodeHostValue(source)})`);
 					const desc = a.description
-						? theme.fg("dim", ` — ${a.description}`)
+						? theme.fg("dim", ` — ${encodeHostValue(a.description)}`)
 						: "";
-					const model = a.model ? theme.fg("dim", ` [${a.model}]`) : "";
-					return `  ${theme.fg("toolTitle", theme.bold(a.name))}${badge}${model}${desc}`;
+					const model = a.model
+						? theme.fg("dim", ` [${encodeHostValue(a.model)}]`)
+						: "";
+					return `  ${theme.fg("toolTitle", theme.bold(encodeHostValue(a.name)))}${badge}${model}${desc}`;
 				});
 				for (const diagnostic of diagnostics) {
-					lines.push(theme.fg("warning", `  ! ${diagnostic.message}`));
+					lines.push(
+						theme.fg(
+							"warning",
+							`  ! ${encodeHostValue(diagnostic.message, HOST_ERROR_CHARS)}`,
+						),
+					);
 				}
 				return new Text(lines.join("\n"), 0, 0);
 			},

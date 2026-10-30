@@ -19,6 +19,15 @@ import {
 import type { SubagentRuntime } from "./state.ts";
 import { delegationDepthRefusal } from "./launch-tools.ts";
 import { launchDiagnosticsText } from "./presentation.ts";
+import {
+	encodeHostValue,
+	HOST_ERROR_CHARS,
+	HOST_PATH_CHARS,
+} from "../../maestro/core/host-text.ts";
+
+function errorText(message: string): string {
+	return encodeHostValue(message, HOST_ERROR_CHARS);
+}
 
 interface WorktreeDeps {
 	runtime: SubagentRuntime;
@@ -101,14 +110,14 @@ export function registerWorktreeCommand(
 							: (await runtime.session!.listWorktreeSurfaces({ cwd: ctx.cwd }))
 									.map(
 										(worktree) =>
-											`${worktree.branch || "(detached HEAD)"} — ${worktree.path}${worktree.workspaceId ? ` (${worktree.workspaceId})` : ""}`,
+											`${worktree.branch ? encodeHostValue(worktree.branch) : "(detached HEAD)"} — ${encodeHostValue(worktree.path, HOST_PATH_CHARS)}${worktree.workspaceId ? ` (${encodeHostValue(worktree.workspaceId)})` : ""}`,
 									)
 									.join("\n") || "No worktrees found.",
 						"info",
 					);
 				} catch (error) {
 					ctx.ui.notify(
-						`Worktree list failed: ${error instanceof Error ? error.message : String(error)}`,
+						`Worktree list failed: ${errorText(error instanceof Error ? error.message : String(error))}`,
 						"error",
 					);
 				}
@@ -216,10 +225,11 @@ export function registerWorktreeCommand(
 				if (!worktree) {
 					throw new Error("Worktree handoff did not return worktree metadata");
 				}
+				const path = encodeHostValue(worktree.path, HOST_PATH_CHARS);
 				ctx.ui.notify(
 					(result.focusError
-						? `Worktree launched, but workspace focus failed: ${result.focusError}\nWorktree: ${worktree.path}`
-						: `Worktree launched in ${worktree.path} (workspace ${worktree.workspaceId}).`) +
+						? `Worktree launched, but workspace focus failed: ${errorText(result.focusError)}\nWorktree: ${path}`
+						: `Worktree launched in ${path} (workspace ${encodeHostValue(worktree.workspaceId)}).`) +
 						launchDiagnosticsText(worktree.diagnostics, "\n", ""),
 					result.focusError || worktree.diagnostics?.length
 						? "warning"
@@ -227,7 +237,7 @@ export function registerWorktreeCommand(
 				);
 			} catch (error) {
 				ctx.ui.notify(
-					`Worktree launch failed: ${error instanceof Error ? error.message : String(error)}`,
+					`Worktree launch failed: ${errorText(error instanceof Error ? error.message : String(error))}`,
 					"error",
 				);
 			}

@@ -17,7 +17,18 @@ import {
 } from "./state.ts";
 import { ensureLifecycle } from "./observation.ts";
 import type { Controls } from "./controls.ts";
-import { encodeHostValue } from "./presentation.ts";
+import {
+	encodeHostValue,
+	HOST_PATH_CHARS,
+} from "../../maestro/core/host-text.ts";
+import {
+	type HostField,
+	hostLine,
+	hostText,
+	list,
+	sendParentMessage,
+	value,
+} from "./presentation.ts";
 
 export function asPiRecord(running: RunningSubagent): PiRunRecord {
 	// SAFETY: live rows are the adapter's actual records. Legacy presentation
@@ -96,23 +107,33 @@ export function persistentSpecialistFacts(
 	return facts;
 }
 
-export function formatPersistentSpecialistFacts(
+/**
+ * Facts for a crash or stop notice. The ledger is child-writable, so its
+ * outcomes are one bounded list of encoded entries with an omitted count;
+ * details keep every entry.
+ */
+export function persistentFactsFields(
 	facts: PersistentSpecialistFacts,
-): string {
-	const lines = [
-		`Logical ID: ${facts.logicalId}`,
-		`Generation ID: ${facts.generationId}`,
-		`Policy hash: ${facts.policyHash}`,
-		// Ledger task strings can originate in child-written events.
-		`Task outcomes: ${facts.tasks.map((task) => `${encodeHostValue(task.task)}=${task.outcome}`).join(", ") || "none"}`,
-		`Session: ${facts.sessionFile}`,
-		`Last observed phase: ${facts.lastObservedPhase}`,
+): HostField[] {
+	const fields = [
+		hostLine`Logical ID: ${facts.logicalId}`,
+		hostLine`Generation ID: ${facts.generationId}`,
+		hostLine`Policy hash: ${facts.policyHash}`,
+		{
+			...hostLine`Task outcomes: ${list(
+				facts.tasks.map((task) => `${task.task}=${task.outcome}`),
+				"ledger entries",
+			)}`,
+			drop: 1,
+		},
+		hostLine`Session: ${value(facts.sessionFile, HOST_PATH_CHARS)}`,
+		hostLine`Last observed phase: ${facts.lastObservedPhase}`,
 	];
 	if (facts.worktree)
-		lines.push(
-			`Worktree Git state: ${facts.worktree.gitError ? "unknown" : facts.worktree.conflicted ? "conflicted" : facts.worktree.clean ? "clean" : "dirty"}`,
+		fields.push(
+			hostLine`Worktree Git state: ${facts.worktree.gitError ? "unknown" : facts.worktree.conflicted ? "conflicted" : facts.worktree.clean ? "clean" : "dirty"}`,
 		);
-	return lines.join("\n");
+	return fields;
 }
 
 function sendPersistentStopFailure(
@@ -125,14 +146,20 @@ function sendPersistentStopFailure(
 		io,
 		io.inspectWorktree(asPiRecord(running)),
 	);
-	api.sendMessage(
+	sendParentMessage(
+		api,
+		"subagent_stop",
 		{
-			customType: "subagent_stop",
-			content: `Persistent specialist stop failed: process exit was not confirmed. Evidence is retained.\n\n${formatPersistentSpecialistFacts(facts)}`,
-			display: true,
-			details: { status: "failed", facts },
+			head: [
+				[
+					hostText(
+						"Persistent specialist stop failed: process exit was not confirmed. Evidence is retained.",
+					),
+				],
+			],
+			evidence: [persistentFactsFields(facts)],
 		},
-		{ triggerTurn: true, deliverAs: "steer" },
+		{ status: "failed", facts },
 	);
 }
 
@@ -168,7 +195,8 @@ export function createPersistentControls({
 			"Live persistent specialists:",
 			...specialists.map((running) => {
 				const allowlist = running.policyTools?.join(",") ?? "unrestricted";
-				return `• ${running.name} | ${running.logicalId} | ${running.generationId} | ${running.agent ?? "bare"} | ${persistentSpecialistState(running)} | ${running.tasksCompleted ?? 0} completed | tools: ${allowlist}; denied: ${running.policyDeniedTools?.join(",") || "none"}; persistent: true`;
+				const denied = running.policyDeniedTools?.join(",") || "none";
+				return `• ${encodeHostValue(running.name)} | ${encodeHostValue(running.logicalId ?? "")} | ${encodeHostValue(running.generationId ?? "")} | ${encodeHostValue(running.agent ?? "bare")} | ${persistentSpecialistState(running)} | ${running.tasksCompleted ?? 0} completed | tools: ${encodeHostValue(allowlist, HOST_PATH_CHARS)}; denied: ${encodeHostValue(denied, HOST_PATH_CHARS)}; persistent: true`;
 			}),
 		];
 	}
@@ -178,7 +206,7 @@ export function createPersistentControls({
 		if ("error" in resolved) return resolved;
 		if (!resolved.running.persistent) {
 			return {
-				error: `Subagent "${resolved.running.name}" is not persistent.`,
+				error: `Subagent "${encodeHostValue(resolved.running.name)}" is not persistent.`,
 			};
 		}
 		return resolved;
@@ -191,7 +219,7 @@ export function createPersistentControls({
 			(running) => running.persistent,
 		);
 		if (specialists.length < config.maxAgents) return undefined;
-		return `Persistent specialist cap (${config.maxAgents}) reached. Current specialists: ${specialists.map((running) => `${running.name} (${persistentSpecialistState(running)}, ${running.tasksCompleted ?? 0} completed)`).join(", ")}.`;
+		return `Persistent specialist cap (${config.maxAgents}) reached. Current specialists: ${specialists.map((running) => `${encodeHostValue(running.name)} (${persistentSpecialistState(running)}, ${running.tasksCompleted ?? 0} completed)`).join(", ")}.`;
 	}
 
 	function startPersistentStopTimeout(
@@ -238,8 +266,9 @@ export function createPersistentControls({
 			};
 		}
 		const running = resolved.running;
+		const shownName = encodeHostValue(running.name);
 		if (running.stopState === "requested" || running.stopState === "pending") {
-			const error = `Stop is already requested for persistent specialist "${running.name}".`;
+			const error = `Stop is already requested for persistent specialist "${shownName}".`;
 			return {
 				content: [{ type: "text", text: error }],
 				details: { error, id: running.id, name: running.name },
@@ -247,7 +276,7 @@ export function createPersistentControls({
 		}
 		const state = persistentSpecialistState(running);
 		if (state === "stopped") {
-			const error = `Persistent specialist "${running.name}" is already stopped.`;
+			const error = `Persistent specialist "${shownName}" is already stopped.`;
 			return {
 				content: [{ type: "text", text: error }],
 				details: { error, id: running.id, name: running.name },
@@ -263,8 +292,8 @@ export function createPersistentControls({
 				{
 					type: "text",
 					text: pending
-						? `Stop pending for persistent specialist "${running.name}"; its active task will settle first.`
-						: `Stop requested for persistent specialist "${running.name}".`,
+						? `Stop pending for persistent specialist "${shownName}"; its active task will settle first.`
+						: `Stop requested for persistent specialist "${shownName}".`,
 				},
 			],
 			details: {
@@ -290,10 +319,11 @@ export function createPersistentControls({
 				details: { error: resolved.error },
 			};
 		const running = resolved.running;
+		const shownName = encodeHostValue(running.name);
 		const task = randomUUID();
 		if (running.stopState === "failed") {
 			io.rejectBusy(asPiRecord(running), task);
-			const error = `Persistent specialist "${running.name}" is in an unconfirmed-stop state; task ${task} was rejected-busy. Process exit is unconfirmed and evidence is retained at session ${running.sessionFile}. Request subagent_stop again or spawn a new specialist.`;
+			const error = `Persistent specialist "${shownName}" is in an unconfirmed-stop state; task ${task} was rejected-busy. Process exit is unconfirmed and evidence is retained at session ${encodeHostValue(running.sessionFile, HOST_PATH_CHARS)}. Request subagent_stop again or spawn a new specialist.`;
 			return {
 				content: [{ type: "text", text: error }],
 				details: { error, task, outcome: "rejected-busy" },
@@ -302,7 +332,7 @@ export function createPersistentControls({
 		const state = persistentSpecialistState(running);
 		if (state !== "idle") {
 			io.rejectBusy(asPiRecord(running), task);
-			const error = `Persistent specialist "${running.name}" is ${state}; task ${task} was rejected-busy. Resend after the pending result.`;
+			const error = `Persistent specialist "${shownName}" is ${state}; task ${task} was rejected-busy. Resend after the pending result.`;
 			return {
 				content: [{ type: "text", text: error }],
 				details: { error, task, outcome: "rejected-busy" },
@@ -313,7 +343,7 @@ export function createPersistentControls({
 			content: [
 				{
 					type: "text",
-					text: `Task ${task} dispatched to persistent specialist "${running.name}".`,
+					text: `Task ${task} dispatched to persistent specialist "${shownName}".`,
 				},
 			],
 			details: { id: running.id, task, inbox, outcome: "dispatched" },

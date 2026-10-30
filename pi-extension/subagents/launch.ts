@@ -1,3 +1,7 @@
+import {
+	encodeHostValue,
+	HOST_ERROR_CHARS,
+} from "../../maestro/core/host-text.ts";
 import { randomUUID } from "node:crypto";
 import type {
 	PiLaunchSnapshot,
@@ -73,7 +77,11 @@ export function createLaunchPlanner({
 			const diagnostic = discoverAgentCatalog(runtime.pi).diagnostics.find(
 				(candidate) => candidate.agentName === params.agent,
 			);
-			throw new Error(diagnostic?.message ?? missingRoleMessage(params.agent));
+			throw new Error(
+				diagnostic
+					? encodeHostValue(diagnostic.message, HOST_ERROR_CHARS)
+					: missingRoleMessage(params.agent),
+			);
 		}
 		if (!ctx.model)
 			throw new Error("Subagent launch requires a resolved parent model");
@@ -150,7 +158,11 @@ export function createLaunchPlanner({
 			const diagnostic = discoverAgentCatalog(runtime.pi).diagnostics.find(
 				(candidate) => candidate.agentName === params.agent,
 			);
-			throw new Error(diagnostic?.message ?? missingRoleMessage(params.agent));
+			throw new Error(
+				diagnostic
+					? encodeHostValue(diagnostic.message, HOST_ERROR_CHARS)
+					: missingRoleMessage(params.agent),
+			);
 		}
 		if (!ctx.model)
 			throw new Error("Subagent launch requires a resolved parent model");

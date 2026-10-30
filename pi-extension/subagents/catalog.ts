@@ -1,3 +1,8 @@
+import {
+	encodeHostValue,
+	HOST_ERROR_CHARS,
+	HOST_PATH_CHARS,
+} from "../../maestro/core/host-text.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "@sinclair/typebox";
 import {
@@ -203,17 +208,23 @@ export function formatVisibleAgentDefinitions(
 	return agents
 		.filter((agent) => !agent.disableModelInvocation)
 		.map((agent) => {
-			const badge = ` (${formatAgentSource(agent)})`;
-			const desc = agent.description ? ` — ${agent.description}` : "";
-			const model = agent.model ? ` [${agent.model}]` : "";
-			return `• ${agent.name}${badge}${model}${desc}`;
+			// Definitions are files a child may be able to write: encode each value.
+			const badge = ` (${encodeHostValue(formatAgentSource(agent))})`;
+			const desc = agent.description
+				? ` — ${encodeHostValue(agent.description, HOST_PATH_CHARS)}`
+				: "";
+			const model = agent.model ? ` [${encodeHostValue(agent.model)}]` : "";
+			return `• ${encodeHostValue(agent.name)}${badge}${model}${desc}`;
 		});
 }
 
 export function formatAgentDiagnostics(
 	diagnostics: AgentDiagnostic[],
 ): string[] {
-	return diagnostics.map((diagnostic) => `! ${diagnostic.message}`);
+	return diagnostics.map(
+		(diagnostic) =>
+			`! ${encodeHostValue(diagnostic.message, HOST_ERROR_CHARS)}`,
+	);
 }
 
 export function resolveEffectiveSessionMode(

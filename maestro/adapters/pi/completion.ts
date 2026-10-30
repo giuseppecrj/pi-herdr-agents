@@ -10,6 +10,8 @@ export interface CompletionResult {
 	exitCode: number;
 	ping?: { name: string; message: string };
 	errorMessage?: string;
+	/** Who wrote errorMessage: the child's sidecar, or the host's own diagnostic. */
+	errorSource?: "child" | "host";
 }
 
 export interface CompletionOptions {
@@ -43,10 +45,20 @@ export function interpretExitSidecar(payload: any): CompletionResult {
 	}
 
 	if (payload?.type === "error") {
-		const errorMessage = isNonEmptyString(payload.errorMessage)
-			? payload.errorMessage
-			: "Subagent exited with stopReason=error (no errorMessage in sidecar).";
-		return { reason: "error", exitCode: 1, errorMessage };
+		return isNonEmptyString(payload.errorMessage)
+			? {
+					reason: "error",
+					exitCode: 1,
+					errorMessage: payload.errorMessage,
+					errorSource: "child",
+				}
+			: {
+					reason: "error",
+					exitCode: 1,
+					errorMessage:
+						"Subagent exited with stopReason=error (no errorMessage in sidecar).",
+					errorSource: "host",
+				};
 	}
 
 	if (payload?.type === "done") return { reason: "done", exitCode: 0 };
@@ -56,6 +68,7 @@ export function interpretExitSidecar(payload: any): CompletionResult {
 		exitCode: 1,
 		errorMessage:
 			"Invalid subagent completion sidecar: unsupported payload type.",
+		errorSource: "host",
 	};
 }
 
@@ -188,6 +201,7 @@ export async function waitForCompletion(
 					exitCode: 1,
 					errorMessage:
 						"Subagent pane disappeared before completion evidence was recorded.",
+					errorSource: "host",
 				};
 			}
 		}

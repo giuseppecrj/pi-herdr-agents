@@ -1,3 +1,7 @@
+import {
+	encodeHostValue,
+	HOST_PATH_CHARS,
+} from "../../maestro/core/host-text.ts";
 import { statSync } from "node:fs";
 import { observePiActivity } from "../../maestro/runtime/index.ts";
 import {
@@ -205,9 +209,9 @@ export function formatNoProgressAdvisoryLine(
 	running: RunningSubagent,
 	event: NoProgressAdvisoryEvent,
 ): string {
-	const name = normalizeStatusName(running.name);
+	const name = encodeHostValue(normalizeStatusName(running.name));
 	const persistentIds = running.persistent
-		? ` Logical ID: ${running.logicalId ?? "unknown"}; generation ID: ${running.generationId ?? "unknown"}.`
+		? ` Logical ID: ${encodeHostValue(running.logicalId ?? "unknown")}; generation ID: ${encodeHostValue(running.generationId ?? "unknown")}.`
 		: "";
 	if (event.kind === "recovered") {
 		return `${name} no-progress advisory recovered after ${formatElapsedDuration(event.idleMs)}.${persistentIds}`;
@@ -223,5 +227,5 @@ export function formatNoProgressAdvisoryLine(
 		: running.persistent
 			? "interrupt, or use subagent_stop then replace with a new persistent specialist"
 			: "interrupt, or after manual termination use subagent_resume or a new spawn";
-	return `${name} no-progress advisory: ${formatElapsedDuration(event.idleMs)} idle while active. Classification: ${classification}. Last entry: ${event.lastEntryKind}. Session: ${running.sessionFile}. Recovery options: ${options}.${persistentIds}`;
+	return `${name} no-progress advisory: ${formatElapsedDuration(event.idleMs)} idle while active. Classification: ${classification}. Last entry: ${encodeHostValue(event.lastEntryKind)}. Session: ${encodeHostValue(running.sessionFile, HOST_PATH_CHARS)}. Recovery options: ${options}.${persistentIds}`;
 }

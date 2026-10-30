@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { SupervisionConfig } from "../../maestro/core/config/supervision-config.ts";
+import { encodeHostValue } from "../../maestro/core/host-text.ts";
 import {
 	capStatusLines,
 	formatElapsedDuration,
@@ -118,7 +119,7 @@ function formatLifecycleWidgetLabel(
 			: ` ${formatElapsedDuration(now - projection.stateDurationSince)}`;
 	if (projection.kind === "active")
 		return projection.label
-			? ` active · ${projection.label}${duration} `
+			? ` active · ${encodeHostValue(projection.label)}${duration} `
 			: ` active${duration} `;
 	if (projection.kind === "blocked") return ` blocked${duration} `;
 	if (projection.kind === "running") return " running… ";
@@ -194,10 +195,10 @@ export function createWidgetController({
 				agent.startTime,
 				projection.runtimeEndedAt ?? now,
 			);
-			const agentTag = agent.agent ? ` (${agent.agent})` : "";
-			const left = ` ${elapsed}  ${agent.name}${agentTag} `;
+			const agentTag = agent.agent ? ` (${encodeHostValue(agent.agent)})` : "";
+			const left = ` ${elapsed}  ${encodeHostValue(agent.name)}${agentTag} `;
 			const runtimeTag = agent.runtimePlan
-				? `${agent.runtimePlan.modelId}|${agent.runtimePlan.thinking} · `
+				? `${encodeHostValue(agent.runtimePlan.modelId)}|${agent.runtimePlan.thinking} · `
 				: "";
 			const label =
 				agent.cancelState === "unconfirmed"

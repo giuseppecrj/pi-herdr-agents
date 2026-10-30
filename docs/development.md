@@ -14,7 +14,8 @@ provider; fakes are for conformance tests only.
   holds the `__test__` surface.
 - `pi-extension/subagents/state.ts`, `catalog.ts`, `presentation.ts` — run-state
   types and reload slots; the role catalog, `subagent` parameters, and launch
-  policy; result text and the child-report envelope.
+  policy; the parent message model, its one serializer, and the child-report
+  envelope.
 - `pi-extension/subagents/observation.ts`, `widgets.ts`, `controls.ts`,
   `persistent.ts`, `delivery.ts`, `launch.ts` — per-load controllers
   (`create*`) for activity observation, the widget and status refresh,
@@ -34,6 +35,9 @@ provider; fakes are for conformance tests only.
   config loaders with injected directories, and task-model init prompt logic.
 - `maestro/core/worktree.ts`, `maestro/core/worktree-cleanup.ts` — manifest
   schema/state, handoff types, and cleanup eligibility/formatting.
+- `maestro/core/host-text.ts` — the one encoding for variable values in
+  parent-facing host lines, lossless command-argument serializers, and display
+  normalization for child text.
 - `maestro/adapters/pi/` — Pi launch, completion, session I/O, activity files,
   model SDK glue, and registry projection behind `PiHarnessAdapter`;
   `child/subagent-done.ts` implements the child protocol, and

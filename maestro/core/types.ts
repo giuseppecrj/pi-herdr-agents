@@ -189,6 +189,7 @@ export interface CompletionResult {
 	exitCode: number;
 	ping?: { name: string; message: string };
 	errorMessage?: string;
+	errorSource?: "child" | "host";
 }
 
 // pi-herdr-agents extension
@@ -218,6 +219,8 @@ export interface CompletionEvidence {
 	exitCode: number;
 	ping?: { name: string; message: string };
 	errorMessage?: string;
+	/** Who wrote errorMessage: the child's sidecar, or a host diagnostic. */
+	errorSource?: "child" | "host";
 	finalMessage?: { text: string; stopReason?: string; errorMessage?: string };
 	/** Harness session reference; for Pi, the session file path. */
 	// pi-herdr-agents extension

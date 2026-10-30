@@ -61,8 +61,6 @@ import {
 	loadAgentDefaults,
 } from "./catalog.ts";
 import {
-	boundChildDelivery,
-	resolveUnexpectedErrorPresentation,
 	sendSubagentResult,
 	resolveResultPresentation,
 } from "./presentation.ts";
@@ -262,8 +260,6 @@ export const __test__ = {
 	persistentSpecialistState,
 	persistentCapacityError,
 	resolveResultPresentation,
-	boundChildDelivery,
-	resolveUnexpectedErrorPresentation,
 	shouldAdvanceToFallback,
 	deliverPersistentTaskEvent,
 	drainPersistentTaskEvents,

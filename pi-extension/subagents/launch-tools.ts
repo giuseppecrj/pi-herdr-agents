@@ -23,6 +23,11 @@ import {
 	loadAgentDefaults,
 } from "./catalog.ts";
 import { getFirstText, launchDiagnosticsText } from "./presentation.ts";
+import {
+	encodeHostValue,
+	HOST_ERROR_CHARS,
+	HOST_PATH_CHARS,
+} from "../../maestro/core/host-text.ts";
 import type { PersistentControls } from "./persistent.ts";
 import type { LaunchPlanner } from "./launch.ts";
 import type { SpawningConfig } from "../../maestro/core/config/spawning-config.ts";
@@ -154,7 +159,7 @@ export function registerSubagentTool(
 						content: [
 							{
 								type: "text",
-								text: `You are the ${currentAgent} agent — do not start another ${currentAgent}. You were spawned to do this work yourself. Complete the task directly.`,
+								text: `You are the ${encodeHostValue(currentAgent)} agent — do not start another ${encodeHostValue(currentAgent)}. You were spawned to do this work yourself. Complete the task directly.`,
 							},
 						],
 						details: { error: "self-spawn blocked" },
@@ -177,7 +182,10 @@ export function registerSubagentTool(
 				if (roleDiagnostic) {
 					return {
 						content: [
-							{ type: "text", text: `Error: ${roleDiagnostic.message}` },
+							{
+								type: "text",
+								text: `Error: ${encodeHostValue(roleDiagnostic.message, HOST_ERROR_CHARS)}`,
+							},
 						],
 						details: { error: roleDiagnostic.code },
 					};
@@ -273,9 +281,9 @@ export function registerSubagentTool(
 						{
 							type: "text",
 							text:
-								`Sub-agent "${params.name}" launched and is now running in the background` +
+								`Sub-agent "${encodeHostValue(params.name)}" launched and is now running in the background` +
 								(running.worktree
-									? ` in worktree ${running.worktree.path} on branch ${running.worktree.branch}. `
+									? ` in worktree ${encodeHostValue(running.worktree.path, HOST_PATH_CHARS)} on branch ${encodeHostValue(running.worktree.branch)}. `
 									: ". ") +
 								launchDiagnosticsText(running.worktree?.diagnostics, "", " ") +
 								`Do NOT generate or assume any results — you have no idea what the sub-agent will do or produce. ` +
@@ -478,7 +486,7 @@ export function registerResumeTool(
 						content: [
 							{
 								type: "text",
-								text: `Error: session file not found: ${params.sessionPath}`,
+								text: `Error: session file not found: ${encodeHostValue(params.sessionPath, HOST_PATH_CHARS)}`,
 							},
 						],
 						details: { error: "session not found" },
@@ -509,7 +517,12 @@ export function registerResumeTool(
 					});
 
 				return {
-					content: [{ type: "text", text: `Session "${name}" resumed.` }],
+					content: [
+						{
+							type: "text",
+							text: `Session "${encodeHostValue(name)}" resumed.`,
+						},
+					],
 					details: {
 						id,
 						name,
@@ -561,7 +574,9 @@ export function registerSubagentCommand(pi: ExtensionAPI): void {
 					(candidate) => candidate.agentName === agentName,
 				);
 				ctx.ui.notify(
-					diagnostic?.message ?? missingRoleMessage(agentName),
+					diagnostic
+						? encodeHostValue(diagnostic.message, HOST_ERROR_CHARS)
+						: missingRoleMessage(agentName),
 					"error",
 				);
 				return;
