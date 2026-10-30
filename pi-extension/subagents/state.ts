@@ -137,11 +137,12 @@ export interface RunningSubagent {
 }
 
 /**
- * A completion that settled while no live parent API was bound. Its running row
- * stays delivery-pending and RunSession keeps ownership until it is released.
+ * Work held while no live parent API was bound: a settled completion, whose
+ * running row stays delivery-pending and RunSession keeps ownership until it is
+ * released, or a fallback attempt waiting to prepare from the live context.
  */
 export interface HeldDelivery {
-	/** Running-row id of the held completion. */
+	/** Running-row id of the held completion or waiting attempt. */
 	id: string;
 	/** Resume with the replacement's live API, or `undefined` when the parent exits. */
 	release(api: ExtensionAPI | undefined): void;
@@ -159,15 +160,36 @@ export interface SubagentRuntime {
 	 * across a reload or session-replacement gap, when nothing may be sent.
 	 */
 	liveApi?: ExtensionAPI;
-	/** Completions held during a gap, released in settle order. Optional for older slots. */
+	/** Completions and fallback preparations held during a gap, released in order. Optional for older slots. */
 	heldDeliveries?: HeldDelivery[];
+	/**
+	 * Set by a preserving session_shutdown (reload, new, resume, fork) and cleared
+	 * when the replacement binds its live API or the parent quits. Only in this gap
+	 * does a missing context mean "wait" rather than "fail".
+	 */
+	reloadGap?: boolean;
 	modelCatalog?: string;
 }
 
 /** Bind the live parent API and release every completion held for it. */
 export function bindLiveApi(runtime: SubagentRuntime, api: ExtensionAPI): void {
 	runtime.liveApi = api;
+	runtime.reloadGap = false;
 	releaseHeldDeliveries(runtime, api);
+}
+
+/**
+ * The live parent context for preparing a launch. In a reload gap, wait for the
+ * replacement session to bind it; `undefined` means none is coming (the parent
+ * quit) or, outside a gap, that none exists.
+ */
+export async function awaitLiveContext(
+	runtime: SubagentRuntime,
+	id: string,
+): Promise<ExtensionContext | undefined> {
+	if (runtime.latestCtx || !runtime.reloadGap) return runtime.latestCtx;
+	// session_start and tool calls set latestCtx before bindLiveApi releases.
+	return (await holdDelivery(runtime, id)) ? runtime.latestCtx : undefined;
 }
 
 /** Wait for the next live parent API; `undefined` means the parent exited. */

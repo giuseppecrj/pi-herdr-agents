@@ -134,8 +134,13 @@ export interface PiLaunchInput {
 	};
 	warning?: string;
 	surface?: SurfaceHandle;
-	/** Existing host normalization may re-read role files for each actual retry launch. */
-	prepareAttempt?(candidateIndex: number): PiAttemptSnapshot;
+	/**
+	 * Existing host normalization may re-read role files for each actual retry
+	 * launch, and may wait (for example, across a parent reload) before it does.
+	 */
+	prepareAttempt?(
+		candidateIndex: number,
+	): PiAttemptSnapshot | Promise<PiAttemptSnapshot>;
 }
 // pi-herdr-agents extension
 export interface PiAttemptSnapshot {
@@ -1027,7 +1032,7 @@ export function createDefaultRunSession(
 				const acquisition = { taskId: input.task.id, suppressed: false };
 				state.pending.add(acquisition);
 				try {
-					const current = input.prepareAttempt?.(index) ?? {
+					const current = (await input.prepareAttempt?.(index)) ?? {
 						...input,
 						snapshot: (capturedSnapshot ??= state.options.getLaunchSnapshot()),
 					};

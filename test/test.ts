@@ -1558,6 +1558,109 @@ describe("host adapter migration", () => {
 			assert.equal(f.mock.sentMessages.length, 0);
 			assert.equal(f.runtime.runningSubagents.size, 0);
 		}));
+	it("waits for the replacement session before preparing a fallback whose model errors in a reload gap", async () =>
+		withAdapterHost(async (f) => {
+			const invoking = invalidatableContext(f.ctx);
+			const first = await f.launch(
+				{
+					name: "fallback",
+					task: "bounded",
+					model: "fake/first, fake/second, fake/third",
+				},
+				f.mock,
+				invoking.ctx,
+			);
+			const controlId = f.runtime.session.getControlTaskId(first.id);
+			for (const shutdown of f.mock.eventHandlers.get("session_shutdown") ?? [])
+				await shutdown({ reason: "reload" }, {});
+			invoking.invalidate();
+			f.mock.invalidate();
+			const reloaded = await import(
+				`../pi-extension/subagents/index.ts?reload-gap-fallback-${Date.now()}`
+			);
+			const replacement = createMockExtensionApi();
+			f.apis.push(replacement);
+			replacement.api.getThinkingLevel = () => "high";
+			reloaded.default(replacement.api, { infrastructure: f.infrastructure });
+
+			await f.finish(first, {
+				type: "error",
+				errorMessage: "first account rejected",
+			});
+			await f.turn();
+			assert.equal(f.commands.length, 1, "nothing launches during the gap");
+			assert.deepEqual(
+				f.runtime.session.getCompleted(controlId).fallbackFailures,
+				[{ model: "fake/first", error: "first account rejected" }],
+				"waiting consumes no candidate",
+			);
+			assert.equal(replacement.sentMessages.length, 0);
+
+			for (const start of replacement.eventHandlers.get("session_start") ?? [])
+				await start(
+					{ reason: "reload" },
+					{ ...f.ctx, hasUI: false, ui: { notify() {}, setWidget() {} } },
+				);
+			await until(f, () => f.commands.length === 2, "the fallback launch");
+			await f.turn();
+			assert.equal(f.commands.length, 2, "exactly one fallback launch");
+			const second = f.runtime.runningSubagents.get(first.id);
+			assert.notEqual(second.sessionFile, first.sessionFile);
+			assert.equal(second.runtimePlan.model, "fake/second");
+
+			await f.finish(second);
+			await until(
+				f,
+				() => replacement.sentMessages.length > 0,
+				"the fallback result delivery",
+			);
+			await f.turn();
+			assert.equal(f.mock.sentMessages.length, 0);
+			assert.equal(replacement.sentMessages.length, 1);
+			const details = replacement.sentMessages[0].message.details;
+			assert.equal(details.errorMessage, undefined);
+			assert.deepEqual(details.fallbackAttempts, ["fake/first", "fake/second"]);
+			assert.deepEqual(details.fallbackFailures, [
+				{ model: "fake/first", error: "first account rejected" },
+			]);
+			assert.equal(f.commands.length, 2);
+			assert.equal(f.runtime.runningSubagents.size, 0);
+		}));
+	it("ends a fallback's wait for the replacement session without launching when the parent quits in the gap", async () =>
+		withAdapterHost(async (f) => {
+			const first = await f.launch({
+				name: "fallback",
+				task: "bounded",
+				model: "fake/first, fake/second",
+			});
+			const controlId = f.runtime.session.getControlTaskId(first.id);
+			const completed = () => f.runtime.session.getCompleted(controlId);
+			for (const shutdown of f.mock.eventHandlers.get("session_shutdown") ?? [])
+				await shutdown({ reason: "reload" }, {});
+			f.mock.invalidate();
+			await f.finish(first, {
+				type: "error",
+				errorMessage: "first account rejected",
+			});
+			await f.turn();
+			assert.deepEqual(
+				completed().fallbackFailures,
+				[{ model: "fake/first", error: "first account rejected" }],
+				"the fallback waits instead of failing its candidate",
+			);
+			for (const shutdown of f.mock.eventHandlers.get("session_shutdown") ?? [])
+				await shutdown({ reason: "quit" }, {});
+			await until(
+				f,
+				() => f.closed.length === 1,
+				"the wait to end and the first pane to be released",
+			);
+			await f.turn();
+			assert.equal(f.commands.length, 1, "nothing launches");
+			assert.equal(f.mock.sentMessages.length, 0);
+			assert.deepEqual(f.runtime.heldDeliveries ?? [], []);
+			assert.equal(f.runtime.runningSubagents.size, 0);
+		}));
 	for (const cwd of [undefined, "work"])
 		it(`launches a fallback through the replacement parent after reload in the invocation's ${cwd ? "relative tool cwd" : "parent cwd"}`, async () =>
 			withAdapterHost(async (f) => {
