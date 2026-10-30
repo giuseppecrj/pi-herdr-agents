@@ -2,6 +2,7 @@ export { createRunSession } from "./run-session.ts";
 export type {
 	CancelReport,
 	DeliveryDecision,
+	FinalizeControl,
 	OwnedRunAttempt,
 	PreparedRun,
 	RunObservation,
