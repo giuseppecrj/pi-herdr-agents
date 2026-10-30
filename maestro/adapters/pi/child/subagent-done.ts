@@ -23,6 +23,12 @@ import {
 } from "../process-identity.ts";
 import { isString } from "../../../core/config/type-guards.ts";
 import { hasUndeliveredChildren } from "../../../core/undelivered-children.ts";
+import {
+	ACCEPT_FILE_ENV,
+	type ChildAcceptReport,
+} from "../../../core/accept.ts";
+import { readAcceptSpecFile } from "../accept-runner.ts";
+import { createChildAcceptLoop } from "./accept-check.ts";
 
 export function shouldMarkUserTookOver(agentStarted: boolean): boolean {
 	return agentStarted;
@@ -87,11 +93,14 @@ export function findLatestAssistantError(
 
 export function buildCompletionSidecar(
 	messages: any[] | undefined,
+	accept?: ChildAcceptReport,
 ):
-	| { type: "done" }
+	| { type: "done"; accept?: ChildAcceptReport }
 	| { type: "error"; errorMessage: string; stopReason: "error" } {
 	const errorInfo = findLatestAssistantError(messages);
-	return errorInfo ? { type: "error", ...errorInfo } : { type: "done" };
+	if (errorInfo) return { type: "error", ...errorInfo };
+	// Only a check that ran adds its report; the sidecar never holds output.
+	return accept ? { type: "done", accept } : { type: "done" };
 }
 
 export function buildPersistentTaskEvent(task: string, generation: string) {
@@ -277,6 +286,22 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
+	// The accept check runs at the final actionable boundary, where Pi awaits
+	// the handler and may continue once; agent_settled only notifies.
+	const acceptSpec =
+		autoExit && !persistent
+			? readAcceptSpecFile(process.env[ACCEPT_FILE_ENV])
+			: undefined;
+	const acceptLoop = acceptSpec
+		? createChildAcceptLoop({ spec: acceptSpec, cwd: process.cwd() })
+		: undefined;
+	if (acceptLoop)
+		pi.on("agent_before_settle", async (event, ctx) => {
+			// A settle that will not exit (undelivered children) checks later.
+			if (completionFinalized || hasUndeliveredChildren()) return undefined;
+			return acceptLoop.beforeSettle(event, ctx.signal);
+		});
+
 	pi.on("agent_settled", (event, ctx) => {
 		if (doneNudge && !completionFinalized) {
 			doneNudge.settled(latestAgentMessages, event?.aborted === true, ctx);
@@ -332,7 +357,9 @@ export default function (pi: ExtensionAPI) {
 			try {
 				writeFileSync(
 					`${sessionFile}.exit`,
-					JSON.stringify(buildCompletionSidecar(messages)),
+					JSON.stringify(
+						buildCompletionSidecar(messages, acceptLoop?.report()),
+					),
 				);
 			} catch {
 				// Best effort — the watcher can still detect the terminal sentinel

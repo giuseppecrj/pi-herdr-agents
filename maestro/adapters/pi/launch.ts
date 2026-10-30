@@ -754,9 +754,8 @@ function createRunningChild(
 		runtimePlan: resolved.request.runtimePlan,
 		worktree: artifacts.worktree,
 		cwd: artifacts.targetCwd,
-		...(resolved.request.accept && !resolved.request.handoff
-			? { accept: resolved.request.accept }
-			: {}),
+		// A handoff loads no child protocol, so it never carries a check.
+		accept: resolved.request.handoff ? undefined : resolved.request.accept,
 		lifecycle: createLifecycle(resolved.startTime),
 		processIdentityFile: artifacts.processIdentityFile,
 	};

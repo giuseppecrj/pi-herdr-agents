@@ -1,6 +1,10 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 
 import { isNonEmptyString, isString } from "../../core/config/type-guards.ts";
+import {
+	parseChildAcceptReport,
+	type ChildAcceptReport,
+} from "../../core/accept.ts";
 
 const ABORT_MESSAGE = "Aborted while waiting for subagent to finish";
 const TERMINAL_SENTINEL = /__SUBAGENT_DONE_(\d+)__/;
@@ -12,6 +16,8 @@ export interface CompletionResult {
 	errorMessage?: string;
 	/** Who wrote errorMessage: the child's sidecar, or the host's own diagnostic. */
 	errorSource?: "child" | "host";
+	/** The child's own accept-check report; evidence, never the verdict. */
+	accept?: ChildAcceptReport;
 }
 
 export interface CompletionOptions {
@@ -61,7 +67,12 @@ export function interpretExitSidecar(payload: any): CompletionResult {
 				};
 	}
 
-	if (payload?.type === "done") return { reason: "done", exitCode: 0 };
+	if (payload?.type === "done") {
+		const accept = parseChildAcceptReport(payload.accept);
+		return accept
+			? { reason: "done", exitCode: 0, accept }
+			: { reason: "done", exitCode: 0 };
+	}
 
 	return {
 		reason: "error",
