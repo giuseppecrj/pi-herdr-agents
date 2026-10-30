@@ -78,7 +78,24 @@ export interface OwnedRunAttempt {
 	/** Supplied cheap hydration; no getState or extra pane inspection. */
 	observe?(at: number): RunObservation;
 	/** Evidence/transcript/manifest finalization precedes parent delivery. */
-	finalize?(result: RunResult, task: Task): Promise<RunResult>;
+	finalize?(
+		result: RunResult,
+		task: Task,
+		control: FinalizeControl,
+	): Promise<RunResult>;
+}
+/**
+ * Host work after the settle point that an operator cancel may still stop,
+ * such as the parent's accept re-check (ADR-0017).
+ */
+// pi-herdr-agents extension
+export interface FinalizeControl {
+	/**
+	 * Run `work` while `cancel` is still accepted for an already settled natural
+	 * result. The signal aborts once termination is confirmed or the run is
+	 * suppressed; a cancel recorded meanwhile delivers the cancelled result.
+	 */
+	cancellable<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T>;
 }
 // pi-herdr-agents extension
 export interface PreparedRun {
@@ -493,11 +510,32 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 				await confirmTermination(entry);
 				result = cancelledResult(owner.handle, entry.cancel);
 			} else if (!retryable(entry, owner, result)) entry.settled = true;
+			let reopened = false;
+			const control: FinalizeControl = {
+				async cancellable(work) {
+					// Only a natural result that already took the settle point reopens it.
+					if (!entry.settled || entry.cancel || entry.suppressed)
+						return work(entry.controller.signal);
+					reopened = true;
+					entry.settled = false;
+					try {
+						return await work(entry.controller.signal);
+					} finally {
+						if (!entry.cancel) entry.settled = true;
+					}
+				},
+			};
 			try {
-				if (owner.finalize) result = await owner.finalize(result, entry.task);
+				if (owner.finalize)
+					result = await owner.finalize(result, entry.task, control);
 			} catch (error) {
 				retire(entry);
 				throw error;
+			}
+			if (reopened && entry.cancel && !entry.suppressed) {
+				// Cancel intent recorded during the reopened window wins (ADR-0014).
+				await confirmTermination(entry);
+				result = cancelledResult(owner.handle, entry.cancel);
 			}
 			// A cancel recorded while finalizing a retryable error lands below: the
 			// acquisition gate starts nothing and the settled owner is terminated.

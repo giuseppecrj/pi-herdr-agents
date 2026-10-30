@@ -12,6 +12,8 @@ import type {
 	WorktreeSurfaceInfo,
 } from "../core/surface-provider.ts";
 import type { ProcessIdentityProbe } from "../adapters/pi/process-identity.ts";
+import type { AcceptRunner } from "../adapters/pi/accept-runner.ts";
+import type { AcceptOutcome, AcceptSpec } from "../core/accept.ts";
 import type { PiLaunchOperations } from "../adapters/pi/launch-operations.ts";
 import type {
 	WorktreeOperations,
@@ -141,6 +143,9 @@ export interface PiRunRecord {
 	crashNotified?: boolean;
 	/** Presentation of the latest operator cancel; the kernel owns the intent. */
 	cancelState?: "requested" | "confirmed" | "unconfirmed";
+	/** Where the child runs; the accept re-check runs here. */
+	cwd?: string;
+	accept?: AcceptSpec;
 }
 
 // pi-herdr-agents extension
@@ -176,6 +181,8 @@ export interface PiCompletedMetadata {
 	fallbackFailures?: { model: string; error: string }[];
 	runtimePlan?: ResolvedRuntimePlan;
 	worktree?: PiWorktreeHandoff;
+	/** The verdict; absent means no check was requested (`none`). */
+	accept?: AcceptOutcome;
 	logicalId?: string;
 	generationId?: string;
 	policyHash?: string;
@@ -279,6 +286,8 @@ export interface PiRunSessionInfrastructure {
 	supervision: SupervisionCoordinator;
 	/** Kernel process-identity probe for worktree cancel; tests inject it. */
 	processProbe?: ProcessIdentityProbe;
+	/** The parent accept re-check's command runner; tests inject it. */
+	acceptRunner?: AcceptRunner;
 	/** Sidebar marker transport; defaults to this pane's Herdr socket. */
 	markerWriter?: MarkerWriter;
 	/** Sidebar marker session evidence; defaults to this pane's Herdr socket. */

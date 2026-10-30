@@ -80,9 +80,9 @@ function fixture(options: { finalize?: OwnedRunAttempt["finalize"] } = {}) {
 	const finalized: RunResult[] = [];
 	const closes: string[] = [];
 	const hooks: string[] = [];
-	const finalize: OwnedRunAttempt["finalize"] = async (result, t) => {
+	const finalize: OwnedRunAttempt["finalize"] = async (result, t, control) => {
 		finalized.push(result);
-		return options.finalize ? options.finalize(result, t) : result;
+		return options.finalize ? options.finalize(result, t, control) : result;
 	};
 	const prepared = (extra: Partial<PreparedRun> = {}): PreparedRun => ({
 		role,

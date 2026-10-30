@@ -67,6 +67,13 @@ import {
 	type PreparedRun,
 } from "./run-session.ts";
 import { createPiPersistentIO } from "./pi-persistent-io.ts";
+import {
+	appendOutcomeLedger,
+	ledgerOutcome,
+	outcomeLedgerFile,
+	runParentAcceptCheck,
+} from "./accept-recheck.ts";
+import { runAcceptCommand } from "../adapters/pi/accept-runner.ts";
 import type {
 	DefaultRunSessionOptions,
 	PiCompletedMetadata,
@@ -122,7 +129,7 @@ interface PiSessionOwner {
 	entries: Map<string, PiEntry>;
 	infrastructure: Pick<
 		PiRunSessionInfrastructure,
-		"surfaceProvider" | "supervision" | "processProbe"
+		"surfaceProvider" | "supervision" | "processProbe" | "acceptRunner"
 	>;
 	worktreeOperations: WorktreeOperations;
 	/** Absent outside Herdr: without a socket nothing can be marked. */
@@ -553,7 +560,7 @@ export function createDefaultRunSession(
 				child.surface,
 			),
 			observe: (at) => hydrate(child, at, "refresh"),
-			finalize: async (result) => {
+			finalize: async (result, _task, control) => {
 				// Clear before delivery; a retained worktree root keeps its pane.
 				entry.marker?.retire();
 				const at = Date.now();
@@ -630,17 +637,37 @@ export function createDefaultRunSession(
 									: `Subagent error: ${result.error}`,
 							summarySource: "host",
 						};
-				let worktree: PiWorktreeHandoff | undefined;
-				if (child.worktree) {
-					worktree = state.worktreeOperations.captureWorktreeHandoff(
-						child.worktree,
-					);
+				let worktree: PiWorktreeHandoff | undefined = child.worktree
+					? state.worktreeOperations.captureWorktreeHandoff(child.worktree)
+					: undefined;
+				// After the handoff capture, before the lifecycle and manifest marks:
+				// the parent re-check decides the verdict (ADR-0017).
+				const accept = child.accept
+					? await runParentAcceptCheck({
+							spec: child.accept,
+							result,
+							evidence,
+							exitCode,
+							cwd: child.cwd,
+							worktree,
+							cancellable: control.cancellable,
+							runner: state.infrastructure.acceptRunner ?? runAcceptCommand,
+						})
+					: undefined;
+				// A cancel during the re-check delivers the cancelled result.
+				const cancelledInCheck =
+					!result.cancellation &&
+					accept?.reason === "cancelled" &&
+					entry.record.cancelState === "confirmed";
+				if (child.worktree && worktree) {
 					try {
 						// Only confirmed termination is a cancellation. Shutdown suppression
-						// of an unconfirmed cancel records what a plain shutdown would.
+						// of an unconfirmed cancel records what a plain shutdown would. A
+						// rejected verdict leaves the manifest state unchanged.
 						state.worktreeOperations.persistWorktreeResult(
 							child.worktree,
-							result.cancellation?.termination === "confirmed"
+							result.cancellation?.termination === "confirmed" ||
+								cancelledInCheck
 								? "cancelled"
 								: worktreeResultState(exitCode, !!evidence?.ping),
 							worktree,
@@ -658,9 +685,14 @@ export function createDefaultRunSession(
 					}
 				}
 				child.lifecycle =
-					exitCode === 0
+					exitCode === 0 && !cancelledInCheck
 						? markCompleted(child.lifecycle, at)
-						: markFailed(child.lifecycle, summary, at, exitCode);
+						: markFailed(
+								child.lifecycle,
+								cancelledInCheck ? "Subagent cancelled." : summary,
+								at,
+								cancelledInCheck ? 1 : exitCode,
+							);
 				if (evidence?.errorMessage)
 					failures.push({
 						model: child.runtimePlan?.model ?? attempts.at(-1)!,
@@ -690,10 +722,31 @@ export function createDefaultRunSession(
 					// live child's plan in structured details, not in the error summary.
 					runtimePlan: evidence ? child.runtimePlan : undefined,
 					worktree,
+					accept,
 					logicalId: child.logicalId,
 					generationId: child.generationId,
 					policyHash: child.policyHash,
 				};
+				if (state.options.outcomeLedger !== false)
+					appendOutcomeLedger(outcomeLedgerFile(state.options.configDir), {
+						at,
+						runId: child.id,
+						attempt: Math.max(1, attempts.length),
+						role: child.agent,
+						requestedModel:
+							task.requestedModel ?? child.runtimePlan?.requestedModel,
+						model:
+							child.runtimePlan?.observed?.model ?? child.runtimePlan?.model,
+						thinking: child.runtimePlan?.thinking,
+						elapsedSec: entry.completed.elapsed,
+						outcome: ledgerOutcome(
+							result,
+							evidence,
+							exitCode,
+							cancelledInCheck,
+						),
+						accept,
+					});
 				if (cursor !== undefined)
 					entry.readResumeResult = resumeResultReader(
 						child.sessionFile,
