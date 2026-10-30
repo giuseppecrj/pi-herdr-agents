@@ -8570,6 +8570,14 @@ describe("subagent-done.ts", () => {
 		it("reads no children from a missing slot", () => {
 			assert.equal(hasUndeliveredChildren({}), false);
 		});
+
+		it("counts a child row without a lifecycle as undelivered", () => {
+			assert.equal(
+				hasUndeliveredChildren({ runningSubagents: new Map([["legacy", {}]]) }),
+				true,
+				"an older runtime entry without lifecycle still holds its parent open",
+			);
+		});
 	});
 
 	it("preserves caller_ping completion when the agent later settles", async () => {
