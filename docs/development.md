@@ -27,7 +27,9 @@ provider; fakes are for conformance tests only.
 - `pi-extension/subagents/model-registry.ts`, `config-path.ts` — permanent
   host-local SDK capability glue and configuration-path conventions.
 - `maestro/core/` — seam interfaces/types, activity and lifecycle projection,
-  status, routing, wake-ups, and supervision.
+  status, routing, wake-ups, and supervision; `undelivered-children.ts` is the
+  shared registry-slot key and the check the child protocol uses to defer
+  auto-exit.
 - `maestro/core/roles/discovery.ts`, `maestro/core/config/` — role discovery,
   config loaders with injected directories, and task-model init prompt logic.
 - `maestro/core/worktree.ts`, `maestro/core/worktree-cleanup.ts` — manifest

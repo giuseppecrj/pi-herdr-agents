@@ -74,6 +74,14 @@ retry, and shutdown suppression of it is not a cancellation. A natural result
 taken first stays authoritative.
 _Avoid_: Interrupt, suppression, persistent stop, pane-close fallback
 
+**Deferred auto-exit**:
+An auto-exit child's wait, past a normal settlement, for the children it launched
+to deliver their result, help request, or cancellation to it. Each delivery
+steers a new turn, and the child exits after the settlement that leaves nothing
+undelivered. Aborted runs and settled errors do not wait, and persistent
+specialists never count.
+_Avoid_: Manual `subagent_done` for nested children, exit hold, polling for results
+
 **Process identity**:
 A child's Pi process named by immutable kernel facts (PID, start time, boot,
 and PID namespace), recorded by the child at launch and verified by the parent

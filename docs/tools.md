@@ -103,6 +103,16 @@ A fixed internal watchdog marks a run as `stalled` when pane inspection fails or
 
 **Interactive subagents stay silent.** Long-running user-driven subagents (for example, an interactive planning role or a bare `interactive: true` fork) do not wake the parent session on `stalled`/`recovered` transitions — the user is working directly in the subagent's pane, and a steer message there would just burn an orchestrator turn on a no-op "still waiting" ping. The widget still updates normally, and activity snapshots are still recorded/classified regardless of the `interactive` setting. By default, agents with `auto-exit: true` are treated as autonomous and get stall pings; agents without it are treated as interactive and stay quiet. Override per-agent with `interactive: true|false` in frontmatter, or per-spawn with `interactive: true|false` on the tool call.
 
+### Children that launch children
+
+An `auto-exit` child that launches its own subagents stays open until each of them has delivered its result, help request, or cancellation to it. The child can end its turn right after launching ("waiting for the children"): it does not exit at that settlement. Each delivery is a steer that starts a new turn, and when that turn settles with nothing left outstanding the child exits as usual, so its own result reflects what the grandchildren returned. A child that launches nothing exits at its first settlement, as before.
+
+- A grandchild that fails, is cancelled, or crashes still delivers a terminal result, so it never blocks the exit once that result is delivered.
+- Persistent specialists are long-lived by design and never hold the exit.
+- A run that was aborted (Escape or `subagent_interrupt`) stays open, and a run that settles on a provider error still exits and reports the error, whatever is outstanding.
+- A grandchild that hangs without ever delivering keeps the child open. The child sees the usual stall advisories and can `subagent_cancel` it; the parent can also cancel or interrupt the child itself.
+- Children that are not `auto-exit` call `subagent_done` themselves and are unaffected.
+
 ## Spawning Subagents
 
 Examples that set `agent` assume a role pack or a project/global definition

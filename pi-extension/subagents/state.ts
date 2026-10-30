@@ -14,6 +14,7 @@ import type {
 	LifecycleProjection,
 	SubagentLifecycle,
 } from "../../maestro/core/lifecycle.ts";
+import { SUBAGENT_RUNTIME_KEY } from "../../maestro/core/undelivered-children.ts";
 import type {
 	WorktreeHandoff,
 	WorktreeLaunch,
@@ -24,7 +25,7 @@ import type {
 // children; the reloaded module adopts the shared registry for status/interrupts.
 export const WIDGET_INTERVAL_KEY = Symbol.for("pi-subagents/widget-interval");
 export const STATUS_INTERVAL_KEY = Symbol.for("pi-subagents/status-interval");
-export const RUNTIME_KEY = Symbol.for("pi-subagents/runtime");
+export const RUNTIME_KEY = SUBAGENT_RUNTIME_KEY;
 
 export function readGlobalSlot<T>(key: symbol): T | undefined {
 	// SAFETY: `globalThis` has no index signature for our extension-private

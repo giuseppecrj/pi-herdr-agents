@@ -30,7 +30,7 @@ Former bundled roles, `/plan`, its plan skill, and `/skill:orchestrate` now belo
 - `pi-extension/subagents/observation.ts`, `widgets.ts`, `controls.ts`, `persistent.ts`, `delivery.ts`, `launch.ts` — per-load controllers (`create*`) for activity observation, the widget and status refresh, interrupt/cancel, persistent specialists, parent delivery, and launch plans
 - `pi-extension/subagents/launch-tools.ts`, `control-tools.ts`, `worktree-tools.ts`, `task-models.ts`, `renderers.ts` — `register*` functions for the public tools, commands, and message renderers
 - `pi-extension/subagents/model-registry.ts`, `config-path.ts` — permanent host-local SDK capability glue and configuration-path conventions
-- `maestro/core/` — seam interfaces and types; activity/lifecycle/status projection, routing, wake-ups, and supervision
+- `maestro/core/` — seam interfaces and types; activity/lifecycle/status projection, routing, wake-ups, and supervision; `undelivered-children.ts` names the process-local registry slot and tells the child protocol whether launched children still owe a delivery
 - `plugins/sidebar/` — optional standalone Node companion Herdr plugin; it imports nothing from the extension
 - `maestro/core/roles/discovery.ts`, `maestro/core/config/` — role parsing/discovery, injected-directory config loaders, and task-model init prompt construction
 - `maestro/core/worktree.ts`, `worktree-cleanup.ts` — manifest schema/state, handoff types, and cleanup eligibility/formatting
