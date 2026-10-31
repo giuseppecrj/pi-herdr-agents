@@ -31,6 +31,10 @@ export interface CompletionOptions {
 		observedAt: number,
 	) => void;
 	sessionFile?: string;
+	/** Persistent lifetime ownership cannot end on a pre-shutdown sidecar. */
+	requireProcessExit?: boolean;
+	/** Only launch-verified process identity, never transcript or activity state. */
+	inspectProcess?: () => "alive" | "exited" | "unknown";
 	onTick?: (elapsedSeconds: number) => void;
 	/** Wait for a local file wake-up or a scheduled reconciliation. */
 	waitForNextCheck?: (signal: AbortSignal) => Promise<"wake" | "reconcile">;
@@ -83,8 +87,9 @@ export function interpretExitSidecar(payload: any): CompletionResult {
 	};
 }
 
-function consumeExitSidecar(
+function readExitSidecar(
 	sessionFile: string | undefined,
+	consume = true,
 ): CompletionResult | null {
 	if (!sessionFile) return null;
 
@@ -95,7 +100,7 @@ function consumeExitSidecar(
 		const result = interpretExitSidecar(
 			JSON.parse(readFileSync(exitFile, "utf8")),
 		);
-		rmSync(exitFile, { force: true });
+		if (consume) rmSync(exitFile, { force: true });
 		return result;
 	} catch {
 		// The child may still be writing the file. Retry on the next polling cycle.
@@ -111,7 +116,7 @@ function terminalExitCode(screen: string): number | null {
 function completionArtifact(
 	options: CompletionOptions,
 ): CompletionResult | null {
-	return consumeExitSidecar(options.sessionFile);
+	return readExitSidecar(options.sessionFile, !options.requireProcessExit);
 }
 
 async function waitForDelayedSidecar(
@@ -155,6 +160,21 @@ export async function waitForCompletion(
 	signal: AbortSignal,
 	options: CompletionOptions,
 ): Promise<CompletionResult> {
+	const result = await detectCompletion(signal, options);
+	if (options.requireProcessExit && options.sessionFile) {
+		try {
+			rmSync(`${options.sessionFile}.exit`, { force: true });
+		} catch {
+			// Exit is already verified; a failed artifact cleanup cannot undo it.
+		}
+	}
+	return result;
+}
+
+async function detectCompletion(
+	signal: AbortSignal,
+	options: CompletionOptions,
+): Promise<CompletionResult> {
 	const startedAt = Date.now();
 
 	// Coordinated supervision waits for its first shared epoch; legacy callers
@@ -163,14 +183,37 @@ export async function waitForCompletion(
 	for (;;) {
 		if (signal.aborted) throw new Error(ABORT_MESSAGE);
 
-		const sidecarResult = consumeExitSidecar(options.sessionFile);
-		if (sidecarResult) return sidecarResult;
+		// The child writes .exit before ctx.shutdown(). Keep semantic evidence
+		// on disk until independent exit evidence permits releasing a persistent
+		// owner, including when all waiters abort and a later wait starts afresh.
+		const sidecarResult = readExitSidecar(
+			options.sessionFile,
+			!options.requireProcessExit,
+		);
+		if (sidecarResult && !options.requireProcessExit) return sidecarResult;
 		options.onLocalEvidence?.();
+
+		if (options.requireProcessExit && options.inspectProcess?.() === "exited") {
+			const completion = await waitForDelayedSidecar(signal, options);
+			return (
+				completion ?? {
+					reason: "error",
+					exitCode: 1,
+					errorMessage:
+						"Subagent process exited before completion evidence was recorded.",
+					errorSource: "host",
+				}
+			);
+		}
 
 		if (reconcile)
 			try {
 				const exitCode = terminalExitCode(await options.readTerminalTail());
-				if (exitCode !== null) {
+				if (
+					exitCode !== null &&
+					(!options.requireProcessExit ||
+						options.inspectProcess?.() !== "alive")
+				) {
 					// The shell sentinel can become readable while the child publishes its
 					// authoritative semantic record. Always recheck after the asynchronous
 					// terminal read; a zero exit can race a ping or error just like a failure.
@@ -182,6 +225,11 @@ export async function waitForCompletion(
 							signal,
 							options,
 						);
+						if (
+							options.requireProcessExit &&
+							options.inspectProcess?.() === "alive"
+						)
+							continue;
 						if (delayedCompletion) return delayedCompletion;
 					}
 					return { reason: "sentinel", exitCode };
@@ -200,12 +248,20 @@ export async function waitForCompletion(
 			}
 			const observedAt = Date.now();
 			options.onPaneInspection?.(inspection, observedAt);
-			if (inspection.kind === "missing") {
+			if (
+				inspection.kind === "missing" &&
+				(!options.requireProcessExit || options.inspectProcess?.() !== "alive")
+			) {
 				// Drain concurrent persistent events before accepting pane fallback.
 				options.onLocalEvidence?.();
 				// Pane closure and atomic artifact publication are separate operations.
 				// Allow a short bounded grace window before declaring evidence lost.
 				const racedCompletion = await waitForDelayedSidecar(signal, options);
+				if (
+					options.requireProcessExit &&
+					options.inspectProcess?.() === "alive"
+				)
+					continue;
 				if (racedCompletion) return racedCompletion;
 				return {
 					reason: "error",

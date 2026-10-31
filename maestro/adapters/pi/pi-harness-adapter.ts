@@ -1,8 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import type {
 	HarnessAdapter,
 	ResumeOptions,
@@ -21,7 +19,6 @@ import {
 	observeActivity,
 	observePaneInspection,
 } from "../../core/lifecycle.ts";
-import { isNonEmptyString } from "../../core/config/type-guards.ts";
 import type { PaneConfig } from "../../core/config/pane-config.ts";
 import {
 	isThinkingLevel,
@@ -61,7 +58,6 @@ import {
 	getNewEntries,
 	inspectFinalAssistantMessage,
 	readPersistentTaskEvents,
-	readSubagentSessionPolicy,
 	writePersistentTaskInbox,
 } from "./session.ts";
 
@@ -251,46 +247,9 @@ export class PiHarnessAdapter implements HarnessAdapter {
 			},
 			this.operations,
 		);
-		if (persistent) {
-			const policy = readSubagentSessionPolicy(child.sessionFile);
-			if (policy.version !== 2)
-				throw new Error("Persistent launch policy was not written as v2.");
-			Object.assign(child, {
-				persistent: true,
-				logicalId: policy.logicalId,
-				generationId: policy.generationId,
-				policyHash: policy.policyHash,
-				policyTools: policy.tools,
-				policyDeniedTools: policy.deniedTools,
-				tasksCompleted: 0,
-				taskId,
-				issuedTaskIds: [taskId],
-				inboxSequence: 0,
-				observedTaskEvents: 0,
-			});
-			appendPersistentDeliveryLedger(child.sessionFile, {
-				task: taskId,
-				outcome: "dispatched",
-				generation: policy.generationId,
-				logicalId: policy.logicalId,
-				policyHash: policy.policyHash,
-			});
-		}
-		const rawCwd = cwd ?? roleCwd;
-		const cwdBase =
-			cwd == null && roleCwd != null
-				? (this.options.parent.agentDir ??
-					process.env.PI_CODING_AGENT_DIR ??
-					join(homedir(), ".pi", "agent"))
-				: (this.options.parent.invocationCwd ?? this.options.parent.cwd);
-		return this.track(
-			child,
-			rawCwd
-				? rawCwd.startsWith("/")
-					? rawCwd
-					: join(cwdBase, rawCwd)
-				: this.options.parent.cwd,
-		);
+		// Launch returns a fully initialized owner; no fallible I/O may separate
+		// command dispatch from tracking (a rejection could start a fallback).
+		return this.track(child);
 	}
 	async resume(opts: ResumeOptions): Promise<AgentHandle> {
 		this.rejectEnvironment(opts.env);
@@ -312,13 +271,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 			},
 			this.operations,
 		);
-		const header = getNewEntries(child.sessionFile, 0).find(
-			(entry) => entry.type === "session",
-		);
-		return this.track(
-			child,
-			isNonEmptyString(header?.cwd) ? header.cwd : process.cwd(),
-		);
+		return this.track(child);
 	}
 	/** Temporary Pi-specific bridge for runtime migration; never infer task delivery from coarse state. */
 	getRunningChild(handle: AgentHandle): PiRunningChild {
@@ -554,6 +507,14 @@ export class PiHarnessAdapter implements HarnessAdapter {
 				promise: waitForCompletion(controller.signal, {
 					intervalMs: 1000,
 					sessionFile: child.sessionFile,
+					requireProcessExit: child.persistent,
+					inspectProcess: () =>
+						child.processIdentity
+							? judgeProcessIdentity(
+									child.processIdentity,
+									this.options.processProbe ?? linuxProcessProbe,
+								).kind
+							: "unknown",
 					waitForNextCheck: registration.wait,
 					readTerminalTail: async () =>
 						this.options.surface.readScreen(child.surface, 5),
@@ -638,14 +599,14 @@ export class PiHarnessAdapter implements HarnessAdapter {
 		// Legacy fallback retries reuse the opaque child ID, but create a new Pi session.
 		return JSON.stringify([handle.id, handle.sessionId]);
 	}
-	private track(child: PiRunningChild, cwd: string): AgentHandle {
+	private track(child: PiRunningChild): AgentHandle {
 		this.children.set(child.id, child);
 		const handle: AgentHandle = {
 			id: child.id,
 			name: child.name,
 			role: child.agent ?? "",
 			harness: this.name,
-			cwd: child.worktree?.path ?? cwd,
+			cwd: child.cwd!,
 			startedAt: child.startTime,
 			sessionId: child.sessionFile,
 			surfaceId: child.surface,

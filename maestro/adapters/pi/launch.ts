@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -28,9 +29,11 @@ import {
 	type PiProcessIdentity,
 } from "./process-identity.ts";
 import {
+	appendPersistentDeliveryLedger,
 	createWorktreeSessionFork,
 	seedSubagentSessionFile,
 	writeSubagentSessionPolicy,
+	type SubagentSessionPolicyV2,
 } from "./session.ts";
 import {
 	buildSubagentToolAllowlist,
@@ -183,6 +186,8 @@ interface PreparedSurface {
 interface PreparedSession extends PreparedSurface {
 	sessionFile: string;
 	activityFile: string;
+	policy: SubagentSessionPolicyV2;
+	initialTaskId?: string;
 	processIdentityFile?: string;
 }
 
@@ -258,10 +263,14 @@ async function launchFreshPiSubagent(
 		const artifacts =
 			handoffArtifacts ?? prepareTaskArtifacts(resolved, session, operations);
 		const command = buildPiCommand(resolved, artifacts);
-		const launchScriptFile = await startPiProcess(
+		// Complete fallible initialization while this transaction still owns the
+		// surface, before any child can run or mutate its session artifacts.
+		const running = createRunningChild(resolved, artifacts);
+		running.launchScriptFile = await startPiProcess(
 			resolved,
 			artifacts,
 			command,
+			running.launchScriptFile,
 			operations,
 		);
 		if (request.handoff) {
@@ -280,7 +289,6 @@ async function launchFreshPiSubagent(
 				);
 			}
 		}
-		const running = createRunningChild(resolved, artifacts, launchScriptFile);
 		startProcessIdentityCapture(running, operations);
 		return running;
 	} catch (error) {
@@ -463,7 +471,7 @@ function prepareChildSession(
 			{ sessionFile },
 		);
 	}
-	writeSubagentSessionPolicy(sessionFile, {
+	const policy = writeSubagentSessionPolicy(sessionFile, {
 		owner: surface.worktree ? "managed-worktree" : "public",
 		tools: resolved.request.behavior.tools,
 		deniedTools: resolved.request.behavior.deniedTools,
@@ -487,6 +495,10 @@ function prepareChildSession(
 		...surface,
 		sessionFile,
 		activityFile,
+		policy,
+		initialTaskId: policy.persistent
+			? (resolved.request.behavior.taskId ?? randomUUID())
+			: undefined,
 		// A handoff Pi loads no child protocol extension, so it records nothing.
 		processIdentityFile:
 			surface.worktree && !resolved.request.handoff
@@ -683,11 +695,9 @@ function buildPiCommand(
 		if (request.behavior.persistent) {
 			env.push("PI_SUBAGENT_PERSISTENT=1");
 			env.push(
-				`PI_SUBAGENT_GENERATION_ID=${shellQuote(request.behavior.generationId ?? "")}`,
+				`PI_SUBAGENT_GENERATION_ID=${shellQuote(artifacts.policy.generationId)}`,
 			);
-			env.push(
-				`PI_SUBAGENT_TASK_ID=${shellQuote(request.behavior.taskId ?? "")}`,
-			);
+			env.push(`PI_SUBAGENT_TASK_ID=${shellQuote(artifacts.initialTaskId!)}`);
 		}
 		env.push(`PI_SUBAGENT_SESSION=${shellQuote(artifacts.sessionFile)}`);
 		env.push(`PI_SUBAGENT_ID=${shellQuote(resolved.id)}`);
@@ -711,13 +721,9 @@ async function startPiProcess(
 	resolved: ResolvedLaunch,
 	artifacts: PreparedArtifacts,
 	command: string,
+	launchScriptFile: string,
 	operations: PiLaunchOperations,
 ): Promise<string> {
-	const launchScriptFile = join(
-		resolved.artifactDir,
-		"subagent-scripts",
-		`${safeName(resolved.request.name) || "subagent"}-${resolved.id}.sh`,
-	);
 	if (artifacts.worktree && !resolved.request.handoff) {
 		requireWorktreeOperations(operations).persistWorktreeResult(
 			artifacts.worktree,
@@ -738,9 +744,8 @@ async function startPiProcess(
 function createRunningChild(
 	resolved: ResolvedLaunch,
 	artifacts: PreparedArtifacts,
-	launchScriptFile: string,
 ): PiRunningChild {
-	return {
+	const child: PiRunningChild = {
 		id: resolved.id,
 		name: resolved.request.name,
 		task: resolved.request.task,
@@ -748,7 +753,11 @@ function createRunningChild(
 		surface: artifacts.surface,
 		startTime: resolved.startTime,
 		sessionFile: artifacts.sessionFile,
-		launchScriptFile,
+		launchScriptFile: join(
+			resolved.artifactDir,
+			"subagent-scripts",
+			`${safeName(resolved.request.name) || "subagent"}-${resolved.id}.sh`,
+		),
 		activityFile: artifacts.activityFile,
 		interactive: resolved.request.behavior.interactive,
 		runtimePlan: resolved.request.runtimePlan,
@@ -759,6 +768,30 @@ function createRunningChild(
 		lifecycle: createLifecycle(resolved.startTime),
 		processIdentityFile: artifacts.processIdentityFile,
 	};
+	const { policy, initialTaskId } = artifacts;
+	if (policy.persistent) {
+		Object.assign(child, {
+			persistent: true,
+			logicalId: policy.logicalId,
+			generationId: policy.generationId,
+			policyHash: policy.policyHash,
+			policyTools: policy.tools,
+			policyDeniedTools: policy.deniedTools,
+			tasksCompleted: 0,
+			taskId: initialTaskId,
+			issuedTaskIds: [initialTaskId!],
+			inboxSequence: 0,
+			observedTaskEvents: 0,
+		});
+		appendPersistentDeliveryLedger(child.sessionFile, {
+			task: initialTaskId!,
+			outcome: "dispatched",
+			generation: policy.generationId,
+			logicalId: policy.logicalId,
+			policyHash: policy.policyHash,
+		});
+	}
+	return child;
 }
 
 // Capture runs beside the launch so readiness never delays the acknowledgement;

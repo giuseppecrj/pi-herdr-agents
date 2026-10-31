@@ -166,6 +166,7 @@ export async function launchResumedPiSubagent(
 			activityFile,
 			interactive,
 			runtimePlan: undefined,
+			cwd,
 			lifecycle: createLifecycle(startTime),
 		};
 	} catch (error) {
