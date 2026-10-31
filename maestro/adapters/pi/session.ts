@@ -575,29 +575,20 @@ export function consumePersistentTaskInbox(
 }
 
 function getForkContentLines(parentSessionFile: string): string[] {
-	const raw = readFileSync(parentSessionFile, "utf8");
-	const lines = raw.split("\n").filter((line) => line.trim());
+	const branch = SessionManager.open(parentSessionFile).getBranch();
 
-	let truncateAt = lines.length;
-	for (let i = lines.length - 1; i >= 0; i--) {
-		try {
-			const entry = JSON.parse(lines[i]);
-			if (entry.type === "message" && entry.message?.role === "user") {
-				truncateAt = i;
-				break;
-			}
-		} catch {
-			// ignore malformed lines
+	// Exclude the triggering user turn and its descendants, but only on the
+	// active branch. Keep entry IDs and compaction boundaries intact for Pi.
+	let truncateAt = branch.length;
+	for (let i = branch.length - 1; i >= 0; i--) {
+		const entry = branch[i];
+		if (entry.type === "message" && entry.message.role === "user") {
+			truncateAt = i;
+			break;
 		}
 	}
 
-	return lines.slice(0, truncateAt).filter((line) => {
-		try {
-			return JSON.parse(line).type !== "session";
-		} catch {
-			return true;
-		}
-	});
+	return branch.slice(0, truncateAt).map((entry) => JSON.stringify(entry));
 }
 
 export function seedSubagentSessionFile(params: {
