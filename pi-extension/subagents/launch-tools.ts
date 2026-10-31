@@ -294,8 +294,6 @@ export function registerSubagentTool(
 					},
 				};
 				const session = runtime.session!;
-				// Reserve synchronously before acquisition yields. Reload adopts this
-				// set; onSpawned transfers the slot to the row, and failure releases it.
 				if (persistent) (runtime.persistentReservations ??= new Set()).add(id);
 				let handle;
 				try {

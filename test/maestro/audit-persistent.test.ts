@@ -212,7 +212,6 @@ test("timeout in reload gap never calls either stale API and delivers exactly on
 	assert.equal(f.running.stopState, "failed");
 	assert.equal(f.runtime.heldDeliveries?.length, 1);
 	assert.equal(f.parent.sentMessages.length, 0);
-	// The process can settle before session_start; that must not lose the notice.
 	f.running.lifecycle = markDelivery(f.running.lifecycle, "delivered");
 	f.runtime.runningSubagents.delete(f.running.id);
 	const replacement = createMockExtensionApi();
@@ -274,7 +273,6 @@ test("timeout evidence and send errors are contained, retried live, and cancelle
 	t.mock.timers.tick(5_000);
 	assert.equal(replacement.sentMessages.length, 1);
 	assert.equal(f.runtime.heldDeliveries?.length, 0);
-	// A second failed stop attempt is pending when quit arrives.
 	f.controls.handleSubagentStop({ id: f.running.id }, replacement.api, 10, io);
 	replacement.api.sendMessage = () => {
 		throw new Error("unavailable");
@@ -324,7 +322,7 @@ for (const type of ["task-done", "help-request"] as const) {
 			"sent",
 		);
 		f.parent.invalidate();
-		f.runtime.pi = f.parent.api; // Never choose this stale loaded API over the live caller.
+		f.runtime.pi = f.parent.api;
 		f.runtime.liveApi = undefined;
 		f.runtime.reloadGap = true;
 		const replacement = createMockExtensionApi();
@@ -388,8 +386,6 @@ function deferred() {
 	return { promise, resolve, reject };
 }
 
-// Use the public tool and real runtime with fake terminal acquisition. This also
-// exercises index.ts shutdown/adoption rather than simulating its reservation edits.
 async function hostFixture(t: TestContext) {
 	const configDir = join(process.env.PI_CODING_AGENT_DIR!, "herdr-agents");
 	mkdirSync(configDir, { recursive: true });

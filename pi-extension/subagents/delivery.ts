@@ -192,8 +192,6 @@ export function createDelivery({
 				if (progress !== "sent") {
 					deliveries.set(deliveryKey, "sending");
 					send();
-					// Parent memory, not the child-writable ledger, records that Pi
-					// accepted the notification. An ack retry must not send it again.
 					deliveries.set(deliveryKey, "sent");
 				}
 				ledger.push(io.acknowledge(asPiRecord(running), event));
@@ -219,8 +217,6 @@ export function createDelivery({
 		for (const event of events.slice(running.observedTaskEvents ?? 0)) {
 			if (!running.persistent || event.generation !== running.generationId)
 				continue;
-			// A reentrant drain must not advance the cursor past a send whose
-			// acknowledgement can still fail in the outer drain.
 			if (
 				running.persistentTaskDeliveries?.get(`${event.type}:${event.task}`) ===
 				"sending"

@@ -220,7 +220,6 @@ export function createPersistentControls({
 		return `Persistent specialist cap (${config.maxAgents}) reached. Current specialists: ${specialists.map((running) => `${encodeHostValue(running.name)} (${persistentSpecialistState(running)}, ${running.tasksCompleted ?? 0} completed)`).join(", ")}. Launches acquiring resources: ${acquiring}.`;
 	}
 
-	/** A notice owns its delivery independently of the row's later retirement. */
 	function notifyStopFailure(
 		running: RunningSubagent,
 		io: PiPersistentIO,
@@ -234,8 +233,6 @@ export function createPersistentControls({
 				try {
 					sendPersistentStopFailure(api, running, io);
 				} catch {
-					// Retain ownership until a live send succeeds or quit suppresses
-					// it. Neither evidence nor send errors may escape a callback.
 					(runtime.heldDeliveries ??= []).push(notice);
 					retry = setTimeout(() => {
 						if (!runtime.liveApi && runtime.reloadGap) return;
@@ -317,8 +314,6 @@ export function createPersistentControls({
 		try {
 			io.requestStop(asPiRecord(running));
 		} catch (error) {
-			// Publication may have written evidence before failing. Keep sends
-			// blocked, but allow an explicit stop retry; never claim it is pending.
 			running.stopState = "failed";
 			running.stopFailure = `stop publication failed: ${String(error)}`;
 			throw new Error(

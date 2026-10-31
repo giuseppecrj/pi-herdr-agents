@@ -51,8 +51,6 @@ export function createPiPersistentIO(state: {
 		},
 		requestStop(r) {
 			const task = r.taskId ?? "stop";
-			// Evidence precedes publication. If the inbox write fails, an explicit
-			// retry may reuse this evidence; it must still publish the directive.
 			if (
 				r.taskId &&
 				!io
