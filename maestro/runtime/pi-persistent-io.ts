@@ -51,7 +51,20 @@ export function createPiPersistentIO(state: {
 		},
 		requestStop(r) {
 			const task = r.taskId ?? "stop";
-			if (r.taskId) ledger(r, task, "stop-pending");
+			// Evidence precedes publication. If the inbox write fails, an explicit
+			// retry may reuse this evidence; it must still publish the directive.
+			if (
+				r.taskId &&
+				!io
+					.readLedger(r)
+					.some(
+						(row) =>
+							row.task === task &&
+							row.generation === r.generationId &&
+							row.outcome === "stop-pending",
+					)
+			)
+				ledger(r, task, "stop-pending");
 			writePersistentTaskInbox(
 				r.sessionFile,
 				(r.inboxSequence = (r.inboxSequence ?? 0) + 1),

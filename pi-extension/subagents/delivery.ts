@@ -15,7 +15,6 @@ import {
 	type RunningSubagent,
 	type SubagentRuntime,
 	shouldDeliverSubagentCompletion,
-	selectCompletionApi,
 	holdDelivery,
 } from "./state.ts";
 import {
@@ -53,8 +52,6 @@ export function createDelivery({
 	startPersistentStopTimeout,
 }: DeliveryDeps) {
 	const runningSubagents = runtime.runningSubagents;
-
-	const inFlightPersistentTaskDeliveries = new Set<string>();
 
 	/**
 	 * Issuance lives in parent memory: the record's current task and the IDs
@@ -108,21 +105,23 @@ export function createDelivery({
 			event.generation !== running.generationId
 		)
 			return;
-		const deliveryKey = `${running.id}:${event.type}:${event.task}`;
-		if (inFlightPersistentTaskDeliveries.has(deliveryKey)) return;
+		const deliveryKey = `${event.type}:${event.task}`;
+		const deliveries = (running.persistentTaskDeliveries ??= new Map());
+		const progress = deliveries.get(deliveryKey);
+		if (progress === "sending" || progress === "acknowledged") return;
 		if (!isIssuedTask(running, event.task))
 			return ignoreUnrecognizedTaskEvent(running, event, api);
 		const ledger = ledgerSnapshot ?? io.readLedger(asPiRecord(running));
 		if (event.type === "help-request") {
 			if (
+				progress !== "sent" &&
 				ledger.some(
 					(entry) =>
 						entry.task === event.task && entry.outcome === "help-requested",
 				)
 			)
 				return;
-			inFlightPersistentTaskDeliveries.add(deliveryKey);
-			try {
+			sendAndAcknowledge(() =>
 				sendParentMessage(
 					api,
 					"subagent_ping",
@@ -147,21 +146,18 @@ export function createDelivery({
 						message: event.message ?? "",
 						sessionFile: running.sessionFile,
 					},
-				);
-				ledger.push(io.acknowledge(asPiRecord(running), event));
-			} finally {
-				inFlightPersistentTaskDeliveries.delete(deliveryKey);
-			}
+				),
+			);
 			return;
 		}
 		if (
+			progress !== "sent" &&
 			ledger.some(
 				(entry) => entry.task === event.task && entry.outcome === "delivered",
 			)
 		)
 			return;
-		inFlightPersistentTaskDeliveries.add(deliveryKey);
-		try {
+		sendAndAcknowledge(() => {
 			const completed = (running.tasksCompleted ?? 0) + 1;
 			const summary = summaryMessage(
 				io.readTaskSummary(asPiRecord(running)),
@@ -189,11 +185,26 @@ export function createDelivery({
 					policyHash: running.policyHash!,
 				},
 			);
-			ledger.push(io.acknowledge(asPiRecord(running), event));
-			if (running.stopState === "pending")
-				startPersistentStopTimeout(running, api, running.stopTimeoutMs, io);
-		} finally {
-			inFlightPersistentTaskDeliveries.delete(deliveryKey);
+		});
+
+		function sendAndAcknowledge(send: () => void): void {
+			try {
+				if (progress !== "sent") {
+					deliveries.set(deliveryKey, "sending");
+					send();
+					// Parent memory, not the child-writable ledger, records that Pi
+					// accepted the notification. An ack retry must not send it again.
+					deliveries.set(deliveryKey, "sent");
+				}
+				ledger.push(io.acknowledge(asPiRecord(running), event));
+				deliveries.set(deliveryKey, "acknowledged");
+				if (running.stopState === "pending")
+					startPersistentStopTimeout(running, api, running.stopTimeoutMs, io);
+			} catch (error) {
+				if (deliveries.get(deliveryKey) === "sending")
+					deliveries.delete(deliveryKey);
+				throw error;
+			}
 		}
 	}
 
@@ -208,20 +219,15 @@ export function createDelivery({
 		for (const event of events.slice(running.observedTaskEvents ?? 0)) {
 			if (!running.persistent || event.generation !== running.generationId)
 				continue;
+			// A reentrant drain must not advance the cursor past a send whose
+			// acknowledgement can still fail in the outer drain.
 			if (
-				inFlightPersistentTaskDeliveries.has(
-					`${running.id}:${event.type}:${event.task}`,
-				)
+				running.persistentTaskDeliveries?.get(`${event.type}:${event.task}`) ===
+				"sending"
 			)
-				continue;
+				return;
 			ledger ??= io.readLedger(asPiRecord(running));
-			deliverPersistentTaskEvent(
-				running,
-				event,
-				selectCompletionApi(api, runtime.pi),
-				io,
-				ledger,
-			);
+			deliverPersistentTaskEvent(running, event, api, io, ledger);
 		}
 		running.observedTaskEvents = events.length;
 	}

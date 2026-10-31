@@ -294,7 +294,15 @@ export function registerSubagentTool(
 					},
 				};
 				const session = runtime.session!;
-				const handle = await session.spawnPi(input);
+				// Reserve synchronously before acquisition yields. Reload adopts this
+				// set; onSpawned transfers the slot to the row, and failure releases it.
+				if (persistent) (runtime.persistentReservations ??= new Set()).add(id);
+				let handle;
+				try {
+					handle = await session.spawnPi(input);
+				} finally {
+					runtime.persistentReservations?.delete(id);
+				}
 				const running = session.getRecord(id)!;
 				const startedDetails = session.getStarted(id)!;
 				// The tool's signal is not a producer signal. Delivery belongs to RunSession.

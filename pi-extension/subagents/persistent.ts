@@ -13,7 +13,7 @@ import type { WorktreeHandoff } from "../../maestro/core/worktree.ts";
 import {
 	type RunningSubagent,
 	type SubagentRuntime,
-	selectCompletionApi,
+	type HeldDelivery,
 } from "./state.ts";
 import type { Controls } from "./controls.ts";
 import {
@@ -213,13 +213,49 @@ export function createPersistentControls({
 		const specialists = Array.from(runningSubagents.values()).filter(
 			(running) => running.persistent,
 		);
-		if (specialists.length < config.maxAgents) return undefined;
-		return `Persistent specialist cap (${config.maxAgents}) reached. Current specialists: ${specialists.map((running) => `${encodeHostValue(running.name)} (${persistentSpecialistState(running)}, ${running.tasksCompleted ?? 0} completed)`).join(", ")}.`;
+		const acquiring = [...(runtime.persistentReservations ?? [])].filter(
+			(id) => !runningSubagents.get(id)?.persistent,
+		).length;
+		if (specialists.length + acquiring < config.maxAgents) return undefined;
+		return `Persistent specialist cap (${config.maxAgents}) reached. Current specialists: ${specialists.map((running) => `${encodeHostValue(running.name)} (${persistentSpecialistState(running)}, ${running.tasksCompleted ?? 0} completed)`).join(", ")}. Launches acquiring resources: ${acquiring}.`;
+	}
+
+	/** A notice owns its delivery independently of the row's later retirement. */
+	function notifyStopFailure(
+		running: RunningSubagent,
+		io: PiPersistentIO,
+	): void {
+		let retry: ReturnType<typeof setTimeout> | undefined;
+		const notice: HeldDelivery = {
+			id: running.id,
+			release(api) {
+				if (retry) clearTimeout(retry);
+				if (!api || running.lifecycle.delivery === "suppressed") return;
+				try {
+					sendPersistentStopFailure(api, running, io);
+				} catch {
+					// Retain ownership until a live send succeeds or quit suppresses
+					// it. Neither evidence nor send errors may escape a callback.
+					(runtime.heldDeliveries ??= []).push(notice);
+					retry = setTimeout(() => {
+						if (!runtime.liveApi && runtime.reloadGap) return;
+						const queue = runtime.heldDeliveries!;
+						const at = queue.indexOf(notice);
+						if (at < 0) return;
+						queue.splice(at, 1);
+						notice.release(runtime.liveApi);
+					}, 1_000);
+					retry.unref();
+				}
+			},
+		};
+		if (runtime.liveApi) notice.release(runtime.liveApi);
+		else if (runtime.reloadGap) (runtime.heldDeliveries ??= []).push(notice);
 	}
 
 	function startPersistentStopTimeout(
 		running: RunningSubagent,
-		api: Pick<ExtensionAPI, "sendMessage">,
+		_api: Pick<ExtensionAPI, "sendMessage">,
 		stopTimeoutMs = 15_000,
 		io: PiPersistentIO,
 	): void {
@@ -238,10 +274,7 @@ export function createPersistentControls({
 				running.stopState = "failed";
 				running.stopFailure =
 					"process exit was not confirmed within the bounded stop wait";
-				const completionApi = runtime.session?.getControlTaskId(running.id)
-					? selectCompletionApi(api, runtime.pi)
-					: api;
-				sendPersistentStopFailure(completionApi, running, io);
+				notifyStopFailure(running, io);
 			}
 		}, stopTimeoutMs);
 		running.stopTimeout.unref();
@@ -280,7 +313,19 @@ export function createPersistentControls({
 		const pending = running.taskId != null;
 		running.stopState = pending ? "pending" : "requested";
 		running.stopTimeoutMs = stopTimeoutMs;
-		io.requestStop(asPiRecord(running));
+		running.stopFailure = undefined;
+		try {
+			io.requestStop(asPiRecord(running));
+		} catch (error) {
+			// Publication may have written evidence before failing. Keep sends
+			// blocked, but allow an explicit stop retry; never claim it is pending.
+			running.stopState = "failed";
+			running.stopFailure = `stop publication failed: ${String(error)}`;
+			throw new Error(
+				`${running.stopFailure}. Evidence is retained and follow-up work is blocked; request subagent_stop again to retry.`,
+				{ cause: error },
+			);
+		}
 		if (!pending) startPersistentStopTimeout(running, api, stopTimeoutMs, io);
 		return {
 			content: [
