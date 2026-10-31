@@ -6,6 +6,7 @@
  * Methods may be sync or async; providers choose. The CLI is the only place
  * that wires a provider to an adapter (via core's SurfaceHandle).
  */
+import { isPlainObject, isString } from "./config/type-guards.ts";
 import type {
 	OpenedPrimaryWorkspaceReport,
 	PrimaryWorkspaceClaim,
@@ -30,7 +31,66 @@ export interface SurfaceInfo {
 	workspaceId?: string;
 }
 
-export interface CreateSurfaceOptions {
+export interface AcquisitionControl {
+	/** Admission intent only; abort does not cancel a remote mutation. */
+	signal?: AbortSignal;
+}
+
+export type UncertainAcquisition =
+	| {
+			kind: "surface-create";
+			placement: "tab" | "split";
+			workspaceId?: string;
+			anchorSurfaceId?: string;
+			observedSurfaceId?: string;
+	  }
+	| {
+			kind: "worktree-create";
+			sourceCwd: string;
+			branch: string;
+			recovered?: RecoveredWorktreeProvisioning;
+	  }
+	| { kind: "command-dispatch"; surfaceId: string };
+
+/** A started mutating request has no proven outcome. Never retry it. */
+export class AcquisitionUncertainError extends Error {
+	readonly code = "PIHA_ACQUISITION_UNCERTAIN";
+	readonly uncertainty: UncertainAcquisition;
+	constructor(
+		message: string,
+		uncertainty: UncertainAcquisition,
+		options?: ErrorOptions,
+	) {
+		super(message, options);
+		this.name = "AcquisitionUncertainError";
+		this.uncertainty = uncertainty;
+	}
+}
+
+/** Structural so errors from an earlier extension load remain recognizable. */
+export function isAcquisitionUncertainError(
+	error: any,
+): error is AcquisitionUncertainError {
+	if (error?.code !== "PIHA_ACQUISITION_UNCERTAIN" || !isString(error.message))
+		return false;
+	const value = error.uncertainty;
+	if (!isPlainObject(value)) return false;
+	switch (value.kind) {
+		case "surface-create":
+			return (
+				"placement" in value &&
+				(value.placement === "tab" || value.placement === "split")
+			);
+		case "worktree-create":
+			return isString(value.sourceCwd) && isString(value.branch);
+		case "command-dispatch":
+			return isString(value.surfaceId);
+		default:
+			return false;
+	}
+}
+
+export interface CreateSurfaceOptions extends AcquisitionControl {
 	name: string;
 	cwd: string;
 	/** Default: { kind: "grouped" }. */
@@ -38,7 +98,7 @@ export interface CreateSurfaceOptions {
 	placement?: SurfacePlacement;
 }
 
-export interface CreateWorktreeSurfaceOptions {
+export interface CreateWorktreeSurfaceOptions extends AcquisitionControl {
 	name: string;
 	cwd: string;
 	branch: string;
@@ -64,7 +124,7 @@ export interface ReportOpenedPrimaryWorkspaceInput {
 export type RecoveredWorktreeProvisioning = Pick<
 	WorktreeSurfaceInfo,
 	"path" | "branch" | "workspaceId"
->;
+> & { paneId?: string };
 
 export class WorktreeProvisioningError extends Error {
 	readonly recoveredWorktree: RecoveredWorktreeProvisioning;
@@ -167,7 +227,7 @@ export interface SurfaceProvider {
 		surfaceId: string,
 		command: string,
 		options: { scriptPath: string; scriptPreamble: string },
-	): string;
+	): string | Promise<string>;
 
 	// pi-herdr-agents extension
 	inspectSurface(surfaceId: string): Promise<PaneInspection>;
@@ -200,8 +260,8 @@ export interface SurfaceProvider {
 	}): Promise<WorktreeSurfaceInfo[]>;
 
 	// pi-herdr-agents extension
-	focusWorkspace(workspaceId: string): void;
+	focusWorkspace(workspaceId: string): void | Promise<void>;
 
 	// pi-herdr-agents extension
-	setTitle(target: "tab" | "workspace", title: string): void;
+	setTitle(target: "tab" | "workspace", title: string): void | Promise<void>;
 }

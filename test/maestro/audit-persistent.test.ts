@@ -200,7 +200,7 @@ test("stop inbox failure retains evidence without duplicating it on retry after 
 	);
 });
 
-test("timeout in reload gap never calls either stale API and delivers exactly once after retirement", (t) => {
+test("timeout in reload gap never calls either stale API and delivers the current failure exactly once", async (t) => {
 	t.mock.timers.enable({ apis: ["setTimeout"] });
 	const f = specialist(t);
 	f.controls.handleSubagentStop({ id: f.running.id }, f.parent.api, 10, f.io);
@@ -212,11 +212,10 @@ test("timeout in reload gap never calls either stale API and delivers exactly on
 	assert.equal(f.running.stopState, "failed");
 	assert.equal(f.runtime.heldDeliveries?.length, 1);
 	assert.equal(f.parent.sentMessages.length, 0);
-	f.running.lifecycle = markDelivery(f.running.lifecycle, "delivered");
-	f.runtime.runningSubagents.delete(f.running.id);
 	const replacement = createMockExtensionApi();
 	bindLiveApi(f.runtime, replacement.api);
 	bindLiveApi(f.runtime, replacement.api);
+	await new Promise<void>((resolve) => setImmediate(resolve));
 	assert.equal(replacement.sentMessages.length, 1);
 	assert.match(
 		replacement.sentMessages[0].message.content,
@@ -224,6 +223,46 @@ test("timeout in reload gap never calls either stale API and delivers exactly on
 	);
 	assert.equal(f.runtime.heldDeliveries?.length, 0);
 });
+
+for (const change of ["exit", "retry", "reload"] as const)
+	test(`slow stop evidence cannot send a stale ${change} notice`, async (t) => {
+		t.mock.timers.enable({ apis: ["setTimeout"] });
+		const f = specialist(t);
+		let finish!: (value: undefined) => void;
+		const io: PiPersistentIO = {
+			...f.io,
+			inspectWorktree: () =>
+				new Promise((done) => {
+					finish = done;
+				}),
+		};
+		f.controls.handleSubagentStop({ id: f.running.id }, f.parent.api, 10, io);
+		t.mock.timers.tick(10);
+		assert.ok(finish);
+		const replacement = createMockExtensionApi();
+		if (change === "exit") {
+			f.running.lifecycle = markDelivery(f.running.lifecycle, "delivered");
+			f.runtime.runningSubagents.delete(f.running.id);
+		} else if (change === "retry") {
+			f.controls.handleSubagentStop({ id: f.running.id }, f.parent.api, 10, io);
+		} else {
+			f.parent.invalidate();
+			f.runtime.liveApi = undefined;
+			f.runtime.reloadGap = true;
+		}
+		finish(undefined);
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		assert.equal(f.parent.sentMessages.length, 0);
+		if (change === "reload") {
+			// The notice must recapture evidence, then use only the new live API.
+			bindLiveApi(f.runtime, replacement.api);
+			finish(undefined);
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			assert.equal(replacement.sentMessages.length, 1);
+			bindLiveApi(f.runtime, replacement.api);
+			assert.equal(replacement.sentMessages.length, 1);
+		} else assert.equal(f.runtime.heldDeliveries?.length ?? 0, 0);
+	});
 
 test("quit releases a held stop failure without sending or retaining a retry", (t) => {
 	t.mock.timers.enable({ apis: ["setTimeout"] });
@@ -242,14 +281,14 @@ test("quit releases a held stop failure without sending or retaining a retry", (
 	assert.equal(f.runtime.heldDeliveries?.length, 0);
 });
 
-test("timeout evidence and send errors are contained, retried live, and cancelled on quit", (t) => {
+test("timeout evidence and send errors are contained, retried live, and cancelled on quit", async (t) => {
 	t.mock.timers.enable({ apis: ["setTimeout"] });
 	const f = specialist(t);
 	let reads = 0;
 	let sends = 0;
 	const io: PiPersistentIO = {
 		...f.io,
-		inspectWorktree() {
+		async inspectWorktree() {
 			if (++reads === 1) throw new Error("read fault");
 			return undefined;
 		},
@@ -262,7 +301,9 @@ test("timeout evidence and send errors are contained, retried live, and cancelle
 	f.controls.handleSubagentStop({ id: f.running.id }, f.parent.api, 10, io);
 	t.mock.timers.tick(10);
 	assert.equal(reads, 1);
+	await new Promise<void>((resolve) => setImmediate(resolve));
 	t.mock.timers.tick(1_000);
+	await new Promise<void>((resolve) => setImmediate(resolve));
 	assert.equal(sends, 1);
 	f.runtime.liveApi = undefined;
 	f.runtime.reloadGap = true;
@@ -270,6 +311,7 @@ test("timeout evidence and send errors are contained, retried live, and cancelle
 	t.mock.timers.tick(1_000);
 	const replacement = createMockExtensionApi();
 	bindLiveApi(f.runtime, replacement.api);
+	await new Promise<void>((resolve) => setImmediate(resolve));
 	t.mock.timers.tick(5_000);
 	assert.equal(replacement.sentMessages.length, 1);
 	assert.equal(f.runtime.heldDeliveries?.length, 0);
@@ -278,6 +320,7 @@ test("timeout evidence and send errors are contained, retried live, and cancelle
 		throw new Error("unavailable");
 	};
 	t.mock.timers.tick(10);
+	await new Promise<void>((resolve) => setImmediate(resolve));
 	assert.equal(f.runtime.heldDeliveries?.length, 1);
 	f.runtime.liveApi = undefined;
 	releaseHeldDeliveries(f.runtime, undefined);

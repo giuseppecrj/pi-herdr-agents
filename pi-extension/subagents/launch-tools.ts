@@ -315,15 +315,20 @@ export function registerSubagentTool(
 					content: [
 						{
 							type: "text",
-							text:
-								`Sub-agent "${encodeHostValue(params.name)}" launched and is now running in the background` +
-								(running.worktree
-									? ` in worktree ${encodeHostValue(running.worktree.path, HOST_PATH_CHARS)} on branch ${encodeHostValue(running.worktree.branch)}. `
-									: ". ") +
-								launchDiagnosticsText(running.worktree?.diagnostics, "", " ") +
-								`Do NOT generate or assume any results — you have no idea what the sub-agent will do or produce. ` +
-								`The results will be delivered to you automatically as a steer message when the sub-agent finishes. ` +
-								`Until then, move on to other work or tell the user you're waiting.`,
+							text: startedDetails.launchFailure
+								? `Sub-agent "${encodeHostValue(params.name)}" launch is uncertain. Its acquired owner remains controlled and supervised until termination is confirmed; no fallback will launch. ${encodeHostValue(startedDetails.launchFailure)} Do not blindly relaunch. A result will be delivered automatically after confirmed termination.`
+								: `Sub-agent "${encodeHostValue(params.name)}" launched and is now running in the background` +
+									(running.worktree
+										? ` in worktree ${encodeHostValue(running.worktree.path, HOST_PATH_CHARS)} on branch ${encodeHostValue(running.worktree.branch)}. `
+										: ". ") +
+									launchDiagnosticsText(
+										running.worktree?.diagnostics,
+										"",
+										" ",
+									) +
+									`Do NOT generate or assume any results — you have no idea what the sub-agent will do or produce. ` +
+									`The results will be delivered to you automatically as a steer message when the sub-agent finishes. ` +
+									`Until then, move on to other work or tell the user you're waiting.`,
 						},
 					],
 					details: startedDetails,
@@ -555,7 +560,9 @@ export function registerResumeTool(
 					content: [
 						{
 							type: "text",
-							text: `Session "${encodeHostValue(name)}" resumed.`,
+							text: started.launchFailure
+								? `Session "${encodeHostValue(name)}" resume is uncertain; its owner remains controlled and supervised. No fallback will launch. ${encodeHostValue(started.launchFailure)}`
+								: `Session "${encodeHostValue(name)}" resumed.`,
 						},
 					],
 					details: {
@@ -563,7 +570,8 @@ export function registerResumeTool(
 						name,
 						sessionPath: params.sessionPath,
 						launchScriptFile: started.launchScriptFile,
-						status: "started",
+						status: started.status,
+						launchFailure: started.launchFailure,
 					},
 				};
 			},

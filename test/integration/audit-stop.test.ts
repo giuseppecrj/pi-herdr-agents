@@ -104,9 +104,9 @@ for (const backend of getAvailableBackends()) {
 						supervision: { forcePolling: true },
 					}),
 				);
-				const parent = createTrackedSurface(env, `audit-stop-${id}`);
+				const parent = await createTrackedSurface(env, `audit-stop-${id}`);
 				await waitForPaneReady(parent);
-				startPi(
+				await startPi(
 					parent,
 					env.dir,
 					[
@@ -208,7 +208,7 @@ for (const backend of getAvailableBackends()) {
 						);
 					}
 				} finally {
-					cleanupTestEnv(env);
+					await cleanupTestEnv(env);
 				}
 			}
 		});

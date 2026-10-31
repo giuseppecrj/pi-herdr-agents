@@ -10999,7 +10999,7 @@ describe("worktree cleanup public surface", () => {
 			assert.equal(f.calls[0], "preserve");
 		}
 	});
-	it("keeps child Herdr list formatting, handoff dispatch, and silent startup", async (t) => {
+	it("keeps child Herdr list formatting, handoff dispatch, and silent startup", async () => {
 		const dir = createTestDir();
 		const previousId = process.env.PI_SUBAGENT_ID;
 		const previousHerdr = process.env.HERDR_ENV;
@@ -11020,73 +11020,58 @@ describe("worktree cleanup public surface", () => {
 			},
 		];
 		const effects: string[][] = [];
-		const availability = t.mock.method(
-			childProcess,
-			"execSync",
-			(command: string) => {
-				assert.equal(command, "command -v herdr");
-				return "/fixture/herdr\n";
-			},
+		// SAFETY: the composition root owns this process-local runtime slot.
+		const hostRuntime = (globalThis as any)[Symbol.for("pi-subagents/runtime")];
+		const priorSession = hostRuntime.session;
+		hostRuntime.session = undefined;
+		const surface = new FakeSurfaceProvider();
+		surface.listWorktreeSurfaces = async (options) => {
+			assert.equal(options?.cwd, "/repo");
+			effects.push(["list", "/repo"]);
+			return __herdrTest__.parseHerdrWorktreeList(
+				JSON.stringify({ result: { type: "worktree_list", worktrees } }),
+			);
+		};
+		const worktree = createWorktreeOperations();
+		worktree.resolveGitCommit = async (cwd, ref) => {
+			assert.equal(cwd, "/repo");
+			assert.equal(ref, "HEAD");
+			effects.push(["base", cwd, ref]);
+			return "a".repeat(40);
+		};
+		worktree.resolveWorktreeProvisionCwd = async (cwd) => {
+			effects.push(["source", cwd]);
+			return cwd;
+		};
+		const launchOperations = launchOperationsFromSurface(
+			surface,
+			{ mode: "grouped", direction: "right", maxPerTab: 4 },
+			worktree,
 		);
-		const mocked = t.mock.method(
-			childProcess,
-			"execFileSync",
-			(file: string, args: string[], options: { cwd?: string }) => {
-				effects.push([file, ...args]);
-				if (file === "herdr" && args[0] === "worktree" && args[1] === "list") {
-					assert.deepEqual(args, ["worktree", "list", "--cwd", "/repo"]);
-					return JSON.stringify({
-						result: { type: "worktree_list", worktrees },
-					});
-				}
-				if (file === "git") {
-					assert.equal(options.cwd, "/repo");
-					if (args[1] === "--verify") {
-						assert.deepEqual(args, ["rev-parse", "--verify", "HEAD^{commit}"]);
-						return "a".repeat(40);
-					}
-					if (args[1] === "--path-format=absolute") {
-						if (args[2] === "--git-dir")
-							assert.deepEqual(args, [
-								"rev-parse",
-								"--path-format=absolute",
-								"--git-dir",
-							]);
-						else if (args[2] === "--git-common-dir")
-							assert.deepEqual(args, [
-								"rev-parse",
-								"--path-format=absolute",
-								"--git-common-dir",
-							]);
-						else assert.fail(`unexpected Git path command: ${args.join(" ")}`);
-						return "/repo/.git\n";
-					}
-					assert.fail(`unexpected Git command: ${args.join(" ")}`);
-				}
-				assert.equal(file, "herdr");
-				assert.deepEqual(args, [
-					"worktree",
-					"create",
-					"--cwd",
-					"/repo",
-					"--branch",
-					"feature/followup",
-					"--base",
-					"a".repeat(40),
-					"--label",
-					"wt: feature/followup",
-					"--no-focus",
-				]);
-				// Stop at the external creation boundary: no real workspace is created.
-				throw new Error("fixture handoff creation stopped");
-			},
+		launchOperations.createWorktree = async (name, cwd, branch, base) => {
+			assert.deepEqual(
+				[name, cwd, branch, base],
+				["wt: feature/followup", "/repo", "feature/followup", "a".repeat(40)],
+			);
+			effects.push(["create", branch]);
+			throw new Error("fixture handoff creation stopped");
+		};
+		const supervision = new SupervisionCoordinator(
+			async () => ({ complete: true, panes: [] }),
+			(id) => surface.inspectSurface(id),
+			true,
 		);
-		syncBuiltinESMExports();
 		try {
 			const { api, registeredCommands, eventHandlers } =
 				createMockExtensionApi();
 			api.getThinkingLevel = () => "medium";
 			subagentsModule.default(api, {
+				infrastructure: {
+					surfaceProvider: surface,
+					launchOperations,
+					worktreeOperations: worktree,
+					supervision,
+				},
 				cleanupOperations: () => {
 					throw new Error("child must not inspect cleanup inventory");
 				},
@@ -11134,19 +11119,12 @@ describe("worktree cleanup public surface", () => {
 				notices.at(-1),
 				"Worktree launch failed: fixture handoff creation stopped",
 			);
-			// The extra Herdr call is the pre-create snapshot of the source primary workspace.
-			assert.equal(effects.length, 7);
-			assert.deepEqual(effects.at(-2), [
-				"herdr",
-				"worktree",
-				"list",
-				"--cwd",
-				"/repo",
-			]);
-			assert.deepEqual(effects.at(-1)?.slice(0, 3), [
-				"herdr",
-				"worktree",
-				"create",
+			assert.deepEqual(effects, [
+				["list", "/repo"],
+				["list", "/repo"],
+				["base", "/repo", "HEAD"],
+				["source", "/repo"],
+				["create", "feature/followup"],
 			]);
 			const manifestDir = join(dir, "artifacts", "child", "worktree-runs");
 			const manifests = readdirSync(manifestDir);
@@ -11158,9 +11136,8 @@ describe("worktree cleanup public surface", () => {
 			assert.equal(manifest.state, "failed");
 			assert.equal(manifest.sourceCwd, "/repo");
 		} finally {
-			mocked.mock.restore();
-			availability.mock.restore();
-			syncBuiltinESMExports();
+			supervision.close();
+			hostRuntime.session = priorSession;
 			restoreEnvVar("PI_SUBAGENT_ID", previousId);
 			restoreEnvVar("HERDR_ENV", previousHerdr);
 			rmSync(dir, { recursive: true, force: true });
@@ -14065,8 +14042,9 @@ describe("subagent interruption", () => {
 		assert.equal(testApi.shouldRetainSubagentSurface({}), false);
 	});
 
-	it("captures committed and uncommitted worktree state for the parent", () => {
-		withTempDir((dir) => {
+	it("captures committed and uncommitted worktree state for the parent", async () => {
+		const dir = createTestDir();
+		try {
 			execFileSync("git", ["init", "-q"], { cwd: dir });
 			execFileSync("git", ["config", "user.email", "test@example.com"], {
 				cwd: dir,
@@ -14089,7 +14067,7 @@ describe("subagent interruption", () => {
 			writeFileSync(join(dir, "tracked.txt"), "dirty\n");
 			writeFileSync(join(dir, "untracked.txt"), "new\n");
 
-			const handoff = captureWorktreeHandoff({
+			const handoff = await captureWorktreeHandoff({
 				path: dir,
 				workspaceId: "w9",
 				paneId: "w9:p1",
@@ -14111,11 +14089,14 @@ describe("subagent interruption", () => {
 			assert.deepEqual(handoff.untrackedFiles, ["untracked.txt"]);
 			assert.ok(handoff.headSha);
 			assert.match(handoff.headSha, /^[0-9a-f]{40}$/);
-		});
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
-	it("reports unknown state when worktree Git inspection fails", () => {
-		withTempDir((dir) => {
+	it("reports unknown state when worktree Git inspection fails", async () => {
+		const dir = createTestDir();
+		try {
 			const worktree = {
 				path: join(dir, "missing"),
 				workspaceId: "w9",
@@ -14125,7 +14106,7 @@ describe("subagent interruption", () => {
 				baseSha: "1111111",
 				manifestFile: join(dir, "manifest.json"),
 			};
-			const handoff = captureWorktreeHandoff(worktree);
+			const handoff = await captureWorktreeHandoff(worktree);
 
 			assert.equal(handoff.headSha, null);
 			assert.equal(handoff.commitsAhead, null);
@@ -14151,7 +14132,9 @@ describe("subagent interruption", () => {
 				/State: inspection unknown · commits ahead unknown/,
 			);
 			assert.match(presentation, /Base\/head: 1111111 -> unknown/);
-		});
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("marks launch failures as failed while retaining explicit ownership", async () => {
@@ -14179,8 +14162,8 @@ describe("subagent interruption", () => {
 			});
 
 			const effects = createWorktreeOperations();
-			effects.resolveGitCommit = () => worktree.baseSha;
-			effects.resolveWorktreeProvisionCwd = (cwd) => cwd;
+			effects.resolveGitCommit = async () => worktree.baseSha;
+			effects.resolveWorktreeProvisionCwd = async (cwd) => cwd;
 			await assert.rejects(
 				launchPiSubagent(
 					{
@@ -14235,7 +14218,13 @@ describe("subagent interruption", () => {
 			assert.equal(manifest.id, "run-1");
 			assert.equal(manifest.state, "failed");
 			assert.equal(manifest.path, worktree.path);
-			assert.match(manifest.gitError, /ENOENT|no such file/i);
+			assert.equal(manifest.acquisitionUncertain, true);
+			assert.match(manifest.error, /pane rejected command/);
+			assert.equal(
+				manifest.gitError,
+				undefined,
+				"the transferred owner captures Git only at finalization",
+			);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -15138,10 +15127,10 @@ describe("herdr.ts", () => {
 					`
 				import { listHerdrWorktrees } from ${JSON.stringify(moduleUrl)};
 				try {
-					listHerdrWorktrees();
+					await listHerdrWorktrees();
 					process.exitCode = 2;
 				} catch (error) {
-					if (error.status !== 1 || !String(error.stderr).includes("server_not_running")) throw error;
+					if (error.kind !== "exit" || !String(error.stderr).includes("server_not_running")) throw error;
 				}
 			`,
 				],

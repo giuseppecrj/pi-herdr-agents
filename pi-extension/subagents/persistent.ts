@@ -39,7 +39,8 @@ export function persistentSpecialistState(
 	running: RunningSubagent,
 ): "idle" | "working" | "stalled" | "stopped" {
 	const projection = projectLifecycle(running.lifecycle, Date.now()).kind;
-	if (running.stopState === "failed") return "stalled";
+	if (running.stopState === "failed" || asPiRecord(running).launchFailure)
+		return "stalled";
 	if (running.stopState)
 		return projection === "stalled" ? "stalled" : "working";
 	if (running.taskId) return projection === "stalled" ? "stalled" : "working";
@@ -133,14 +134,8 @@ export function persistentFactsFields(
 
 function sendPersistentStopFailure(
 	api: Pick<ExtensionAPI, "sendMessage">,
-	running: RunningSubagent,
-	io: PiPersistentIO,
+	facts: PersistentSpecialistFacts,
 ): void {
-	const facts = persistentSpecialistFacts(
-		running,
-		io,
-		io.inspectWorktree(asPiRecord(running)),
-	);
 	sendParentMessage(
 		api,
 		"subagent_stop",
@@ -225,25 +220,60 @@ export function createPersistentControls({
 		io: PiPersistentIO,
 	): void {
 		let retry: ReturnType<typeof setTimeout> | undefined;
+		let busy = false,
+			sent = false;
+		const generation = running.generationId;
+		const sequence = running.inboxSequence;
+		const failure = running.stopFailure;
+		const current = () =>
+			!sent &&
+			runningSubagents.get(running.id) === running &&
+			running.generationId === generation &&
+			running.inboxSequence === sequence &&
+			running.stopState === "failed" &&
+			running.stopFailure === failure &&
+			running.lifecycle.delivery !== "suppressed";
+		const hold = () => {
+			if (!current() || (!runtime.liveApi && !runtime.reloadGap)) return;
+			const queue = (runtime.heldDeliveries ??= []);
+			if (!queue.includes(notice)) queue.push(notice);
+			if (!runtime.liveApi) return;
+			retry = setTimeout(() => {
+				if (!runtime.liveApi && runtime.reloadGap) return;
+				const at = queue.indexOf(notice);
+				if (at < 0) return;
+				queue.splice(at, 1);
+				notice.release(runtime.liveApi);
+			}, 1_000);
+			retry.unref();
+		};
 		const notice: HeldDelivery = {
 			id: running.id,
 			release(api) {
 				if (retry) clearTimeout(retry);
-				if (!api || running.lifecycle.delivery === "suppressed") return;
-				try {
-					sendPersistentStopFailure(api, running, io);
-				} catch {
-					(runtime.heldDeliveries ??= []).push(notice);
-					retry = setTimeout(() => {
-						if (!runtime.liveApi && runtime.reloadGap) return;
-						const queue = runtime.heldDeliveries!;
-						const at = queue.indexOf(notice);
-						if (at < 0) return;
-						queue.splice(at, 1);
-						notice.release(runtime.liveApi);
-					}, 1_000);
-					retry.unref();
-				}
+				if (!api || busy || !current()) return;
+				busy = true;
+				void (async () => {
+					try {
+						const worktree = await io.inspectWorktree(asPiRecord(running));
+						// Evidence collection can cross reload, successful exit, or another stop.
+						if (!current()) return;
+						const liveApi = runtime.liveApi;
+						if (!liveApi) {
+							hold();
+							return;
+						}
+						sendPersistentStopFailure(
+							liveApi,
+							persistentSpecialistFacts(running, io, worktree),
+						);
+						sent = true;
+					} catch {
+						hold();
+					} finally {
+						busy = false;
+					}
+				})();
 			},
 		};
 		if (runtime.liveApi) notice.release(runtime.liveApi);

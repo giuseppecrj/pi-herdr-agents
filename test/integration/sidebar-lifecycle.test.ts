@@ -229,7 +229,7 @@ for (const backend of backends) {
 				...(canary ? releaseCanary(canary).residue : []),
 			];
 			if (residue.length === 0) {
-				cleanupTestEnv(env);
+				await cleanupTestEnv(env);
 				return;
 			}
 			// A residual worktree still points at its source repository, and the
@@ -306,7 +306,7 @@ for (const backend of backends) {
 			initRepository(env.dir);
 
 			const parentSession = join(env.dir, `sidebar-parent-${id}.jsonl`);
-			const parent = createTrackedSurface(env, `sidebar-parent-${id}`);
+			const parent = await createTrackedSurface(env, `sidebar-parent-${id}`);
 			await waitForPaneReady(parent);
 			const owned = {
 				expected: {
@@ -328,7 +328,7 @@ for (const backend of backends) {
 
 			const hold = (marker: string, file: string) =>
 				`Run: ${holdCommand(marker, file, gate)}`;
-			startPi(
+			await startPi(
 				parent,
 				env.dir,
 				[
@@ -500,7 +500,7 @@ for (const backend of backends) {
 					throw new Error("timed out waiting for an idle parent");
 				await sleep(250);
 			}
-			runInPane(run.parent, "/reload");
+			await runInPane(run.parent, "/reload");
 			await waitForScreen(run.parent, /Reloaded keybindings/, PI_TIMEOUT);
 			// Past one 15-second TTL, only the reloaded parent's renewals keep them.
 			await sleep(18_000);

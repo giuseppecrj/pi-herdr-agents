@@ -1,9 +1,11 @@
 import type { PaneConfig } from "../../core/config/pane-config.ts";
 import type {
 	SurfaceProvider,
+	AcquisitionControl,
 	WorktreeSurface,
 } from "../../core/surface-provider.ts";
 import type { WorktreeOperations } from "../../core/worktree.ts";
+import { Deadline } from "../../core/deadline.ts";
 import {
 	linuxProcessProbe,
 	readLinuxProcessEnvironment,
@@ -34,12 +36,17 @@ export interface WorktreeSurfaceForLaunch {
 export interface PiLaunchOperations {
 	/** Required for managed worktree launches; ordinary panes need no Git effects. */
 	worktree?: WorktreeOperations;
-	createPane(name: string, cwd?: string): MaybePromise<string>;
+	createPane(
+		name: string,
+		cwd?: string,
+		control?: AcquisitionControl,
+	): MaybePromise<string>;
 	createWorktree(
 		name: string,
 		cwd: string,
 		branch: string,
 		base: string,
+		control?: AcquisitionControl,
 	): MaybePromise<WorktreeSurfaceForLaunch>;
 	waitForShellReady(surface: string): Promise<void>;
 	runScript(
@@ -47,6 +54,7 @@ export interface PiLaunchOperations {
 		command: string,
 		options: { scriptPath: string; scriptPreamble: string },
 	): MaybePromise<string>;
+	/** Rollback resolves only once this ordinary pane is confirmed absent. */
 	closePane(pane: string): MaybePromise<void>;
 	waitForPiReady?(
 		surface: string,
@@ -117,12 +125,15 @@ async function waitForSurfacePiReady(
 ): Promise<void> {
 	const timeoutMs = options.timeoutMs ?? 10_000;
 	const intervalMs = options.intervalMs ?? 50;
-	const deadline = Date.now() + timeoutMs;
+	const deadline = Deadline.after(timeoutMs);
 	let lastError = "expected Pi process not observed";
 
-	while (Date.now() <= deadline) {
+	while (!deadline.expired()) {
 		try {
-			const info = await Promise.resolve(provider.getProcessInfo(surface));
+			const info = await provider.getProcessInfo(surface, {
+				timeoutMs: deadline.remainingMs(),
+			});
+			deadline.remainingMs();
 			// An unreadable process (one that is exiting) proves nothing, but must
 			// not hide a matching sibling.
 			for (const process of info.foregroundProcesses) {
@@ -135,8 +146,10 @@ async function waitForSurfacePiReady(
 		} catch (error) {
 			lastError = errorMessage(error);
 		}
-		if (Date.now() >= deadline) break;
-		await new Promise((resolve) => setTimeout(resolve, intervalMs));
+		if (deadline.expired()) break;
+		await new Promise((resolve) =>
+			setTimeout(resolve, Math.min(intervalMs, deadline.remainingMs())),
+		);
 	}
 	throw new Error(
 		`Timed out waiting for Pi session ${sessionFile} in Herdr pane ${surface}: ${lastError}`,
@@ -164,12 +177,17 @@ export async function captureSurfacePiProcessIdentity(
 	let lastError = "the child has not recorded its process identity";
 	let answered = false;
 	for (;;) {
+		if (Date.now() >= deadline) break;
 		try {
 			const record = readProcessIdentityRecord(expected.file);
 			if (record) {
 				// The deadline bounds Herdr too; a late answer is dropped, never accepted.
 				const info = await settleBefore(
-					Promise.resolve().then(() => provider.getProcessInfo(surface)),
+					Promise.resolve().then(() => {
+						const remaining = deadline - Date.now();
+						if (remaining <= 0) return undefined;
+						return provider.getProcessInfo(surface, { timeoutMs: remaining });
+					}),
 					deadline,
 					{ unref: true },
 				);
@@ -237,16 +255,23 @@ export function launchOperationsFromSurface(
 ): PiLaunchOperations {
 	return {
 		worktree,
-		createPane(name, cwd) {
+		createPane(name, cwd, control) {
 			return provider.createSurface({
 				name,
 				cwd: cwd ?? process.cwd(),
 				placement: placementFromPaneConfig(config),
+				signal: control?.signal,
 			});
 		},
-		async createWorktree(name, cwd, branch, base) {
+		async createWorktree(name, cwd, branch, base, control) {
 			const worktree = await Promise.resolve(
-				provider.createWorktreeSurface({ name, cwd, branch, base }),
+				provider.createWorktreeSurface({
+					name,
+					cwd,
+					branch,
+					base,
+					signal: control?.signal,
+				}),
 			);
 			return worktreeSurfaceForLaunch(worktree);
 		},
@@ -256,8 +281,20 @@ export function launchOperationsFromSurface(
 		runScript(surface, command, options) {
 			return provider.runScript(surface, command, options);
 		},
-		closePane(pane) {
-			return provider.closeSurface(pane);
+		async closePane(pane) {
+			let closeError: unknown;
+			try {
+				await provider.closeSurface(pane);
+			} catch (error) {
+				closeError = error;
+			}
+			try {
+				await provider.waitForSurfaceAbsence(pane);
+			} catch (error) {
+				throw new Error(
+					`${closeError ? `${errorMessage(closeError)}; ` : ""}${errorMessage(error)}`,
+				);
+			}
 		},
 		waitForPiReady(surface, sessionFile, cwd) {
 			return waitForSurfacePiReady(provider, surface, sessionFile, cwd);

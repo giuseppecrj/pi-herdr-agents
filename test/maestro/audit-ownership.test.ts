@@ -43,9 +43,9 @@ function fixture() {
 	} as const;
 	const surface = new FakeSurfaceProvider();
 	const worktree = createWorktreeOperations();
-	worktree.resolveGitCommit = () => "base-sha";
-	worktree.resolveWorktreeProvisionCwd = (cwd) => cwd;
-	worktree.captureWorktreeHandoff = (launch) => ({
+	worktree.resolveGitCommit = async () => "base-sha";
+	worktree.resolveWorktreeProvisionCwd = async (cwd) => cwd;
+	worktree.captureWorktreeHandoff = async (launch) => ({
 		...launch,
 		headSha: null,
 		commitsAhead: null,
@@ -144,6 +144,55 @@ function commandSession(command: string): string {
 }
 
 describe("audited launch ownership", () => {
+	it("uncertain dispatch on a caller-provided surface never closes that surface", async () =>
+		usingFixture(async (f) => {
+			const id = f.surface.createSurface({ name: "caller", cwd: f.root });
+			f.operations.runScript = () => {
+				throw new Error("receipt lost");
+			};
+			const handle = await f.adapter.spawn({
+				...f.options,
+				surface: f.surface.attachSurface(id),
+			});
+			const child = f.adapter.getRunningChild(handle);
+			assert.equal(child.ownsSurface, false);
+			await child.processIdentityCapture;
+			await assert.rejects(f.adapter.kill(handle), /unconfirmed/);
+			assert.equal(f.surface.listSurfaces().length, 1);
+			f.kernel.alive = false;
+			await f.adapter.kill(handle);
+			assert.equal(f.surface.listSurfaces().length, 1);
+		}));
+	it("transfers uncertain worktree dispatch without closing its root or fabricating process exit", async () =>
+		usingFixture(async (f) => {
+			f.operations.runScript = () => {
+				throw new Error("dispatch response lost");
+			};
+			const handle = await f.adapter.spawn({
+				...f.options,
+				behavior: { autoExit: true },
+				worktreeRequest: { branch: "retained" },
+			});
+			const child = f.adapter.getRunningChild(handle);
+			assert.ok(child.worktree);
+			assert.ok(handle.launchFailure);
+			await child.processIdentityCapture;
+			const controller = new AbortController();
+			const wait = f.adapter.awaitCompletion(handle, controller.signal);
+			await nextTurn();
+			assert.equal(f.adapter.exitCode(handle), undefined);
+			assert.equal(f.surface.listSurfaces().length, 1);
+			controller.abort();
+			await assert.rejects(wait, /Aborted/);
+			f.kernel.alive = false;
+			const result = await f.adapter.awaitCompletion(
+				handle,
+				new AbortController().signal,
+			);
+			assert.equal(result.reason, "error");
+			assert.match(result.errorMessage!, /dispatch response lost/);
+			assert.equal(f.surface.listSurfaces().length, 1);
+		}));
 	it("initializes persistent policy and ledger before dispatch, without rereading child-writable policy", async () =>
 		usingFixture(async (f) => {
 			let ledgerAtDispatch = 0;
@@ -404,7 +453,11 @@ describe("audited persistent exit ownership", () => {
 				);
 				assert.equal(result.reason, "done");
 				assert.equal(f.adapter.exitCode(handle), 0);
-				assert.equal(result.worktree?.path, child.worktree?.path);
+				assert.equal(
+					result.worktree,
+					undefined,
+					"Git enrichment belongs to runtime finalization, not raw exit evidence",
+				);
 				assert.equal(
 					f.surface.listSurfaces().length,
 					1,

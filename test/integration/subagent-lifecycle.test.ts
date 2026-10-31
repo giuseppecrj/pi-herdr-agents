@@ -134,8 +134,8 @@ for (const backend of backends) {
 			resetProviderRequests();
 		});
 
-		afterEach(() => {
-			cleanupTestEnv(env);
+		afterEach(async () => {
+			await cleanupTestEnv(env);
 			restoreBackend(prevMux);
 		});
 
@@ -146,7 +146,7 @@ for (const backend of backends) {
 			const markerFile = `/tmp/pi-integ-echo-${id}.txt`;
 			trackTempFile(env, markerFile);
 
-			const surface = createTrackedSurface(env, `echo-${id}`);
+			const surface = await createTrackedSurface(env, `echo-${id}`);
 			await waitForPaneReady(surface);
 
 			const task = [
@@ -158,7 +158,7 @@ for (const backend of backends) {
 				`After you receive the subagent result, say INTEGRATION_COMPLETE.`,
 			].join("\n");
 
-			startPi(surface, env.dir, task);
+			await startPi(surface, env.dir, task);
 
 			// Verify: subagent created the marker file
 			const content = await waitForFile(markerFile, PI_TIMEOUT, /PASS/);
@@ -204,10 +204,10 @@ for (const backend of backends) {
 			const childMarker = `CHILD_RESULT_${id}`;
 			const parentMarker = `PARENT_CONTINUED_${id}`;
 			const parentSession = join(env.dir, `single-result-parent-${id}.jsonl`);
-			const surface = createTrackedSurface(env, `single-result-${id}`);
+			const surface = await createTrackedSurface(env, `single-result-${id}`);
 			await waitForPaneReady(surface);
 
-			startPi(
+			await startPi(
 				surface,
 				env.dir,
 				[
@@ -293,9 +293,9 @@ for (const backend of backends) {
 					"herdr-agents",
 					"outcomes.jsonl",
 				);
-				const surface = createTrackedSurface(env, `accept-${id}`);
+				const surface = await createTrackedSurface(env, `accept-${id}`);
 				await waitForPaneReady(surface);
-				startPi(
+				await startPi(
 					surface,
 					env.dir,
 					`INTEGRATION_ACCEPT:${id}:${mode} ACCEPT_FILE:${file}`,
@@ -362,10 +362,10 @@ for (const backend of backends) {
 			const coordinatorName = `nested-${id}`;
 			const marker = `INTEGRATION_MULTI_WAVE_COORDINATOR:${id}`;
 			const parentSession = join(env.dir, `multi-wave-parent-${id}.jsonl`);
-			const surface = createTrackedSurface(env, `multi-wave-${id}`);
+			const surface = await createTrackedSurface(env, `multi-wave-${id}`);
 			await waitForPaneReady(surface);
 
-			startPi(
+			await startPi(
 				surface,
 				env.dir,
 				[
@@ -447,7 +447,7 @@ for (const backend of backends) {
 			const id = uniqueId();
 			const branch = `integration/ticket-${id}`;
 			const ticketFile = `ticket-${id}.txt`;
-			const surface = createTrackedSurface(env, `worktree-run-${id}`);
+			const surface = await createTrackedSurface(env, `worktree-run-${id}`);
 			await waitForPaneReady(surface);
 
 			execFileSync("git", ["init", "-q", "-b", "main"], { cwd: env.dir });
@@ -487,7 +487,7 @@ for (const backend of backends) {
 					});
 				};\n`,
 			);
-			startPi(surface, env.dir, task, {
+			await startPi(surface, env.dir, task, {
 				extraArgs: `-e ${shellQuote(decoyExtension)}`,
 			});
 
@@ -558,7 +558,7 @@ for (const backend of backends) {
 				const eligibleEntry = /eligible\s+·\s+Git:\s+0\s+dirty/;
 				const eligibleDeadline = Date.now() + PI_TIMEOUT;
 				for (;;) {
-					runInPane(surface, "/worktree list");
+					await runInPane(surface, "/worktree list");
 					try {
 						await waitForScreen(surface, eligibleEntry, 20_000, 300);
 						break;
@@ -568,7 +568,7 @@ for (const backend of backends) {
 				}
 				// Put inventory-shaped stale output on screen on every host, even if
 				// no unrelated dirty managed checkout exists there.
-				runInPane(surface, "/cleanup-inventory-decoy");
+				await runInPane(surface, "/cleanup-inventory-decoy");
 				const decoyScreen = await waitForScreen(
 					surface,
 					new RegExp(`STALE_INVENTORY_${id}`),
@@ -584,7 +584,10 @@ for (const backend of backends) {
 					join(worktree.path, "uncommitted.txt"),
 					"retained dirty state\n",
 				);
-				runInPane(surface, `/worktree remove ${worktree.open_workspace_id}`);
+				await runInPane(
+					surface,
+					`/worktree remove ${worktree.open_workspace_id}`,
+				);
 				await waitForScreen(surface, dirtyCleanupWarning, PI_TIMEOUT, 300);
 				assert.equal(existsSync(worktree.path), true);
 				assert.equal(
@@ -602,7 +605,10 @@ for (const backend of backends) {
 					cwd: worktree.path,
 					encoding: "utf8",
 				}).trim();
-				runInPane(surface, `/worktree remove ${worktree.open_workspace_id}`);
+				await runInPane(
+					surface,
+					`/worktree remove ${worktree.open_workspace_id}`,
+				);
 				await waitForScreen(surface, /commits\s+retained/, PI_TIMEOUT, 300);
 				assert.equal(existsSync(worktree.path), false);
 				assert.match(
@@ -731,7 +737,7 @@ for (const backend of backends) {
 				entry.customType === "subagent_result" &&
 				entry.details?.name === `Switch-${id}`;
 
-			const surface = createTrackedSurface(env, `switch-${id}`);
+			const surface = await createTrackedSurface(env, `switch-${id}`);
 			await waitForPaneReady(surface);
 
 			const task = [
@@ -743,7 +749,7 @@ for (const backend of backends) {
 				`Do not do anything else. Just call the subagent tool once.`,
 			].join("\n");
 
-			startPi(surface, env.dir, task, {
+			await startPi(surface, env.dir, task, {
 				extraArgs: [
 					`--session ${shellQuote(originalSession)}`,
 					`--session-dir ${shellQuote(sessionDir)}`,
@@ -752,7 +758,7 @@ for (const backend of backends) {
 			await waitForFile(startFile, PI_TIMEOUT, /START_/);
 			assert.equal(existsSync(originalSession), true);
 
-			runInPane(surface, "/new");
+			await runInPane(surface, "/new");
 
 			const content = await waitForFile(markerFile, PI_TIMEOUT, /DONE_/);
 			assert.ok(
@@ -819,7 +825,7 @@ for (const backend of backends) {
 			trackTempFile(env, startFile);
 			trackTempFile(env, markerFile);
 
-			const surface = createTrackedSurface(env, `status-${id}`);
+			const surface = await createTrackedSurface(env, `status-${id}`);
 			await waitForPaneReady(surface);
 
 			const task = [
@@ -831,7 +837,7 @@ for (const backend of backends) {
 				`After you receive the subagent result, say STATUS_TEST_DONE.`,
 			].join("\n");
 
-			startPi(surface, env.dir, task);
+			await startPi(surface, env.dir, task);
 
 			const activeScreen = await waitForScreen(
 				surface,
@@ -881,7 +887,7 @@ for (const backend of backends) {
 			trackTempFile(env, fileA);
 			trackTempFile(env, fileB);
 
-			const surface = createTrackedSurface(env, `parallel-${id}`);
+			const surface = await createTrackedSurface(env, `parallel-${id}`);
 			await waitForPaneReady(surface);
 
 			const task = [
@@ -900,7 +906,7 @@ for (const backend of backends) {
 				`Call both subagent tools NOW, do not wait between them.`,
 			].join("\n");
 
-			startPi(surface, env.dir, task);
+			await startPi(surface, env.dir, task);
 
 			// Both marker files should appear
 			const [contentA, contentB] = await Promise.all([
@@ -925,7 +931,7 @@ for (const backend of backends) {
 			const markerFile = `/tmp/pi-integ-fork-${id}.txt`;
 			trackTempFile(env, markerFile);
 
-			const surface = createTrackedSurface(env, `fork-${id}`);
+			const surface = await createTrackedSurface(env, `fork-${id}`);
 			await waitForPaneReady(surface);
 
 			const task = [
@@ -937,7 +943,7 @@ for (const backend of backends) {
 				`After you receive the result, say FORK_COMPLETE.`,
 			].join("\n");
 
-			startPi(surface, env.dir, task);
+			await startPi(surface, env.dir, task);
 
 			// Verify: forked subagent created the file
 			const content = await waitForFile(markerFile, PI_TIMEOUT, /FORK_OK/);
@@ -992,7 +998,7 @@ for (const backend of backends) {
 		it("subagent caller_ping sends notification back to the parent", async () => {
 			const id = uniqueId();
 
-			const surface = createTrackedSurface(env, `ping-${id}`);
+			const surface = await createTrackedSurface(env, `ping-${id}`);
 			await waitForPaneReady(surface);
 
 			const task = [
@@ -1003,7 +1009,7 @@ for (const backend of backends) {
 				`Just call the subagent tool once. Do not do anything else before calling it.`,
 			].join("\n");
 
-			startPi(surface, env.dir, task);
+			await startPi(surface, env.dir, task);
 
 			// The test-ping agent calls caller_ping, which steers a "needs help" message
 			// back to the outer pi. Look for it on screen.
@@ -1022,9 +1028,9 @@ for (const backend of backends) {
 		it("rejects public resume of a legacy Pi session without a saved policy", async () => {
 			const id = uniqueId();
 			const sessionFile = join(env.dir, `resume-child-${id}.jsonl`);
-			const seedSurface = createTrackedSurface(env, `resume-seed-${id}`);
+			const seedSurface = await createTrackedSurface(env, `resume-seed-${id}`);
 			await waitForPaneReady(seedSurface);
-			startPi(seedSurface, env.dir, "Reply with only SEED_FIRST", {
+			await startPi(seedSurface, env.dir, "Reply with only SEED_FIRST", {
 				extraArgs: `--print --session ${shellQuote(sessionFile)}`,
 			});
 			await waitForScreen(seedSurface, /FIRST/);
@@ -1032,7 +1038,10 @@ for (const backend of backends) {
 			assert.equal(existsSync(sessionFile), true);
 
 			const parentSession = join(env.dir, `resume-parent-${id}.jsonl`);
-			const parentSurface = createTrackedSurface(env, `resume-parent-${id}`);
+			const parentSurface = await createTrackedSurface(
+				env,
+				`resume-parent-${id}`,
+			);
 			await waitForPaneReady(parentSurface);
 			const panesBefore = JSON.parse(
 				execFileSync(
@@ -1043,7 +1052,7 @@ for (const backend of backends) {
 			)
 				.result.panes.map((pane: { pane_id: string }) => pane.pane_id)
 				.sort();
-			startPi(
+			await startPi(
 				parentSurface,
 				env.dir,
 				[
@@ -1081,9 +1090,12 @@ for (const backend of backends) {
 				env.dir,
 				`resume-restricted-parent-${id}.jsonl`,
 			);
-			const surface = createTrackedSurface(env, `resume-restricted-${id}`);
+			const surface = await createTrackedSurface(
+				env,
+				`resume-restricted-${id}`,
+			);
 			await waitForPaneReady(surface);
-			startPi(surface, env.dir, `INTEGRATION_RESUME_RESTRICTIONS:${id}`, {
+			await startPi(surface, env.dir, `INTEGRATION_RESUME_RESTRICTIONS:${id}`, {
 				extraArgs: `--session ${shellQuote(parentSession)}`,
 			});
 
@@ -1134,7 +1146,7 @@ for (const backend of backends) {
 			const markerFile = `/tmp/pi-integ-discovery-${id}.txt`;
 			trackTempFile(env, markerFile);
 
-			const surface = createTrackedSurface(env, `discovery-${id}`);
+			const surface = await createTrackedSurface(env, `discovery-${id}`);
 			await waitForPaneReady(surface);
 
 			// Use subagents_list to verify test agents are discoverable,
@@ -1148,7 +1160,7 @@ for (const backend of backends) {
 				`After you receive the subagent result, say DISCOVERY_DONE.`,
 			].join("\n");
 
-			startPi(surface, env.dir, task);
+			await startPi(surface, env.dir, task);
 
 			// The test-echo agent (discovered from project .pi/agents/) should work
 			const content = await waitForFile(markerFile, PI_TIMEOUT, /DISCO/);
@@ -1165,7 +1177,7 @@ for (const backend of backends) {
 			const markerFile = `/tmp/pi-integ-sysprompt-${id}.txt`;
 			trackTempFile(env, markerFile);
 
-			const surface = createTrackedSurface(env, `sysprompt-${id}`);
+			const surface = await createTrackedSurface(env, `sysprompt-${id}`);
 			await waitForPaneReady(surface);
 
 			const task = [
@@ -1177,7 +1189,7 @@ for (const backend of backends) {
 				`After the subagent completes, say SYSPROMPT_TEST_DONE.`,
 			].join("\n");
 
-			startPi(surface, env.dir, task);
+			await startPi(surface, env.dir, task);
 
 			const content = await waitForFile(markerFile, PI_TIMEOUT, /SYSPROMPT/);
 			assert.ok(
@@ -1191,9 +1203,9 @@ for (const backend of backends) {
 			const markerFile = `/tmp/pi-integ-fallback-${id}.txt`;
 			const parentSession = join(env.dir, `fallback-parent-${id}.jsonl`);
 			trackTempFile(env, markerFile);
-			const surface = createTrackedSurface(env, `fallback-${id}`);
+			const surface = await createTrackedSurface(env, `fallback-${id}`);
 			await waitForPaneReady(surface);
-			startPi(
+			await startPi(
 				surface,
 				env.dir,
 				[
@@ -1266,12 +1278,12 @@ for (const backend of backends) {
 			const markerFile = `/tmp/pi-integ-reload-fallback-${id}.txt`;
 			const parentSession = join(env.dir, `reload-fallback-parent-${id}.jsonl`);
 			trackTempFile(env, markerFile);
-			const surface = createTrackedSurface(env, `reload-fallback-${id}`);
+			const surface = await createTrackedSurface(env, `reload-fallback-${id}`);
 			await waitForPaneReady(surface);
 			const releaseFailures = pauseProviderFailures();
 			let reloadedAt = 0;
 			try {
-				startPi(
+				await startPi(
 					surface,
 					env.dir,
 					[
@@ -1297,7 +1309,7 @@ for (const backend of backends) {
 					const pane = await inspectPane(surface);
 					return pane.kind === "present" && pane.agentStatus === "idle";
 				}, "an idle parent pane");
-				runInPane(surface, "/reload");
+				await runInPane(surface, "/reload");
 				await waitForScreen(surface, /Reloaded keybindings/, PI_TIMEOUT);
 				reloadedAt = Date.now();
 			} finally {
@@ -1354,9 +1366,9 @@ for (const backend of backends) {
 				`account-fallback-parent-${id}.jsonl`,
 			);
 			trackTempFile(env, markerFile);
-			const surface = createTrackedSurface(env, `account-fallback-${id}`);
+			const surface = await createTrackedSurface(env, `account-fallback-${id}`);
 			await waitForPaneReady(surface);
-			startPi(
+			await startPi(
 				surface,
 				env.dir,
 				[
@@ -1424,9 +1436,9 @@ for (const backend of backends) {
 		it("reports every attempted model when all fallbacks fail", async () => {
 			const id = uniqueId();
 			const parentSession = join(env.dir, `fallback-fail-parent-${id}.jsonl`);
-			const surface = createTrackedSurface(env, `fallback-fail-${id}`);
+			const surface = await createTrackedSurface(env, `fallback-fail-${id}`);
 			await waitForPaneReady(surface);
-			startPi(
+			await startPi(
 				surface,
 				env.dir,
 				[

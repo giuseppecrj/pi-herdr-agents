@@ -186,8 +186,8 @@ for (const backend of backends) {
 			resetProviderRequests();
 		});
 
-		afterEach(() => {
-			cleanupTestEnv(env);
+		afterEach(async () => {
+			await cleanupTestEnv(env);
 			restoreBackend(prevMux);
 		});
 
@@ -204,11 +204,14 @@ for (const backend of backends) {
 			// Unique decimal so a leaked `sleep` is attributable to this case.
 			const sleepToken = `91.${Math.floor(Math.random() * 1e6)}`;
 			const parentSession = join(env.dir, `cancel-parent-${id}.jsonl`);
-			const parent = createTrackedSurface(env, `cancel-parent-${id}`);
-			const bystander = createTrackedSurface(env, `cancel-bystander-${id}`);
+			const parent = await createTrackedSurface(env, `cancel-parent-${id}`);
+			const bystander = await createTrackedSurface(
+				env,
+				`cancel-bystander-${id}`,
+			);
 			await waitForPaneReady(parent);
 			await waitForPaneReady(bystander);
-			runInPane(bystander, `echo BYSTANDER_ALIVE_${id}`);
+			await runInPane(bystander, `echo BYSTANDER_ALIVE_${id}`);
 			const baselinePanes = new Set(workspacePanes(env.workspaceId));
 			const lines = [
 				`INTEGRATION_CANCEL:${id}:${mode}`,
@@ -220,7 +223,7 @@ for (const backend of backends) {
 				...Object.entries(extra).map(([k, v]) => `CANCEL_${k}: ${v}`),
 				"Follow the scripted cancellation scenario.",
 			];
-			startPi(parent, env.dir, lines.join("\n"), {
+			await startPi(parent, env.dir, lines.join("\n"), {
 				extraArgs: `--session ${shellQuote(parentSession)}`,
 			});
 			return {

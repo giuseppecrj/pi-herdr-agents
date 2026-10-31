@@ -14,10 +14,23 @@ import {
 	type PrimaryWorkspaceClaim,
 	type ReleasedPrimaryWorkspaceClaim,
 } from "../../core/opened-primary-workspace.ts";
-import { WorktreeProvisioningError } from "../../core/surface-provider.ts";
+import {
+	AcquisitionUncertainError,
+	isAcquisitionUncertainError,
+	WorktreeProvisioningError,
+	type AcquisitionControl,
+	type RecoveredWorktreeProvisioning,
+	type UncertainAcquisition,
+} from "../../core/surface-provider.ts";
+import { Deadline } from "../../core/deadline.ts";
 import {
 	herdrExec,
 	herdrExecAsync,
+	HerdrClientError,
+	HERDR_PLACEMENT_TIMEOUT_MS,
+	HERDR_WORKTREE_TIMEOUT_MS,
+	HERDR_RECONCILE_TIMEOUT_MS,
+	HERDR_COSMETIC_TIMEOUT_MS,
 	parseHerdrJson,
 	swapHerdrExecForTest,
 	type HerdrExecForTest,
@@ -105,10 +118,12 @@ interface HerdrCurrentPaneInfo {
 	workspace_id: string;
 }
 
-function getHerdrCurrentPaneInfo(): HerdrCurrentPaneInfo {
+async function getHerdrCurrentPaneInfo(
+	timeout?: number,
+): Promise<HerdrCurrentPaneInfo> {
 	// Inherited IDs go stale after a pane moves. Herdr resolves the calling
 	// terminal's original identity to its live pane, tab, and workspace.
-	const output = herdrExec(buildCurrentPaneArgs());
+	const output = await herdrExecAsync(buildCurrentPaneArgs(), timeout);
 	const parsed = parseHerdrJson(output);
 	const pane = parsed?.result?.pane;
 	if (
@@ -183,17 +198,85 @@ function buildWorktreeCreateArgs(
 	];
 }
 
-export function createHerdrSurface(name: string, cwd = process.cwd()): string {
-	// Legacy tab mode targets the caller workspace explicitly; Herdr's
-	// implicit default may be another workspace.
-	const { workspace_id: workspaceId } = getHerdrCurrentPaneInfo();
-	const output = herdrExec(buildTabCreateArgs(name, cwd, workspaceId));
-	const paneId = extractHerdrRootPaneId(output, "tab create");
+async function mutate<T>(
+	args: string[],
+	deadline: Deadline,
+	uncertainty: UncertainAcquisition,
+	parse: (output: string) => T,
+	signal?: AbortSignal,
+): Promise<T> {
+	signal?.throwIfAborted();
+	const timeout = deadline.remainingMs();
+	let output: string | undefined;
 	try {
-		herdrExec(["pane", "rename", paneId, name]);
-	} catch {
-		// Optional — pane label is cosmetic.
+		output = await herdrExecAsync(args, timeout);
+		return parse(output);
+	} catch (error) {
+		if (error instanceof HerdrClientError) {
+			if (error.kind === "not-spawned") throw error;
+			output ??= error.stdout;
+		}
+		// Untimely/partial receipts can name retained resources, never authorize
+		// late dispatch, adoption by label, or automatic deletion.
+		const result = parseHerdrJson(output ?? "")?.result;
+		const paneId = result?.root_pane?.pane_id ?? result?.pane?.pane_id;
+		if (uncertainty.kind === "surface-create" && isNonEmptyString(paneId))
+			uncertainty = { ...uncertainty, observedSurfaceId: paneId };
+		if (
+			uncertainty.kind === "worktree-create" &&
+			isNonEmptyString(result?.worktree?.path) &&
+			isNonEmptyString(result?.worktree?.branch)
+		) {
+			const recovered: RecoveredWorktreeProvisioning = {
+				path: result.worktree.path,
+				branch: result.worktree.branch,
+			};
+			if (isNonEmptyString(result.workspace?.workspace_id))
+				recovered.workspaceId = result.workspace.workspace_id;
+			if (isNonEmptyString(paneId)) {
+				recovered.paneId = paneId;
+				placement.retained.add(paneId);
+			}
+			uncertainty = { ...uncertainty, recovered };
+		}
+		throw new AcquisitionUncertainError(
+			`Herdr acquisition uncertain; no fallback is safe. Observed acquisition: ${JSON.stringify(uncertainty)}. ${error instanceof Error ? error.message : String(error)}`,
+			uncertainty,
+			{ cause: error },
+		);
 	}
+}
+
+async function renamePane(paneId: string, name: string): Promise<void> {
+	try {
+		await herdrExecAsync(
+			["pane", "rename", paneId, name],
+			HERDR_COSMETIC_TIMEOUT_MS,
+		);
+	} catch {
+		/* cosmetic; never lose returned ownership */
+	}
+}
+
+export async function createHerdrSurface(
+	name: string,
+	cwd = process.cwd(),
+	control?: AcquisitionControl,
+): Promise<string> {
+	const deadline = Deadline.after(HERDR_PLACEMENT_TIMEOUT_MS);
+	const paneId = await withPlacement(deadline, control?.signal, async () => {
+		const { workspace_id: workspaceId } = await getHerdrCurrentPaneInfo(
+			deadline.remainingMs(),
+		);
+		return mutate(
+			buildTabCreateArgs(name, cwd, workspaceId),
+			deadline,
+			{ kind: "surface-create", placement: "tab", workspaceId },
+			(output) => extractHerdrRootPaneId(output, "tab create"),
+			control?.signal,
+		);
+	});
+	await renamePane(paneId, name);
 	return paneId;
 }
 
@@ -201,6 +284,8 @@ interface OwnedAgentsTab {
 	workspaceId: string;
 	panes: Set<string>;
 	retainedPaneId?: string;
+	/** An unproven split may still consume capacity; never reuse this tab. */
+	uncertainSplit?: AcquisitionUncertainError;
 }
 
 // In-memory ownership survives /reload, not process restart. Separate parent
@@ -214,6 +299,47 @@ const agentsTabs = (placementGlobal[agentsTabsKey] ??= new Map<
 	string,
 	OwnedAgentsTab
 >());
+
+const placementKey = Symbol.for("pi-herdr-subagents:placement-queue");
+// SAFETY: only this module owns this reload-surviving queue and retention set.
+const queueGlobal = globalThis as typeof globalThis & {
+	[placementKey]?: { tail: Promise<void>; retained: Set<string> };
+};
+const placement = (queueGlobal[placementKey] ??= {
+	tail: Promise.resolve(),
+	retained: new Set<string>(),
+});
+
+/** Queue time counts. A cancelled/expired queued job can never dispatch later. */
+function withPlacement<T>(
+	deadline: Deadline,
+	signal: AbortSignal | undefined,
+	action: () => Promise<T>,
+): Promise<T> {
+	return new Promise((resolve, reject) => {
+		let abandoned = false;
+		const abandon = () => {
+			abandoned = true;
+			reject(signal?.reason ?? new Error("Placement deadline exceeded"));
+		};
+		const timer = setTimeout(abandon, deadline.remainingMs());
+		signal?.addEventListener("abort", abandon, { once: true });
+		if (signal?.aborted) abandon();
+		const job = placement.tail.then(async () => {
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", abandon);
+			if (abandoned) return;
+			try {
+				deadline.remainingMs();
+				signal?.throwIfAborted();
+				resolve(await action());
+			} catch (error) {
+				reject(error);
+			}
+		});
+		placement.tail = job.catch(() => {});
+	});
+}
 
 function canonicalPath(path: string): string {
 	try {
@@ -231,12 +357,16 @@ function containsCwd(root: string, cwd: string): boolean {
 	);
 }
 
-function placementPanes(): Array<{
-	pane_id: string;
-	tab_id: string;
-	workspace_id: string;
-}> {
-	const parsed = parseHerdrJson(herdrExec(["pane", "list"]));
+async function placementPanes(timeout?: number): Promise<
+	Array<{
+		pane_id: string;
+		tab_id: string;
+		workspace_id: string;
+	}>
+> {
+	const parsed = parseHerdrJson(
+		await herdrExecAsync(["pane", "list"], timeout),
+	);
 	const panes = parsed?.result?.panes;
 	if (
 		parsed?.result?.type !== "pane_list" ||
@@ -253,89 +383,113 @@ function placementPanes(): Array<{
 	return panes;
 }
 
-export function createHerdrGroupedSurface(
+export async function createHerdrGroupedSurface(
 	name: string,
 	cwd: string,
 	maxPerTab: number,
 	direction: "right" | "down",
-): string {
-	const callerWorkspace = getHerdrCurrentPaneInfo().workspace_id;
-	const parsed = parseHerdrJson(herdrExec(["workspace", "list"]));
-	const workspaces = parsed?.result?.workspaces;
-	if (parsed?.result?.type !== "workspace_list" || !Array.isArray(workspaces)) {
-		throw new Error("Unexpected herdr workspace list output for placement");
-	}
-	const panes = placementPanes();
-	const target = canonicalPath(cwd);
-	let workspaceId = callerWorkspace;
-	let matchLength = -1;
-	for (const workspace of workspaces) {
-		if (!isString(workspace?.workspace_id))
-			throw new Error("Unexpected herdr workspace identity");
-		// Herdr exposes checkout ownership, but no stable non-Git workspace root.
-		// A shell's incidental cwd is not a workspace association.
-		const checkout = workspace.worktree?.checkout_path;
-		if (!isString(checkout)) continue;
-		const canonical = canonicalPath(checkout);
+	control?: AcquisitionControl,
+): Promise<string> {
+	const deadline = Deadline.after(HERDR_PLACEMENT_TIMEOUT_MS);
+	const acquired = await withPlacement(deadline, control?.signal, async () => {
+		const callerWorkspace = (
+			await getHerdrCurrentPaneInfo(deadline.remainingMs())
+		).workspace_id;
+		const parsed = parseHerdrJson(
+			await herdrExecAsync(["workspace", "list"], deadline.remainingMs()),
+		);
+		const workspaces = parsed?.result?.workspaces;
 		if (
-			containsCwd(canonical, target) &&
-			(canonical.length > matchLength ||
-				(canonical.length === matchLength &&
-					workspace.workspace_id === callerWorkspace))
+			parsed?.result?.type !== "workspace_list" ||
+			!Array.isArray(workspaces)
 		) {
-			workspaceId = workspace.workspace_id;
-			matchLength = canonical.length;
+			throw new Error("Unexpected herdr workspace list output for placement");
 		}
-	}
-
-	// The entire inspect/create/record window is synchronous, before launch's
-	// first await. Overlapping launches in this parent cannot overbook a tab.
-	let paneId: string | undefined;
-	for (const [tabId, owned] of agentsTabs) {
-		if (owned.workspaceId !== workspaceId) continue;
-		const live = panes.filter(
-			(pane) => pane.tab_id === tabId && pane.workspace_id === workspaceId,
-		);
-		if (live.length === 0) {
-			agentsTabs.delete(tabId);
-			continue;
-		}
-		if (live.length >= maxPerTab) continue;
-		// The tab ID remains ours even when only user-added panes survive.
-		const anchor =
-			live.find((pane) => owned.panes.has(pane.pane_id)) ?? live[0];
-		paneId = extractHerdrPaneId(
-			herdrExec(buildPaneSplitArgs(anchor.pane_id, direction, cwd)),
-			"pane split",
-		);
-		owned.panes.add(paneId);
-		break;
-	}
-	if (!paneId) {
-		const count = [...agentsTabs.values()].filter(
-			(tab) => tab.workspaceId === workspaceId,
-		).length;
-		const label = count === 0 ? "Agents" : `Agents ${count + 1}`;
-		const output = herdrExec(buildTabCreateArgs(label, cwd, workspaceId));
-		paneId = extractHerdrRootPaneId(output, "tab create");
-		const tabId = parseHerdrJson(output)?.result?.tab?.tab_id;
-		if (!isString(tabId) || !tabId) {
-			// Only the explicitly returned pane is ours to roll back.
-			try {
-				herdrExec(["pane", "close", paneId]);
-			} catch {
-				/* preserve parse error */
+		const panes = await placementPanes(deadline.remainingMs());
+		const target = canonicalPath(cwd);
+		let workspaceId = callerWorkspace;
+		let matchLength = -1;
+		for (const workspace of workspaces) {
+			if (!isString(workspace?.workspace_id))
+				throw new Error("Unexpected herdr workspace identity");
+			// Herdr exposes checkout ownership, but no stable non-Git workspace root.
+			// A shell's incidental cwd is not a workspace association.
+			const checkout = workspace.worktree?.checkout_path;
+			if (!isString(checkout)) continue;
+			const canonical = canonicalPath(checkout);
+			if (
+				containsCwd(canonical, target) &&
+				(canonical.length > matchLength ||
+					(canonical.length === matchLength &&
+						workspace.workspace_id === callerWorkspace))
+			) {
+				workspaceId = workspace.workspace_id;
+				matchLength = canonical.length;
 			}
-			throw new Error("Unexpected herdr tab create identity");
 		}
-		agentsTabs.set(tabId, { workspaceId, panes: new Set([paneId]) });
-	}
-	try {
-		herdrExec(["pane", "rename", paneId, name]);
-	} catch {
-		/* cosmetic */
-	}
-	return paneId;
+
+		// Only inspect/create/record holds the reload-shared placement reservation.
+		let paneId: string | undefined;
+		for (const [tabId, owned] of agentsTabs) {
+			if (owned.workspaceId !== workspaceId || owned.uncertainSplit) continue;
+			const live = panes.filter(
+				(pane) => pane.tab_id === tabId && pane.workspace_id === workspaceId,
+			);
+			if (live.length === 0) {
+				agentsTabs.delete(tabId);
+				continue;
+			}
+			if (live.length >= maxPerTab) continue;
+			// The tab ID remains ours even when only user-added panes survive.
+			const anchor =
+				live.find((pane) => owned.panes.has(pane.pane_id)) ?? live[0];
+			try {
+				paneId = await mutate(
+					buildPaneSplitArgs(anchor.pane_id, direction, cwd),
+					deadline,
+					{
+						kind: "surface-create",
+						placement: "split",
+						workspaceId,
+						anchorSurfaceId: anchor.pane_id,
+					},
+					(output) => extractHerdrPaneId(output, "pane split"),
+					control?.signal,
+				);
+			} catch (error) {
+				if (isAcquisitionUncertainError(error)) owned.uncertainSplit = error;
+				throw error;
+			}
+			owned.panes.add(paneId);
+			break;
+		}
+		if (!paneId) {
+			const count = [...agentsTabs.values()].filter(
+				(tab) => tab.workspaceId === workspaceId,
+			).length;
+			const label = count === 0 ? "Agents" : `Agents ${count + 1}`;
+			const created = await mutate(
+				buildTabCreateArgs(label, cwd, workspaceId),
+				deadline,
+				{ kind: "surface-create", placement: "tab", workspaceId },
+				(output) => ({
+					paneId: extractHerdrRootPaneId(output, "tab create"),
+					tabId: parseHerdrJson(output)?.result?.tab?.tab_id,
+				}),
+				control?.signal,
+			);
+			paneId = created.paneId;
+			// A known pane remains owned even when optional grouping metadata is absent.
+			if (isString(created.tabId) && created.tabId)
+				agentsTabs.set(created.tabId, {
+					workspaceId,
+					panes: new Set([paneId]),
+				});
+		}
+		return paneId;
+	});
+	await renamePane(acquired, name);
+	return acquired;
 }
 
 /** Worktree records returned by `herdr worktree list`. */
@@ -392,20 +546,20 @@ export function buildWorktreeRemoveArgs(workspaceId: string): string[] {
 	return ["worktree", "remove", "--workspace", workspaceId];
 }
 
-export function removeHerdrWorktree(
+export async function removeHerdrWorktree(
 	workspaceId: string,
 	timeout?: number,
-): void {
-	herdrExec(buildWorktreeRemoveArgs(workspaceId), timeout);
+): Promise<void> {
+	await herdrExecAsync(buildWorktreeRemoveArgs(workspaceId), timeout);
 }
 
-export function listHerdrWorktrees(
+export async function listHerdrWorktrees(
 	cwd?: string,
 	timeout?: number,
-): HerdrWorktreeInfo[] {
+): Promise<HerdrWorktreeInfo[]> {
 	const args = ["worktree", "list"];
 	if (cwd) args.push("--cwd", cwd);
-	return parseHerdrWorktreeList(herdrExec(args, timeout));
+	return parseHerdrWorktreeList(await herdrExecAsync(args, timeout));
 }
 
 function parseHerdrPaneList(output: string, workspaceId: string): string[] {
@@ -424,18 +578,22 @@ function parseHerdrPaneList(output: string, workspaceId: string): string[] {
 		.filter(isString);
 }
 
-function recoverHerdrWorktree(
+async function recoverHerdrWorktree(
 	cwd: string,
 	branch: string,
-): HerdrWorktreeSurface | HerdrWorktreeInfo | undefined {
-	const matches = listHerdrWorktrees(cwd).filter(
-		(worktree) => worktree.branch === branch,
-	);
+): Promise<HerdrWorktreeSurface | HerdrWorktreeInfo | undefined> {
+	const deadline = Deadline.after(HERDR_RECONCILE_TIMEOUT_MS);
+	const matches = (
+		await listHerdrWorktrees(cwd, deadline.cappedAt(3_000).remainingMs())
+	).filter((worktree) => worktree.branch === branch);
 	if (matches.length !== 1) return undefined;
 	const worktree = matches[0];
 	if (!worktree.workspaceId) return worktree;
 	const panes = parseHerdrPaneList(
-		herdrExec(["pane", "list", "--workspace", worktree.workspaceId]),
+		await herdrExecAsync(
+			["pane", "list", "--workspace", worktree.workspaceId],
+			deadline.cappedAt(3_000).remainingMs(),
+		),
 		worktree.workspaceId,
 	);
 	if (panes.length !== 1) return worktree;
@@ -447,38 +605,57 @@ function recoverHerdrWorktree(
 	};
 }
 
-function retainWorktreeTab(
+async function retainWorktreeTab(
 	worktree: HerdrWorktreeSurface,
 	output: string,
-): HerdrWorktreeSurface {
-	const returnedTabId = parseHerdrJson(output)?.result?.tab?.tab_id;
-	const tabId =
-		isString(returnedTabId) && returnedTabId
-			? returnedTabId
-			: placementPanes().find(
-					(pane) =>
-						pane.pane_id === worktree.paneId &&
-						pane.workspace_id === worktree.workspaceId,
-				)?.tab_id;
-	if (tabId) {
-		agentsTabs.set(tabId, {
-			workspaceId: worktree.workspaceId,
-			panes: new Set([worktree.paneId]),
-			retainedPaneId: worktree.paneId,
+	diagnostics: string[],
+	deadline: Deadline,
+): Promise<void> {
+	// Protect the root before the first await, independently of optional grouping.
+	placement.retained.add(worktree.paneId);
+	try {
+		const tabId = await withPlacement(deadline, undefined, async () => {
+			const returned = parseHerdrJson(output)?.result?.tab?.tab_id;
+			const id =
+				isString(returned) && returned
+					? returned
+					: (await placementPanes(deadline.remainingMs())).find(
+							(pane) =>
+								pane.pane_id === worktree.paneId &&
+								pane.workspace_id === worktree.workspaceId,
+						)?.tab_id;
+			if (id) {
+				const owned = agentsTabs.get(id) ?? {
+					workspaceId: worktree.workspaceId,
+					panes: new Set<string>(),
+				};
+				owned.panes.add(worktree.paneId);
+				owned.retainedPaneId = worktree.paneId;
+				agentsTabs.set(id, owned);
+			}
+			return id;
 		});
-		try {
-			herdrExec(["tab", "rename", tabId, "Agents"]);
-		} catch {
-			/* cosmetic */
+		if (tabId) {
+			try {
+				await herdrExecAsync(
+					["tab", "rename", tabId, "Agents"],
+					deadline.cappedAt(HERDR_COSMETIC_TIMEOUT_MS).remainingMs(),
+				);
+			} catch {
+				/* cosmetic */
+			}
 		}
+	} catch (error) {
+		diagnostics.push(
+			`Retained worktree grouping unavailable: ${String(error)}`,
+		);
 	}
-	return worktree;
 }
 
 /** Each launch snapshot: `worktree list` before and after create, and the opened workspace's `pane list`. */
 export const OPENED_PRIMARY_SNAPSHOT_TIMEOUT_MS = 3_000;
 export const OPENED_PRIMARY_SNAPSHOT_CALLS = 3;
-/** Synchronous launch blocking if every snapshot runs to its timeout. */
+/** Snapshot wall time if every read runs to its timeout; the event loop stays responsive. */
 export const OPENED_PRIMARY_SNAPSHOT_WORST_CASE_MS =
 	OPENED_PRIMARY_SNAPSHOT_CALLS * OPENED_PRIMARY_SNAPSHOT_TIMEOUT_MS;
 
@@ -523,15 +700,15 @@ function parseHerdrWorktreeSource(output: string): HerdrWorktreeSource {
 	return info;
 }
 
-function readHerdrWorktreeSource(
+async function readHerdrWorktreeSource(
 	cwd: string,
 	timeout: number,
 	phase: SnapshotPhase,
 	diagnostics: string[],
-): HerdrWorktreeSource | undefined {
+): Promise<HerdrWorktreeSource | undefined> {
 	try {
 		return parseHerdrWorktreeSource(
-			herdrExec(["worktree", "list", "--cwd", cwd], timeout),
+			await herdrExecAsync(["worktree", "list", "--cwd", cwd], timeout),
 		);
 	} catch (error) {
 		snapshotFailure(phase, error, diagnostics);
@@ -569,14 +746,17 @@ function parseClaimedPanes(output: string, workspaceId: string): ClaimedPane[] {
 	return panes;
 }
 
-function readPrimaryTerminalId(
+async function readPrimaryTerminalId(
 	workspaceId: string,
 	timeout: number,
 	diagnostics: string[],
-): string | undefined {
+): Promise<string | undefined> {
 	try {
 		const panes = parseClaimedPanes(
-			herdrExec(["pane", "list", "--workspace", workspaceId], timeout),
+			await herdrExecAsync(
+				["pane", "list", "--workspace", workspaceId],
+				timeout,
+			),
 			workspaceId,
 		);
 		return panes.length === 1 ? panes[0].terminalId : undefined;
@@ -586,14 +766,14 @@ function readPrimaryTerminalId(
 	}
 }
 
-function openedPrimaryClaim(
+async function openedPrimaryClaim(
 	source: HerdrWorktreeSource | undefined,
 	timeout: number,
 	diagnostics: string[],
-): PrimaryWorkspaceClaim | undefined {
+): Promise<PrimaryWorkspaceClaim | undefined> {
 	if (!source?.primaryWorkspaceId || !source.repoKey || !source.checkoutPath)
 		return undefined;
-	const terminalId = readPrimaryTerminalId(
+	const terminalId = await readPrimaryTerminalId(
 		source.primaryWorkspaceId,
 		timeout,
 		diagnostics,
@@ -615,58 +795,88 @@ function withDiagnostics(
 	return diagnostics.length ? { ...worktree, diagnostics } : worktree;
 }
 
-export function createHerdrWorktree(
+export async function createHerdrWorktree(
 	name: string,
 	cwd: string,
 	branch: string,
 	base: string,
 	snapshotTimeoutMs = OPENED_PRIMARY_SNAPSHOT_TIMEOUT_MS,
-): HerdrWorktreeSurface {
-	// A failed before-snapshot claims nothing and skips the later snapshots.
-	// Herdr does not report which workspace create opened, so a workspace that
-	// appears during a long checkout can be misattributed. Removal only
-	// suggests closing it; it never closes the workspace.
+	control?: AcquisitionControl,
+): Promise<HerdrWorktreeSurface> {
+	const deadline = Deadline.after(HERDR_WORKTREE_TIMEOUT_MS);
 	const diagnostics: string[] = [];
-	const before = readHerdrWorktreeSource(
+	const before = await readHerdrWorktreeSource(
 		cwd,
-		snapshotTimeoutMs,
+		deadline.cappedAt(snapshotTimeoutMs).remainingMs(),
 		"before create",
 		diagnostics,
 	);
-	const output = herdrExec(buildWorktreeCreateArgs(name, cwd, branch, base));
-	const after =
-		before && !before.primaryWorkspaceId
-			? readHerdrWorktreeSource(
-					cwd,
-					snapshotTimeoutMs,
-					"after create",
-					diagnostics,
-				)
-			: undefined;
-	const claim = openedPrimaryClaim(after, snapshotTimeoutMs, diagnostics);
-	if (claim) rememberOpenedPrimaryWorkspace(claim);
+	let created: { worktree: HerdrWorktreeSurface; output: string };
 	try {
-		return withDiagnostics(
-			retainWorktreeTab(extractHerdrWorktree(output), output),
-			diagnostics,
+		created = await mutate(
+			buildWorktreeCreateArgs(name, cwd, branch, base),
+			deadline,
+			{ kind: "worktree-create", sourceCwd: cwd, branch },
+			(output) => {
+				const worktree = extractHerdrWorktree(output);
+				if (worktree.branch !== branch)
+					throw new Error("Herdr returned a different worktree branch");
+				return { worktree, output };
+			},
+			control?.signal,
 		);
-	} catch (parseError) {
+	} catch (error) {
+		if (!isAcquisitionUncertainError(error)) throw error;
 		let recovered: HerdrWorktreeSurface | HerdrWorktreeInfo | undefined;
 		try {
-			recovered = recoverHerdrWorktree(cwd, branch);
+			recovered = await recoverHerdrWorktree(cwd, branch);
 		} catch {
-			throw parseError;
+			/* original error remains authoritative */
 		}
-		if (recovered?.workspaceId && "paneId" in recovered)
-			return withDiagnostics(retainWorktreeTab(recovered, output), diagnostics);
-		if (recovered) {
-			throw new HerdrWorktreeCreateError(
-				`Herdr created branch ${branch}, but its workspace response was incomplete`,
-				recovered,
-			);
-		}
-		throw parseError;
+		if (recovered && "paneId" in recovered)
+			placement.retained.add(recovered.paneId);
+		// Reconciliation is retention evidence, never permission for late Pi dispatch.
+		throw new AcquisitionUncertainError(
+			`${error.message}${recovered ? `; recovery evidence (not permission to relaunch): ${JSON.stringify(recovered)}` : ""}`,
+			{
+				kind: "worktree-create",
+				sourceCwd: cwd,
+				branch,
+				recovered:
+					error.uncertainty.kind === "worktree-create"
+						? (error.uncertainty.recovered ?? recovered)
+						: recovered,
+			},
+			{ cause: error },
+		);
 	}
+	placement.retained.add(created.worktree.paneId);
+	try {
+		const after =
+			before && !before.primaryWorkspaceId
+				? await readHerdrWorktreeSource(
+						cwd,
+						deadline.cappedAt(snapshotTimeoutMs).remainingMs(),
+						"after create",
+						diagnostics,
+					)
+				: undefined;
+		const claim = await openedPrimaryClaim(
+			after,
+			deadline.cappedAt(snapshotTimeoutMs).remainingMs(),
+			diagnostics,
+		);
+		if (claim) rememberOpenedPrimaryWorkspace(claim);
+	} catch (error) {
+		snapshotFailure("after create", error, diagnostics);
+	}
+	await retainWorktreeTab(
+		created.worktree,
+		created.output,
+		diagnostics,
+		deadline,
+	);
+	return withDiagnostics(created.worktree, diagnostics);
 }
 
 interface DecodedPrimaryWorkspace {
@@ -835,19 +1045,28 @@ export async function reportOpenedPrimaryWorkspace(
 	};
 }
 
-export function createHerdrSurfaceSplit(
+export async function createHerdrSurfaceSplit(
 	name: string,
 	direction: "right" | "down",
 	cwd = process.cwd(),
-): string {
+	control?: AcquisitionControl,
+): Promise<string> {
+	const deadline = Deadline.after(HERDR_PLACEMENT_TIMEOUT_MS);
 	const parentPaneId = getHerdrParentPaneId();
-	const output = herdrExec(buildPaneSplitArgs(parentPaneId, direction, cwd));
-	const paneId = extractHerdrPaneId(output, "pane split");
-	try {
-		herdrExec(["pane", "rename", paneId, name]);
-	} catch {
-		// Optional.
-	}
+	const paneId = await withPlacement(deadline, control?.signal, () =>
+		mutate(
+			buildPaneSplitArgs(parentPaneId, direction, cwd),
+			deadline,
+			{
+				kind: "surface-create",
+				placement: "split",
+				anchorSurfaceId: parentPaneId,
+			},
+			(output) => extractHerdrPaneId(output, "pane split"),
+			control?.signal,
+		),
+	);
+	await renamePane(paneId, name);
 	return paneId;
 }
 
@@ -880,60 +1099,91 @@ export async function readHerdrScreenAsync(
 	]);
 }
 
-export function sendHerdrCommand(surface: string, command: string): void {
-	// pane run sends the text and Enter in a single socket request, avoiding
-	// a race where Enter could arrive before the text is fully processed.
-	herdrExec(["pane", "run", surface, command]);
+export async function sendHerdrCommand(
+	surface: string,
+	command: string,
+): Promise<void> {
+	// Dispatch is a mutation, not a best-effort cosmetic operation.
+	await mutate(
+		["pane", "run", surface, command],
+		Deadline.after(10_000),
+		{ kind: "command-dispatch", surfaceId: surface },
+		(output) => {
+			const response = parseHerdrJson(output);
+			if (
+				(!isNonEmptyString(response?.result?.type) &&
+					response?.result?.ok !== true) ||
+				response.error
+			)
+				throw new Error(`Unexpected herdr pane run output: ${output}`);
+		},
+	);
 }
 
-export function sendHerdrKeys(surface: string, keys: string): void {
-	herdrExec(["pane", "send-keys", surface, keys]);
+export async function sendHerdrKeys(
+	surface: string,
+	keys: string,
+): Promise<void> {
+	await herdrExecAsync(["pane", "send-keys", surface, keys]);
 }
 
-export function sendHerdrEscape(surface: string): void {
-	sendHerdrKeys(surface, "Escape");
+export function sendHerdrEscape(surface: string): Promise<void> {
+	return sendHerdrKeys(surface, "Escape");
 }
 
-export function closeHerdrSurface(surface: string): void {
-	for (const owned of agentsTabs.values()) {
-		if (owned.retainedPaneId === surface) return;
-	}
-	// Herdr removes a tab when its last pane closes. Never close a whole tab:
-	// a user may have added a pane since our last snapshot.
-	herdrExec(["pane", "close", surface]);
-	// Keep tab ownership until placement observes that the tab is actually gone.
-	for (const owned of agentsTabs.values()) owned.panes.delete(surface);
+export async function closeHerdrSurface(surface: string): Promise<void> {
+	await withPlacement(
+		Deadline.after(HERDR_PLACEMENT_TIMEOUT_MS),
+		undefined,
+		async () => {
+			if (
+				placement.retained.has(surface) ||
+				[...agentsTabs.values()].some(
+					(owned) => owned.retainedPaneId === surface,
+				)
+			)
+				return;
+			// Never close a whole tab: user-added panes must survive.
+			await herdrExecAsync(["pane", "close", surface]);
+			for (const owned of agentsTabs.values()) owned.panes.delete(surface);
+		},
+	);
 }
 
-export function renameHerdrTab(title: string): void {
-	const { tab_id: tabId } = getHerdrCurrentPaneInfo();
-	herdrExec(["tab", "rename", tabId, title]);
+export async function renameHerdrTab(title: string): Promise<void> {
+	const { tab_id: tabId } = await getHerdrCurrentPaneInfo();
+	await herdrExecAsync(["tab", "rename", tabId, title]);
 }
 
-export function renameHerdrWorkspace(title: string): void {
-	const { workspace_id: workspaceId } = getHerdrCurrentPaneInfo();
-	herdrExec(["workspace", "rename", workspaceId, title]);
+export async function renameHerdrWorkspace(title: string): Promise<void> {
+	const { workspace_id: workspaceId } = await getHerdrCurrentPaneInfo();
+	await herdrExecAsync(["workspace", "rename", workspaceId, title]);
 }
 
-export function focusHerdrWorkspace(workspaceId: string): void {
-	herdrExec(["workspace", "focus", workspaceId]);
+export async function focusHerdrWorkspace(workspaceId: string): Promise<void> {
+	await herdrExecAsync(["workspace", "focus", workspaceId]);
 }
 
 async function withMockHerdrExec<T>(
 	mock: HerdrExecForTest,
 	run: () => Promise<T> | T,
 ): Promise<T> {
+	await placement.tail;
 	const previous = swapHerdrExecForTest(mock);
 	agentsTabs.clear();
+	placement.retained.clear();
 	try {
 		return await run();
 	} finally {
+		await placement.tail;
 		swapHerdrExecForTest(previous);
 		agentsTabs.clear();
+		placement.retained.clear();
 	}
 }
 
 export const __herdrTest__ = {
+	withPlacement,
 	buildCurrentPaneArgs,
 	buildTabCreateArgs,
 	buildPaneSplitArgs,

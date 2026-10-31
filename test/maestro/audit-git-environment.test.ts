@@ -115,10 +115,10 @@ test("host Git ignores poisoned repository while preserving linked checkout, inc
 			wrong,
 		);
 		const poisoned = { ...process.env };
-		assert.equal(resolveGitCommit(source, "HEAD"), expected);
-		assert.equal(resolveGitCommit(linked, "HEAD"), expected);
-		assert.equal(resolveWorktreeProvisionCwd(linked), source);
-		const handoff = captureWorktreeHandoff({
+		assert.equal(await resolveGitCommit(source, "HEAD"), expected);
+		assert.equal(await resolveGitCommit(linked, "HEAD"), expected);
+		assert.equal(await resolveWorktreeProvisionCwd(linked), source);
+		const handoff = await captureWorktreeHandoff({
 			path: linked,
 			branch: "linked",
 			baseSha: expected,

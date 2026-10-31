@@ -49,18 +49,11 @@ function launchPiSubagent(
 }
 import {
 	closePane,
-	createSubagentPane,
-	splitCurrentPane,
-	createGroupedSubagentPane,
-	createSubagentWorktree,
 	waitForShellReady,
 	runScriptInPane,
 	shellQuote,
 } from "../../maestro/surfaces/herdr/terminal.ts";
-import {
-	createSubagentPaneFactory,
-	loadPaneConfig,
-} from "../../maestro/core/config/pane-config.ts";
+import { loadPaneConfig } from "../../maestro/core/config/pane-config.ts";
 import subagentsExtension from "../../pi-extension/subagents/index.ts";
 import { isNonEmptyString } from "../../maestro/core/config/type-guards.ts";
 import {
@@ -137,8 +130,8 @@ for (const backend of getAvailableBackends()) {
 		beforeEach(() => {
 			env = createTestEnv(backend);
 		});
-		afterEach(() => {
-			cleanupTestEnv(env);
+		afterEach(async () => {
+			await cleanupTestEnv(env);
 		});
 
 		function request(index: number): FreshPiLaunchRequest {
@@ -243,7 +236,7 @@ writeFileSync(${JSON.stringify(report)}, JSON.stringify(result));
 `,
 				);
 				await waitForShellReady(parent.pane_id);
-				runScriptInPane(
+				await runScriptInPane(
 					parent.pane_id,
 					`PI_CODING_AGENT_DIR=${shellQuote(join(env.dir, ".pi", "agent"))} ${shellQuote(process.execPath)} --experimental-strip-types ${shellQuote(script)}`,
 					{ scriptPath: join(env.dir, "moved-parent.sh") },
@@ -269,8 +262,8 @@ writeFileSync(${JSON.stringify(report)}, JSON.stringify(result));
 					"unmatched non-Git cwd must use the parent's live workspace, not inherited workspace",
 				);
 				await waitForFile(`${result.child.sessionFile}.exit`, 60_000);
-				closePane(result.child.surface);
-				closePane(result.after.pane_id);
+				await closePane(result.child.surface);
+				await closePane(result.after.pane_id);
 				assert.deepEqual(identities(env.workspaceId), sourceBaseline);
 				assert.deepEqual(
 					identities(destination.workspaceId),
@@ -278,7 +271,7 @@ writeFileSync(${JSON.stringify(report)}, JSON.stringify(result));
 				);
 				assert.equal(getFocusedSurface(backend), focus);
 			} finally {
-				cleanupTestEnv(destination);
+				await cleanupTestEnv(destination);
 			}
 		});
 
@@ -321,7 +314,7 @@ writeFileSync(${JSON.stringify(report)}, JSON.stringify(result));
 			);
 			assert.equal(getFocusedSurface(backend), focus);
 
-			closePane(children[0].surface);
+			await closePane(children[0].surface);
 			const userPane = JSON.parse(
 				execFileSync(
 					"herdr",
@@ -346,7 +339,7 @@ writeFileSync(${JSON.stringify(report)}, JSON.stringify(result));
 				"actual user panes consume capacity",
 			);
 			for (const child of [...children.slice(1), sixth])
-				closePane(child.surface);
+				await closePane(child.surface);
 			const remaining = panes(env.workspaceId);
 			assert.deepEqual(
 				new Set(remaining.map((pane) => pane.pane_id)),
@@ -373,7 +366,7 @@ writeFileSync(${JSON.stringify(report)}, JSON.stringify(result));
 				childTabs[0],
 				"the ID-owned Agents tab remains reusable with only a user pane",
 			);
-			closePane(next.surface);
+			await closePane(next.surface);
 			assert.deepEqual(
 				new Set(panes(env.workspaceId).map((pane) => pane.pane_id)),
 				new Set(remaining.map((pane) => pane.pane_id)),
@@ -386,18 +379,11 @@ writeFileSync(${JSON.stringify(report)}, JSON.stringify(result));
 			mkdirSync(configDir);
 			const configPath = join(configDir, "config.json");
 			writeFileSync(configPath, JSON.stringify({ panes: { maxPerTab: 2 } }));
-			const operations = {
-				createPane: createSubagentPaneFactory(
-					loadPaneConfig(configDir, getSubagentsConfigExamplePath()),
-					createSubagentPane,
-					splitCurrentPane,
-					createGroupedSubagentPane,
-				),
-				createWorktree: createSubagentWorktree,
-				waitForShellReady,
-				runScript: runScriptInPane,
-				closePane,
-			};
+			const config = loadPaneConfig(configDir, getSubagentsConfigExamplePath());
+			const operations = launchOperationsFromSurface(
+				new HerdrSurfaceProvider({ paneConfig: config }),
+				config,
+			);
 			const children = await Promise.all(
 				Array.from({ length: 5 }, (_, index) =>
 					launchPiSubagent(request(index), operations),
@@ -1007,7 +993,7 @@ writeFileSync(${JSON.stringify(report)}, JSON.stringify(result));
 					)?.tab_id,
 					root.tab_id,
 				);
-				closePane(reviewer.surface);
+				await closePane(reviewer.surface);
 				assert.deepEqual(
 					panes(writer.worktree.workspaceId).map((pane) => pane.pane_id),
 					[writer.surface],
@@ -1100,11 +1086,11 @@ writeFileSync(${JSON.stringify(report)}, JSON.stringify(result));
 					),
 					"checkout ownership must outrank another workspace's shell cwd",
 				);
-				closePane(child.surface);
+				await closePane(child.surface);
 			} finally {
 				if (checkoutWorkspace)
 					execFileSync("herdr", ["workspace", "close", checkoutWorkspace]);
-				cleanupTestEnv(other);
+				await cleanupTestEnv(other);
 			}
 		});
 	});

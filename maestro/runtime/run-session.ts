@@ -3,7 +3,11 @@ import type {
 	ResumeOptions,
 	SpawnOptions,
 } from "../core/harness-adapter.ts";
-import type { SurfaceProvider } from "../core/surface-provider.ts";
+import {
+	isAcquisitionUncertainError,
+	type AcquisitionUncertainError,
+	type SurfaceProvider,
+} from "../core/surface-provider.ts";
 import type {
 	ActivityReadResult,
 	AgentHandle,
@@ -272,8 +276,13 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 						...(task.runtime.fallbacks ?? []),
 					]
 				: [],
-			spawnAttempt: async (spawnOptions) =>
-				wrap(await options.adapter.spawn(spawnOptions)),
+			spawnAttempt: async (spawnOptions, _index, cancelled) =>
+				wrap(
+					await options.adapter.spawn({
+						...spawnOptions,
+						acquisitionSignal: cancelled,
+					}),
+				),
 		};
 	}
 
@@ -359,6 +368,7 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 		if (!prepared)
 			throw new Error(`Task "${entry.task.id}" has no prepared launch.`);
 		const failures: { model: string; error: string }[] = [];
+		let uncertain: AcquisitionUncertainError | undefined;
 		const count = Math.max(1, prepared.candidates.length);
 		while (!entry.suppressed && !entry.cancel && entry.nextCandidate < count) {
 			const index = entry.nextCandidate++;
@@ -375,6 +385,10 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 					model: prepared.candidates[index]?.model ?? "adapter default",
 					error: errorText(error),
 				});
+				if (isAcquisitionUncertainError(error)) {
+					uncertain = error;
+					break;
+				}
 				continue;
 			} finally {
 				entry.acquiring = false;
@@ -383,9 +397,9 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 			// real owner; a cancelled one is terminated as soon as it is registered.
 			register(entry, owner);
 			terminateTransferred(entry);
-			return { owner, failures };
+			return { owner, failures, uncertain: undefined };
 		}
-		return { owner: undefined, failures };
+		return { owner: undefined, failures, uncertain };
 	}
 
 	function notifyCancel(
@@ -492,6 +506,7 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 		const prepared = entry.prepared;
 		return (
 			!entry.suppressed &&
+			!owner.handle.launchFailure &&
 			!(owner.persistent ?? entry.persistent) &&
 			result.evidence?.errorMessage !== undefined &&
 			!!prepared &&
@@ -512,6 +527,16 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 				);
 				result = evidenceResult(owner.handle, evidence);
 			} catch (error) {
+				if (owner.handle.launchFailure && !entry.cancel && !entry.suppressed) {
+					// A broken watcher is not exit evidence for an uncertain launch.
+					// Retain this same owner and retry supervision, never acquisition.
+					try {
+						await owner.adapter.kill(owner.handle);
+					} catch {
+						await new Promise((resolve) => setTimeout(resolve, 1_000));
+						continue;
+					}
+				}
 				result = rejectedResult(owner.handle, error);
 			}
 			// Settle point: intent recorded before this synchronous check wins, and a
@@ -624,6 +649,7 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 					throw new Error(ABORT_MESSAGE);
 				}
 				if (!acquired.owner) {
+					if (acquired.uncertain) throw acquired.uncertain;
 					if (entry.cancel) throw new Error(CANCELLED_BEFORE_LAUNCH);
 					throw new Error(
 						`Subagent could not launch with any configured model. Attempted: ${prepared.candidates.map((candidate) => candidate.model).join(", ")}. ${formatFailures(acquired.failures)}`,
@@ -646,6 +672,7 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 						?.persistent ??
 					false;
 				entry.acquiring = true;
+				resumeOptions.acquisitionSignal = entry.cancelIntent.signal;
 				let owner: OwnedRunAttempt;
 				try {
 					owner = options.operations?.resume

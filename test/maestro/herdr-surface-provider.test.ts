@@ -549,16 +549,20 @@ describe("HerdrSurfaceProvider", () => {
 			},
 			async () => {
 				const provider = new HerdrSurfaceProvider({ paneConfig });
-				await provider.waitForSurfaceAbsence("missing-pane", { timeoutMs: 0 });
+				await assert.rejects(
+					provider.waitForSurfaceAbsence("missing-pane", { timeoutMs: 0 }),
+					/finite and positive/,
+				);
+				await provider.waitForSurfaceAbsence("missing-pane", { timeoutMs: 10 });
 				await assert.rejects(
 					() =>
-						provider.waitForSurfaceAbsence("present-pane", { timeoutMs: 0 }),
+						provider.waitForSurfaceAbsence("present-pane", { timeoutMs: 10 }),
 					/absence unconfirmed/,
 				);
 				await assert.rejects(
 					() =>
 						provider.waitForSurfaceAbsence("unavailable-pane", {
-							timeoutMs: 0,
+							timeoutMs: 10,
 						}),
 					/absence unconfirmed/,
 				);
@@ -587,10 +591,10 @@ describe("HerdrSurfaceProvider", () => {
 			},
 			async () => {
 				const provider = new HerdrSurfaceProvider({ paneConfig });
-				provider.focusWorkspace("workspace-target");
-				provider.setTitle("tab", "Tab Title");
-				provider.setTitle("workspace", "Workspace Title");
-				assert.throws(
+				await provider.focusWorkspace("workspace-target");
+				await provider.setTitle("tab", "Tab Title");
+				await provider.setTitle("workspace", "Workspace Title");
+				await assert.rejects(
 					() => provider.removeWorktreeSurface("workspace-dead"),
 					/remove failed/,
 				);

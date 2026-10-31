@@ -19,7 +19,7 @@ export function createPiPersistentIO(state: {
 	readonly worktreeOperations: WorktreeOperations;
 }): PiPersistentIO {
 	const io: PiPersistentIO = {
-		inspectWorktree: (r) =>
+		inspectWorktree: async (r) =>
 			r.worktree
 				? state.worktreeOperations.captureWorktreeHandoff(r.worktree)
 				: undefined,

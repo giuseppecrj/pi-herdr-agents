@@ -1000,7 +1000,12 @@ describe("Pi launch", () => {
 
 			await assert.rejects(
 				launchPiSubagent(request, operations),
-				(error: Error) => error.message === "original launch error",
+				(error: Error) =>
+					/original launch error; rollback unconfirmed: cleanup error/.test(
+						error.message,
+					) &&
+					error.cause instanceof Error &&
+					error.cause.message === "original launch error",
 			);
 			assert.equal(cleanupAttempts, 1);
 		});

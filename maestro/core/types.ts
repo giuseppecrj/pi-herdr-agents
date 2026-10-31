@@ -172,6 +172,8 @@ export interface SurfaceHandle {
 }
 
 export interface AgentHandle {
+	/** A real acquired owner whose dispatch/rollback is uncertain; never retry. */
+	launchFailure?: string;
 	id: string;
 	name: string;
 	role: string;

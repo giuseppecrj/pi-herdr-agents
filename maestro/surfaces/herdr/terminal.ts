@@ -17,7 +17,7 @@ import {
 	sendHerdrEscape,
 } from "./herdr.ts";
 import {
-	getHerdrPaneProcessInfo,
+	getHerdrPaneProcessInfoAsync,
 	waitForHerdrShellReady,
 	isProcessAlive,
 	inspectHerdrPane,
@@ -50,7 +50,10 @@ function assertTerminalAvailable(): void {
 export { shellQuote };
 
 /** Create a new herdr tab and return its root pane ID. */
-export function createSubagentPane(name: string, cwd?: string): PaneId {
+export function createSubagentPane(
+	name: string,
+	cwd?: string,
+): Promise<PaneId> {
 	assertTerminalAvailable();
 	return createHerdrSurface(name, cwd);
 }
@@ -61,7 +64,7 @@ export function createGroupedSubagentPane(
 	cwd: string,
 	maxPerTab: number,
 	direction: SplitDirection,
-): PaneId {
+): Promise<PaneId> {
 	assertTerminalAvailable();
 	return createHerdrGroupedSurface(name, cwd, maxPerTab, direction);
 }
@@ -72,7 +75,7 @@ export function createSubagentWorktree(
 	cwd: string,
 	branch: string,
 	base: string,
-): import("./herdr.ts").HerdrWorktreeSurface {
+): Promise<import("./herdr.ts").HerdrWorktreeSurface> {
 	assertTerminalAvailable();
 	return createHerdrWorktree(name, cwd, branch, base);
 }
@@ -82,41 +85,41 @@ export function splitCurrentPane(
 	name: string,
 	direction: SplitDirection,
 	cwd?: string,
-): PaneId {
+): Promise<PaneId> {
 	assertTerminalAvailable();
 	return createHerdrSurfaceSplit(name, direction, cwd);
 }
 
-export function renameCurrentTab(title: string): void {
+export function renameCurrentTab(title: string): Promise<void> {
 	assertTerminalAvailable();
-	renameHerdrTab(title);
+	return renameHerdrTab(title);
 }
 
-export function renameCurrentWorkspace(title: string): void {
+export function renameCurrentWorkspace(title: string): Promise<void> {
 	assertTerminalAvailable();
-	renameHerdrWorkspace(title);
+	return renameHerdrWorkspace(title);
 }
 
-export function focusWorkspace(workspaceId: string): void {
+export function focusWorkspace(workspaceId: string): Promise<void> {
 	assertTerminalAvailable();
-	focusHerdrWorkspace(workspaceId);
+	return focusHerdrWorkspace(workspaceId);
 }
 
-export function runInPane(paneId: PaneId, command: string): void {
+export function runInPane(paneId: PaneId, command: string): Promise<void> {
 	assertTerminalAvailable();
-	sendHerdrCommand(paneId, command);
+	return sendHerdrCommand(paneId, command);
 }
 
-export function interruptPane(paneId: PaneId): void {
+export function interruptPane(paneId: PaneId): Promise<void> {
 	assertTerminalAvailable();
-	sendHerdrEscape(paneId);
+	return sendHerdrEscape(paneId);
 }
 
-export function runScriptInPane(
+export async function runScriptInPane(
 	paneId: PaneId,
 	command: string,
 	options?: { scriptPath?: string; scriptPreamble?: string },
-): string {
+): Promise<string> {
 	const scriptPath =
 		options?.scriptPath ??
 		join(
@@ -132,7 +135,7 @@ export function runScriptInPane(
 	scriptLines.push(command);
 	writeFileSync(scriptPath, `${scriptLines.join("\n")}\n`, { mode: 0o755 });
 
-	runInPane(paneId, `bash ${shellQuote(scriptPath)}`);
+	await runInPane(paneId, `bash ${shellQuote(scriptPath)}`);
 	return scriptPath;
 }
 
@@ -172,16 +175,18 @@ export async function inspectPane(
 	return result;
 }
 
-export function closePane(paneId: PaneId): void {
+export function closePane(paneId: PaneId): Promise<void> {
 	assertTerminalAvailable();
-	closeHerdrSurface(paneId);
+	return closeHerdrSurface(paneId);
 }
 
 export type { HerdrPaneProcessInfo };
 
-export function getPaneProcessInfo(paneId: PaneId): HerdrPaneProcessInfo {
+export function getPaneProcessInfo(
+	paneId: PaneId,
+): Promise<HerdrPaneProcessInfo> {
 	assertTerminalAvailable();
-	return getHerdrPaneProcessInfo(paneId);
+	return getHerdrPaneProcessInfoAsync(paneId);
 }
 
 export async function waitForShellReady(

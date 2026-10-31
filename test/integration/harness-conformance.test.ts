@@ -79,9 +79,9 @@ async function fixture(
 	const absenceObservers = new Map<string, () => void>();
 	const wake = new FileWakeRegistry();
 	class TrackedProvider extends HerdrSurfaceProvider {
-		override createWorktreeSurface(opts: CreateWorktreeSurfaceOptions) {
+		override async createWorktreeSurface(opts: CreateWorktreeSurfaceOptions) {
 			try {
-				const result = super.createWorktreeSurface(opts);
+				const result = await super.createWorktreeSurface(opts);
 				ownedWorkspaces.add(result.workspaceId);
 				ownedBuckets.add(dirname(result.path));
 				return result;
@@ -127,7 +127,7 @@ async function fixture(
 				}
 			}
 		} finally {
-			cleanupTestEnv(env);
+			await cleanupTestEnv(env);
 			console.log(
 				`Disposed current-test-owned fixture ${env.workspaceId} ${env.dir}`,
 			);
@@ -258,7 +258,10 @@ async function fixture(
 					}, "interrupted Pi waiting");
 					writeFileSync(gates.get(handle.name)!, "open\n");
 					if (kind === "error") {
-						runInPane(child.surface, "/model pi-integration/account-rejected");
+						await runInPane(
+							child.surface,
+							"/model pi-integration/account-rejected",
+						);
 						await until(
 							() =>
 								getNewEntries(child.sessionFile, 0).some(
@@ -268,9 +271,9 @@ async function fixture(
 								),
 							"deterministic rejected model selection",
 						);
-						runInPane(child.surface, "Return exactly ERROR_COMPLETION");
+						await runInPane(child.surface, "Return exactly ERROR_COMPLETION");
 					} else {
-						runInPane(
+						await runInPane(
 							child.surface,
 							"ONLY call caller_ping with a request for help.",
 						);

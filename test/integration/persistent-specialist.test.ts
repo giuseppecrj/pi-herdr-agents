@@ -100,8 +100,8 @@ for (const backend of backends) {
 			resetProviderRequests();
 		});
 
-		afterEach(() => {
-			cleanupTestEnv(env);
+		afterEach(async () => {
+			await cleanupTestEnv(env);
 			restoreBackend(previousBackend);
 		});
 
@@ -110,11 +110,11 @@ for (const backend of backends) {
 			const startFile = `/tmp/pi-integ-persistent-${id}.txt`;
 			const parentSession = join(env.dir, `persistent-parent-${id}.jsonl`);
 			trackTempFile(env, startFile);
-			const parent = createTrackedSurface(env, `persistent-parent-${id}`);
+			const parent = await createTrackedSurface(env, `persistent-parent-${id}`);
 			await waitForPaneReady(parent);
 			const baselinePanes = new Set(workspacePanes(env.workspaceId));
 
-			startPi(
+			await startPi(
 				parent,
 				env.dir,
 				[

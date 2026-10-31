@@ -1,6 +1,6 @@
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { accessSync, constants, existsSync, statSync } from "node:fs";
+import { delimiter, join } from "node:path";
 import type {
 	HarnessAdapter,
 	ResumeOptions,
@@ -45,6 +45,8 @@ import {
 } from "./launch-operations.ts";
 import {
 	launchPiSubagent,
+	AcquiredPiLaunchError,
+	type PiLaunchRequest,
 	startProcessIdentityCapture,
 	type FreshPiLaunchRequest,
 	type PiRunningChild,
@@ -135,12 +137,15 @@ export class PiHarnessAdapter implements HarnessAdapter {
 			);
 	}
 	isAvailable(): boolean {
-		try {
-			execFileSync("pi", ["--version"], { stdio: "ignore" });
-			return true;
-		} catch {
-			return false;
-		}
+		return (process.env.PATH ?? "").split(delimiter).some((directory) => {
+			try {
+				const path = join(directory, "pi");
+				accessSync(path, constants.X_OK);
+				return statSync(path).isFile();
+			} catch {
+				return false;
+			}
+		});
 	}
 	async spawn(opts: PiSpawnOptions): Promise<AgentHandle> {
 		this.rejectEnvironment(opts.env);
@@ -193,60 +198,57 @@ export class PiHarnessAdapter implements HarnessAdapter {
 		const roleCwd = resolved ? resolved.roleCwd : defaults?.cwd;
 		const id = opts.launchIdentity?.id ?? randomUUID();
 		const taskId = opts.launchIdentity?.taskId ?? randomUUID();
-		const child = await launchPiSubagent(
-			{
-				kind: "fresh",
-				id,
-				name: opts.name,
-				task: opts.task,
-				agent: resolved ? resolved.agent : opts.role.name,
-				cwd,
-				worktree: opts.worktreeRequest,
-				accept: opts.accept,
-				// An omitted override must not force lineage-only/default fork to standalone.
-				fork: opts.session
-					? opts.session.mode === "fork"
-						? true
-						: opts.session.mode === "standalone"
-							? false
-							: undefined
-					: undefined,
-				surface: opts.surface?.id,
-				parent: this.options.parent,
-				runtimePlan:
-					resolved?.runtimePlan ??
-					resolveRuntimePlan(
-						opts.runtime ?? {},
-						defaults ?? {},
-						this.parentRuntime(opts),
-						this.options.modelRegistry,
-					),
-				modelScope: this.options.modelRegistry.scope,
-				behavior: {
-					tools: resolved
-						? resolved.tools
-						: (opts.tools ?? opts.role.allowedTools).join(","),
-					cwd: roleCwd,
-					skills: (opts.behavior?.skills ?? defaults?.skills)?.join(","),
-					deniedTools: [...denied],
-					// `spawning: false` removes the spawning tools, so it always wins.
-					selfSpawn:
-						defaults?.selfSpawn === true && defaults.spawning !== false,
-					autoExit,
-					interactive,
-					persistent,
-					logicalId: opts.launchIdentity?.logicalId ?? id,
-					generationId: opts.launchIdentity?.generationId ?? randomUUID(),
-					taskId,
-					identity: opts.systemPrompt ?? opts.role.systemPrompt,
-					systemPromptMode:
-						opts.behavior?.systemPromptMode ?? defaults?.systemPromptMode,
-					sessionMode:
-						opts.session?.mode ?? defaults?.sessionMode ?? "standalone",
-				},
+		const child = await this.acquireChild({
+			kind: "fresh",
+			acquisitionSignal: opts.acquisitionSignal,
+			id,
+			name: opts.name,
+			task: opts.task,
+			agent: resolved ? resolved.agent : opts.role.name,
+			cwd,
+			worktree: opts.worktreeRequest,
+			accept: opts.accept,
+			// An omitted override must not force lineage-only/default fork to standalone.
+			fork: opts.session
+				? opts.session.mode === "fork"
+					? true
+					: opts.session.mode === "standalone"
+						? false
+						: undefined
+				: undefined,
+			surface: opts.surface?.id,
+			parent: this.options.parent,
+			runtimePlan:
+				resolved?.runtimePlan ??
+				resolveRuntimePlan(
+					opts.runtime ?? {},
+					defaults ?? {},
+					this.parentRuntime(opts),
+					this.options.modelRegistry,
+				),
+			modelScope: this.options.modelRegistry.scope,
+			behavior: {
+				tools: resolved
+					? resolved.tools
+					: (opts.tools ?? opts.role.allowedTools).join(","),
+				cwd: roleCwd,
+				skills: (opts.behavior?.skills ?? defaults?.skills)?.join(","),
+				deniedTools: [...denied],
+				// `spawning: false` removes the spawning tools, so it always wins.
+				selfSpawn: defaults?.selfSpawn === true && defaults.spawning !== false,
+				autoExit,
+				interactive,
+				persistent,
+				logicalId: opts.launchIdentity?.logicalId ?? id,
+				generationId: opts.launchIdentity?.generationId ?? randomUUID(),
+				taskId,
+				identity: opts.systemPrompt ?? opts.role.systemPrompt,
+				systemPromptMode:
+					opts.behavior?.systemPromptMode ?? defaults?.systemPromptMode,
+				sessionMode:
+					opts.session?.mode ?? defaults?.sessionMode ?? "standalone",
 			},
-			this.operations,
-		);
+		});
 		// Launch returns a fully initialized owner; no fallible I/O may separate
 		// command dispatch from tracking (a rejection could start a fallback).
 		return this.track(child);
@@ -259,19 +261,28 @@ export class PiHarnessAdapter implements HarnessAdapter {
 			throw new Error(
 				"Pi resume restores saved tools; tool overrides are not supported",
 			);
-		const child = await launchPiSubagent(
-			{
-				kind: "resume",
-				name: opts.name,
-				sessionFile: opts.sessionId,
-				message: opts.message,
-				parent: this.options.parent,
-				modelScope: this.options.modelRegistry.scope,
-				behavior: { autoExit: opts.autoExit },
-			},
-			this.operations,
-		);
+		const child = await this.acquireChild({
+			kind: "resume",
+			acquisitionSignal: opts.acquisitionSignal,
+			name: opts.name,
+			sessionFile: opts.sessionId,
+			message: opts.message,
+			parent: this.options.parent,
+			modelScope: this.options.modelRegistry.scope,
+			behavior: { autoExit: opts.autoExit },
+		});
 		return this.track(child);
+	}
+	private async acquireChild(
+		request: PiLaunchRequest,
+	): Promise<PiRunningChild> {
+		try {
+			return await launchPiSubagent(request, this.operations);
+		} catch (error) {
+			// The transaction transfers its fully initialized owner, not a made-up handle.
+			if (error instanceof AcquiredPiLaunchError) return error.child;
+			throw error;
+		}
 	}
 	/** Temporary Pi-specific bridge for runtime migration; never infer task delivery from coarse state. */
 	getRunningChild(handle: AgentHandle): PiRunningChild {
@@ -335,7 +346,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 		const child = this.getRunningChild(handle);
 		// A worktree root pane is the retained review workspace (Herdr refuses to
 		// close it): stop only the owned Pi process and keep pane and checkout.
-		if (child.worktree) return this.stopRetainedPi(child);
+		if (child.worktree || !child.ownsSurface) return this.stopRetainedPi(child);
 		let closeError: unknown;
 		try {
 			await this.options.surface.closeSurface(child.surface);
@@ -363,6 +374,9 @@ export class PiHarnessAdapter implements HarnessAdapter {
 	 */
 	private async stopRetainedPi(child: PiRunningChild): Promise<void> {
 		const probe = this.options.processProbe ?? linuxProcessProbe;
+		const retainedDescription = child.worktree
+			? "retained worktree pane"
+			: "caller-provided pane";
 		const timeoutMs = this.options.killTimeoutMs ?? 5_000;
 		const deadline = Date.now() + timeoutMs;
 		const paneGone = async () =>
@@ -394,7 +408,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 			if (!identity) {
 				if (gone) return;
 				throw new Error(
-					`Owned Pi process identity was not captured for retained worktree pane ${child.surface}; nothing was signalled: ${child.processIdentityError ?? (child.processIdentityCapture ? "identity capture is still pending" : "no identity was recorded at launch")}`,
+					`Owned Pi process identity was not captured for ${retainedDescription} ${child.surface}; nothing was signalled: ${child.processIdentityError ?? (child.processIdentityCapture ? "identity capture is still pending" : "no identity was recorded at launch")}`,
 				);
 			}
 		}
@@ -411,7 +425,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 			if (judgeProcessIdentity(verified, probe).kind === "exited")
 				return { kind: "exited" };
 			throw new Error(
-				`Owned Pi process exit unconfirmed in retained worktree pane ${child.surface}: ${after.reason}; process ${verified.pid} was alive when signalled`,
+				`Owned Pi process exit unconfirmed in ${retainedDescription} ${child.surface}: ${after.reason}; process ${verified.pid} was alive when signalled`,
 			);
 		};
 		let state = signal();
@@ -435,7 +449,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 			state = judgeProcessIdentity(identity, probe);
 		}
 		throw new Error(
-			`Owned Pi process exit unconfirmed in retained worktree pane ${child.surface}: ${describeIdentityState(identity, state, signalled, timeoutMs)}`,
+			`Owned Pi process exit unconfirmed in ${retainedDescription} ${child.surface}: ${describeIdentityState(identity, state, signalled, timeoutMs)}`,
 		);
 	}
 	async readOutput(handle: AgentHandle, lines?: number): Promise<string> {
@@ -460,6 +474,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 		};
 		if (
 			this.evidence.has(this.runKey(handle)) ||
+			child.launchFailure ||
 			child.stopState ||
 			child.taskId != null ||
 			child.tasksCompleted == null
@@ -504,32 +519,62 @@ export class PiHarnessAdapter implements HarnessAdapter {
 			const next: CompletionWait = {
 				controller,
 				waiters: 0,
-				promise: waitForCompletion(controller.signal, {
-					intervalMs: 1000,
-					sessionFile: child.sessionFile,
-					requireProcessExit: child.persistent,
-					inspectProcess: () =>
-						child.processIdentity
-							? judgeProcessIdentity(
-									child.processIdentity,
-									this.options.processProbe ?? linuxProcessProbe,
-								).kind
-							: "unknown",
-					waitForNextCheck: registration.wait,
-					readTerminalTail: async () =>
-						this.options.surface.readScreen(child.surface, 5),
-					inspectPane: registration.inspectPane,
-					onLocalEvidence: () =>
-						this.options.onObservation?.(child, "local-evidence"),
-					onPaneInspection: (pane, at) => {
-						child.lifecycle = observePaneInspection(child.lifecycle, pane, at);
-						this.options.onObservation?.(child, "pane");
-					},
-					onTick: () => {
-						this.options.onObservation?.(child, "tick");
-					},
-				})
+				promise: (async () => {
+					if (child.launchFailure) {
+						try {
+							await this.kill(handle);
+							return {
+								reason: "error" as const,
+								exitCode: 1,
+								errorMessage: child.launchFailure,
+								errorSource: "host" as const,
+							};
+						} catch {
+							/* unconfirmed: keep the actual owner supervised and controllable */
+						}
+					}
+					return waitForCompletion(controller.signal, {
+						intervalMs: 1000,
+						sessionFile: child.sessionFile,
+						requireProcessExit: child.persistent || !!child.launchFailure,
+						inspectProcess: () =>
+							child.processIdentity
+								? judgeProcessIdentity(
+										child.processIdentity,
+										this.options.processProbe ?? linuxProcessProbe,
+									).kind
+								: "unknown",
+						waitForNextCheck: registration.wait,
+						readTerminalTail: async () =>
+							// A caller-provided terminal can contain an earlier run's marker.
+							child.launchFailure && !child.ownsSurface && !child.worktree
+								? ""
+								: this.options.surface.readScreen(child.surface, 5),
+						inspectPane: registration.inspectPane,
+						onLocalEvidence: () =>
+							this.options.onObservation?.(child, "local-evidence"),
+						onPaneInspection: (pane, at) => {
+							child.lifecycle = observePaneInspection(
+								child.lifecycle,
+								pane,
+								at,
+							);
+							this.options.onObservation?.(child, "pane");
+						},
+						onTick: () => {
+							this.options.onObservation?.(child, "tick");
+						},
+					});
+				})()
 					.then((result) => {
+						if (child.launchFailure)
+							result = {
+								...result,
+								reason: "error",
+								exitCode: 1,
+								errorMessage: child.launchFailure,
+								errorSource: "host",
+							};
 						const final = existsSync(child.sessionFile)
 							? inspectFinalAssistantMessage(
 									getNewEntries(child.sessionFile, 0),
@@ -547,11 +592,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 							if (final.stopReason === "error" && result.errorMessage)
 								evidence.finalMessage.errorMessage = result.errorMessage;
 						}
-						if (child.worktree)
-							evidence.worktree =
-								this.worktreeOperations().captureWorktreeHandoff(
-									child.worktree,
-								);
+						// RunSession finalization is the single Git handoff capture owner.
 						this.evidence.set(key, evidence);
 						child.lifecycle = markCompletionDetected(
 							child.lifecycle,
@@ -570,11 +611,6 @@ export class PiHarnessAdapter implements HarnessAdapter {
 			wait = next;
 		}
 		return this.joinWait(wait, signal);
-	}
-	private worktreeOperations(): WorktreeOperations {
-		const operations = this.operations.worktree;
-		if (!operations) throw new Error("Worktree operations are unavailable");
-		return operations;
 	}
 	private joinWait(
 		wait: CompletionWait,
@@ -611,6 +647,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 			sessionId: child.sessionFile,
 			surfaceId: child.surface,
 		};
+		if (child.launchFailure) handle.launchFailure = child.launchFailure;
 		if (child.worktree)
 			handle.worktree = {
 				id: child.id,
@@ -620,7 +657,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 				baseSha: child.worktree.baseSha,
 				createdAt: child.startTime,
 				path: child.worktree.path,
-				state: "running",
+				state: child.launchFailure ? "failed" : "running",
 				manifestFile: child.worktree.manifestFile,
 			};
 		return handle;

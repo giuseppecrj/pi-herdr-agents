@@ -44,6 +44,145 @@ import {
 import { createSubagentActivityRecorder } from "../../maestro/adapters/pi/activity-file.ts";
 import { FileWakeRegistry } from "../../maestro/core/wake.ts";
 import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
+import { AcquisitionUncertainError } from "../../maestro/core/surface-provider.ts";
+
+for (const resumed of [false, true])
+	test(`uncertain ${resumed ? "resume" : "dispatch"} with failed rollback transfers the real owner until cancel confirms exit`, () =>
+		fixture(async (f) => {
+			const input = f.input("dispatch-failed");
+			input.plans = [
+				input.plans[0],
+				{ ...input.plans[0], model: "test/two", modelId: "two" },
+			];
+			let dispatches = 0,
+				failClose = true;
+			f.operations.runScript = () => {
+				dispatches++;
+				throw new AcquisitionUncertainError("dispatch response lost", {
+					kind: "command-dispatch",
+					surfaceId: "owned",
+				});
+			};
+			const close = f.provider.closeSurface.bind(f.provider);
+			f.provider.closeSurface = (id) => {
+				if (failClose) throw new Error("rollback unavailable");
+				return close(id);
+			};
+			let handle;
+			if (resumed) {
+				const file = join(f.dir, "resume.jsonl");
+				writeFileSync(
+					file,
+					JSON.stringify({ type: "session", cwd: f.dir }) + "\n",
+				);
+				writeSubagentSessionPolicy(file, { owner: "public", deniedTools: [] });
+				handle = await f.session.resumePi({
+					taskId: input.task.id,
+					sessionPath: file,
+					name: "resume",
+				});
+			} else handle = await f.session.spawnPi(input);
+			assert.equal(f.session.getStarted(input.task.id)?.status, "uncertain");
+			assert.ok(handle.launchFailure);
+			const record = f.session.getRecord(input.task.id)!;
+			assert.equal(record.surface, handle.surfaceId);
+			let delivered = false;
+			const wait = f.session.supervise(
+				handle,
+				f.session.getTask(input.task.id)!,
+			);
+			void wait.then(() => {
+				delivered = true;
+			});
+			await turn();
+			assert.equal(
+				(await f.session.cancel(input.task.id)).status,
+				"unconfirmed",
+			);
+			assert.equal(delivered, false);
+			assert.equal(f.session.getRecord(input.task.id), record);
+			assert.equal(dispatches, 1);
+			failClose = false;
+			assert.equal((await f.session.cancel(input.task.id)).status, "confirmed");
+			assert.equal((await wait).outcome, "killed");
+			assert.equal(f.settled.length, 1);
+			assert.equal(dispatches, 1);
+		}));
+
+test("confirmed rollback of uncertain dispatch still blocks model fallback", () =>
+	fixture(async (f) => {
+		const input = f.input("rollback-confirmed");
+		input.plans = [input.plans[0], { ...input.plans[0], model: "test/two" }];
+		let dispatches = 0;
+		f.operations.runScript = () => {
+			dispatches++;
+			throw new Error("dispatch receipt lost");
+		};
+		const handle = await f.session.spawnPi(input);
+		assert.ok(handle.launchFailure);
+		const result = await f.session.supervise(handle, input.task);
+		assert.equal(result.outcome, "failed");
+		assert.equal(dispatches, 1);
+		assert.equal(f.settled.length, 1);
+		assert.match(f.settled[0].errorMessage!, /dispatch receipt lost/);
+	}));
+
+test("ownerless uncertainty on a running fallback preserves prior provider evidence and never launches the next candidate", () =>
+	fixture(async (f) => {
+		const input = f.input("fallback-uncertain");
+		input.plans = [
+			input.plans[0],
+			{ ...input.plans[0], model: "test/two" },
+			{ ...input.plans[0], model: "test/three" },
+		];
+		const handle = await f.session.spawnPi(input);
+		let attempts = 0;
+		f.operations.createPane = () => {
+			attempts++;
+			throw new AcquisitionUncertainError("remote tab outcome unknown", {
+				kind: "surface-create",
+				placement: "tab",
+			});
+		};
+		const wait = f.session.supervise(handle, input.task);
+		f.complete(f.latest()!, {
+			type: "error",
+			errorMessage: "first provider reason",
+		});
+		await wait;
+		assert.equal(attempts, 1);
+		assert.equal(f.settled.length, 1);
+		assert.match(
+			f.settled[0].errorMessage!,
+			/first provider reason[\s\S]*remote tab outcome unknown/,
+		);
+		assert.deepEqual(f.settled[0].fallbackAttempts, ["test/one", "test/two"]);
+	}));
+
+test("cancel during deferred creation transfers and terminates the returned pane without dispatch", () =>
+	fixture(async (f) => {
+		const input = f.input("creation-cancel");
+		let release!: () => void, entered!: () => void;
+		const started = new Promise<void>((done) => {
+			entered = done;
+		});
+		const gate = new Promise<void>((done) => {
+			release = done;
+		});
+		const create = f.operations.createPane;
+		f.operations.createPane = async (...args) => {
+			entered();
+			await gate;
+			return create(...args);
+		};
+		const launch = f.session.spawnPi(input);
+		await started;
+		assert.equal((await f.session.cancel(input.task.id)).status, "requested");
+		release();
+		await assert.rejects(launch, /cancelled before launch/);
+		assert.equal(f.commands.length, 0);
+		assert.equal(f.provider.listSurfaces().length, 0);
+	}));
 
 test("Task15 detached activity observation works before any factory and retains lifecycle rules", () => {
 	const dir = mkdtempSync(join(tmpdir(), "detached-activity-"));
@@ -513,7 +652,7 @@ test("injected worktree finalization precedes delivery and preserves inspection/
 		const calls: string[] = [];
 		const worktreeOps = createWorktreeOperations();
 		const write = worktreeOps.persistWorktreeResult;
-		worktreeOps.captureWorktreeHandoff = (worktree) => {
+		worktreeOps.captureWorktreeHandoff = async (worktree) => {
 			calls.push("capture");
 			return {
 				...worktree,
@@ -546,7 +685,6 @@ test("injected worktree finalization precedes delivery and preserves inspection/
 		f.options.hooks.onSettled = (_record, result) => {
 			calls.push("delivery");
 			assert.deepEqual(calls, [
-				"capture",
 				"capture",
 				"finalize:ready_for_review",
 				"delivery",
@@ -1200,11 +1338,11 @@ for (const persistent of [false, true])
 				input.plans[0],
 				{ ...input.plans[0], model: "test/two", modelId: "two" },
 			];
-			const run = f.operations.runScript;
+			const create = f.operations.createPane;
 			let launches = 0;
-			f.operations.runScript = (...args) => {
+			f.operations.createPane = (...args) => {
 				if (launches++ === 0) throw new Error("first launch raw");
-				return run(...args);
+				return create(...args);
 			};
 			const h = await f.session.spawnPi(input);
 			const r = f.latest()!;
@@ -1227,7 +1365,7 @@ test("exhausted running fallback acquisition keeps prior provider error and atte
 		];
 		const h = await f.session.spawnPi(input);
 		const r = f.latest()!;
-		f.operations.runScript = () => {
+		f.operations.createPane = () => {
 			throw new Error("fallback raw launch failure");
 		};
 		const wait = f.session.supervise(h, input.task);
@@ -1297,11 +1435,11 @@ test("per-attempt normalization changes role and opaque generation, never the va
 			};
 		};
 		// Initial acquisition failure still advances when that effective attempt was persistent.
-		const run = f.operations.runScript;
+		const create = f.operations.createPane;
 		let launches = 0;
-		f.operations.runScript = (...args) => {
+		f.operations.createPane = (...args) => {
 			if (launches++ === 0) throw new Error("launch fails");
-			return run(...args);
+			return create(...args);
 		};
 		const h = await f.session.spawnPi(input);
 		const r = f.latest()!;

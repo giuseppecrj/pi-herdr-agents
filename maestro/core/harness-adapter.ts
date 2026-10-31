@@ -22,6 +22,8 @@ import type {
 } from "./types.ts";
 
 export interface SpawnOptions {
+	/** Launch admission only, never proof of remote cancellation. */
+	acquisitionSignal?: AbortSignal;
 	name: string;
 	/** Full task text for the agent. */
 	task: string;
@@ -57,6 +59,7 @@ export interface SpawnOptions {
 
 // pi-herdr-agents extension
 export interface ResumeOptions {
+	acquisitionSignal?: AbortSignal;
 	name: string;
 	/** Harness session reference to resume; for Pi, the session file path. */
 	sessionId: string;

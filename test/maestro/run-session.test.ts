@@ -246,6 +246,32 @@ function retired(f: ReturnType<typeof fixture>, t: Task) {
 	assert.equal(f.session.getTask(t.id), undefined);
 }
 
+it("an uncertain owner survives a rejected watcher until termination is independently confirmed", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	const f = fixture();
+	const taskInput = routed();
+	const handle = await f.session.spawn(taskInput);
+	handle.launchFailure = "dispatch receipt lost";
+	f.adapter.completionError = new Error("watcher unavailable");
+	let confirmed = false;
+	f.adapter.kill = async () => {
+		if (!confirmed) throw new Error("exit unconfirmed");
+	};
+	let settled = false;
+	const wait = f.session.supervise(handle, taskInput).then((result) => {
+		settled = true;
+		return result;
+	});
+	await new Promise<void>((resolve) => setImmediate(resolve));
+	assert.equal(settled, false);
+	assert.equal(f.session.getHandle(taskInput.id), handle);
+	assert.deepEqual(f.provider.closes, []);
+	confirmed = true;
+	t.mock.timers.tick(1000);
+	assert.equal((await wait).outcome, "failed");
+	assert.equal(f.adapter.launches.length, 1);
+});
+
 describe("RunSession preparation and default owners", () => {
 	it("resolves roles, merges env and forwards launch input without acquiring infrastructure", async () => {
 		const f = fixture({ env: { SHARED: "parent", PARENT: "yes" } });
@@ -260,8 +286,10 @@ describe("RunSession preparation and default owners", () => {
 			runtime: candidates[0],
 		});
 		const handle = await f.session.spawn(t);
+		assert.ok(f.adapter.launches[0].acquisitionSignal instanceof AbortSignal);
 		assert.deepEqual(f.adapter.launches, [
 			{
+				acquisitionSignal: f.adapter.launches[0].acquisitionSignal,
 				name: "writer",
 				task: "do the work",
 				role,
@@ -1089,8 +1117,10 @@ describe("RunSession delivery, cleanup and controls", () => {
 		});
 		assert.notEqual(handle.id, t.id);
 		assert.equal(f.session.getHandle(t.id), handle);
+		assert.ok(adapter.resumes[0].acquisitionSignal instanceof AbortSignal);
 		assert.deepEqual(adapter.resumes, [
 			{
+				acquisitionSignal: adapter.resumes[0].acquisitionSignal,
 				name: "resume",
 				sessionId: "saved",
 				message: "reply",
