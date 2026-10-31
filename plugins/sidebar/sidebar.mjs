@@ -217,11 +217,11 @@ async function applyFocus(ctx, name, success) {
 		ctx.out.error(`${name} failed: unexpected reply ${describe(reply.result)}`);
 		return 1;
 	}
-	ctx.out.log(success + ctx.note);
+	if (success) ctx.out.log(success + ctx.note);
 	return 0;
 }
 
-async function clearView(ctx) {
+async function clearView(ctx, name = "All", success = ALL_MESSAGE) {
 	const { out } = ctx;
 	// Guarded clear: Herdr leaves a view owned by another source in place and
 	// reports it, so All never claims that a foreign filter is gone.
@@ -231,19 +231,21 @@ async function clearView(ctx) {
 		ALL_PARAMS,
 	);
 	if (!reply.ok) {
-		out.error(`All failed: ${reply.error.code}: ${reply.error.message}`);
+		out.error(`${name} failed: ${reply.error.code}: ${reply.error.message}`);
 		return 1;
 	}
 	if (!isAgentView(reply.result)) {
-		out.error(`All failed: unexpected reply ${describe(reply.result)}`);
+		out.error(`${name} failed: unexpected reply ${describe(reply.result)}`);
 		return 1;
 	}
 	if (!reply.result.active) {
-		out.log(ALL_MESSAGE + ctx.note);
+		out.log(success + ctx.note);
 		return 0;
 	}
 	if (reply.result.source === VIEW_SOURCE) {
-		out.error("All failed: Herdr still reports this plugin's view as active.");
+		out.error(
+			`${name} failed: Herdr still reports this plugin's view as active.`,
+		);
 		return 1;
 	}
 	const label = reply.result.label
@@ -263,13 +265,15 @@ async function restoreView(ctx) {
 		ctx.out.log(RESTORE_ALL_MESSAGE);
 		return 0;
 	}
-	const code = await applyFocus(ctx, "Focus restore", RESTORE_FOCUS_MESSAGE);
-	if (code !== 0 || readChoice(ctx.env) !== "all") return code;
+	const code = await applyFocus(ctx, "Focus restore");
+	if (code !== 0) return code;
+	if (readChoice(ctx.env) !== "all") {
+		ctx.out.log(RESTORE_FOCUS_MESSAGE + ctx.note);
+		return 0;
+	}
 	// All ran while this Focus was in flight. All saves before it clears, so
 	// rereading here undoes a Focus that landed after All's clear.
-	await ctx.request(ctx.socketPath, "agent.view.clear", ALL_PARAMS);
-	ctx.out.log(RESTORE_ALL_MESSAGE);
-	return 0;
+	return clearView(ctx, "Focus restore cleanup", RESTORE_ALL_MESSAGE);
 }
 
 // `save` is the choice an action records; restore only reads it.

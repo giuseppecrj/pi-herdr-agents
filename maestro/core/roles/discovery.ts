@@ -221,6 +221,10 @@ function parseSessionMode(
 	return undefined;
 }
 
+function normalizeRoleText(content: string): string {
+	return content.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+}
+
 function parseAgentDefinition(
 	content: string,
 	fallbackName: string,
@@ -395,7 +399,19 @@ export function discoverAgentCatalog(
 		if (!existsSync(path)) return;
 		for (const filePath of listMarkdownFiles(path)) {
 			const fallbackName = basename(filePath, ".md");
-			const content = readFileSync(filePath, "utf8");
+			let content: string;
+			try {
+				content = normalizeRoleText(readFileSync(filePath, "utf8"));
+			} catch (error) {
+				agents.delete(fallbackName);
+				diagnostics.push({
+					code: "unreadable-role-definition",
+					message: `Cannot read role definition ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+					path: filePath,
+					agentName: fallbackName,
+				});
+				continue;
+			}
 			const legacyDiagnostic = legacyExternalCliDiagnostic(
 				content,
 				fallbackName,
@@ -417,7 +433,15 @@ export function discoverAgentCatalog(
 				continue;
 			}
 			const parsed = parseAgentDefinition(content, fallbackName);
-			if (parsed)
+			if (!parsed) {
+				agents.delete(fallbackName);
+				diagnostics.push({
+					code: "invalid-role-definition",
+					message: `Role definition must start with frontmatter: ${filePath}`,
+					path: filePath,
+					agentName: fallbackName,
+				});
+			} else
 				agents.set(parsed.name, {
 					...parsed,
 					source,
@@ -468,7 +492,7 @@ export function discoverAgentCatalog(
 			const fallbackName = basename(filePath, ".md");
 			let content: string;
 			try {
-				content = readFileSync(filePath, "utf8");
+				content = normalizeRoleText(readFileSync(filePath, "utf8"));
 			} catch (error) {
 				diagnostics.push({
 					code: "unreadable-role-definition",

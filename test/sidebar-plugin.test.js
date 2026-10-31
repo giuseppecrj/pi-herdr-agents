@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import {
 	ALL_MESSAGE,
+	ALL_PARAMS,
 	FOCUS_MESSAGE,
 	RESTORE_ALL_MESSAGE,
 	RESTORE_FOCUS_MESSAGE,
@@ -454,6 +455,66 @@ describe("remembered view choice", () => {
 			assert.equal(lines.log.at(-1), RESTORE_ALL_MESSAGE);
 			assert.equal(readChoice(env), "all");
 		}));
+
+	for (const [label, reply, code, message] of [
+		[
+			"RPC error",
+			{ ok: false, error: { code: "boom", message: "no" } },
+			1,
+			/cleanup failed: boom: no/,
+		],
+		[
+			"malformed reply",
+			{ ok: true, result: {} },
+			1,
+			/cleanup failed: unexpected reply/,
+		],
+		[
+			"own view still active",
+			{
+				ok: true,
+				result: { type: "agent_view", active: true, source: VIEW_SOURCE },
+			},
+			1,
+			/cleanup failed: Herdr still reports/,
+		],
+		[
+			"foreign view won the race",
+			{
+				ok: true,
+				result: { type: "agent_view", active: true, source: "other" },
+			},
+			3,
+			/Another agent view is still active/,
+		],
+	]) {
+		it(`reports restore compensation failure: ${label}`, () =>
+			withStateDir(async (dir) => {
+				const env = {
+					HERDR_SOCKET_PATH: "/unused",
+					HERDR_PLUGIN_STATE_DIR: dir,
+				};
+				const sent = [];
+				const request = async (_socket, method, params) => {
+					sent.push(method);
+					if (method === "agent.view.clear") {
+						assert.deepEqual(params, ALL_PARAMS);
+						return reply;
+					}
+					writeFileSync(join(dir, VIEW_FILE), '{"view":"all"}');
+					return {
+						ok: true,
+						result: { type: "agent_view", active: true, source: VIEW_SOURCE },
+					};
+				};
+				const { lines, out } = capture();
+				assert.equal(await runAction("restore", { env, out, request }), code);
+				assert.deepEqual(sent, ["agent.view.set", "agent.view.clear"]);
+				assert.deepEqual(lines.log, []);
+				assert.match(lines.error.join("\n"), message);
+				assert.equal(readChoice(env), "all");
+			}));
+	}
 
 	it("reports a failed restore with exit 1", () =>
 		withFakeHerdrSocket(replyError("boom", "no"), async (path) => {
