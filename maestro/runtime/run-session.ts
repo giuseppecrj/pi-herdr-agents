@@ -550,6 +550,14 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 				entry.uncertainRetryDelayMs = UNCERTAIN_RETRY_INITIAL_MS;
 				result = evidenceResult(owner.handle, evidence);
 			} catch (error) {
+				if (
+					entry.cancel &&
+					entry.cancel.termination !== "confirmed" &&
+					!entry.suppressed
+				) {
+					await waitForUncertainRetry(entry);
+					if (!entry.controller.signal.aborted) continue;
+				}
 				if (owner.handle.launchFailure && !entry.cancel && !entry.suppressed) {
 					// A broken watcher is not exit evidence for an uncertain launch.
 					// Retain this same owner and retry supervision, never acquisition.

@@ -300,14 +300,24 @@ async function launchFreshPiSubagent(
 		request.acquisitionSignal?.throwIfAborted();
 		// Complete fallible initialization while this transaction still owns the
 		// surface, before any child can run or mutate its session artifacts.
-		running = createRunningChild(resolved, artifacts);
-		running.launchScriptFile = await startPiProcess(
-			resolved,
-			artifacts,
-			command,
-			running.launchScriptFile,
-			operations,
-		);
+		const initialized = createRunningChild(resolved, artifacts);
+		try {
+			initialized.launchScriptFile = await startPiProcess(
+				resolved,
+				artifacts,
+				command,
+				initialized.launchScriptFile,
+				operations,
+			);
+		} catch (error) {
+			if (
+				isAcquisitionUncertainError(error) &&
+				error.uncertainty.kind === "command-dispatch"
+			)
+				running = initialized;
+			throw error;
+		}
+		running = initialized;
 		if (request.handoff) {
 			if (!operations.waitForPiReady) {
 				throw new Error("Pi startup confirmation is unavailable");

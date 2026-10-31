@@ -250,6 +250,11 @@ oversized, or malformed Git inspection produces unknown handoff fields, not a
 clean-state claim. Readiness queries consume the remaining readiness budget and
 cannot establish success after it expires.
 
+A definite failure before command dispatch, such as an unwritable launch script,
+is a normal launch failure. Ordinary rollback must confirm pane absence before
+model fallback can proceed. Worktree launches retain the checkout and report the
+failure without supervising a child that never started.
+
 A timed-out Herdr client does not prove that the server cancelled its operation.
 Uncertain creation or dispatch never advances the model fallback list. A launch
 with no identified owner fails with the observed resource identities and any
@@ -307,9 +312,9 @@ Each model attempt also appends one line to the [outcome ledger](configuration.m
 
 Set `persistent: true` on a `subagent` launch to create one logical specialist with one v1 session generation. Its resolved tools, denied tools, model, thinking level, and optional worktree binding are snapshotted at launch and do not change when work is sent later. `subagents_list` shows each live specialist's logical ID, generation ID, state, completed-task count, and effective policy.
 
-The initial task and each `subagent_send({ id|name, message })` task are dispatched with a task ID. Parent-owned in-process bookkeeping prevents a successful task-result or help notification from being sent again when its ledger acknowledgment fails; the acknowledgment alone is retried, including across `/reload`. This bookkeeping does not survive a full process crash and is not a durable exactly-once messaging guarantee. A specialist accepts one task at a time. Sends while it is working are recorded as `rejected-busy`; no queue is retained. After a task result arrives, it is idle and accepts the next task. A persistent child's `caller_ping` records a help request but keeps the session alive; answer with `subagent_send`.
+The initial task and each `subagent_send({ id|name, message })` task are dispatched with a task ID. Parent-owned in-process bookkeeping prevents a successful task-result or help notification from being sent again when its ledger acknowledgment fails; the acknowledgment alone is retried, including across `/reload`. This bookkeeping does not survive a full process crash and is not a durable exactly-once messaging guarantee. A specialist accepts one task at a time. Sends while it is working are recorded as `rejected-busy`; no queue is retained. After a task result arrives, it is idle and accepts the next task while its process remains open. Once process exit is observed, sends and stop requests are rejected even while the final Git handoff is pending. A persistent child's `caller_ping` records a help request but keeps the session alive; answer with `subagent_send`.
 
-Use `subagent_stop({ id|name })` to request graceful shutdown. If a task is active, stop becomes `stop-pending` and the task reaches its terminal outcome first. The parent reports `stopped` only after process-exit evidence is confirmed, then closes an ordinary pane it created and releases the name. If confirmation times out, the specialist is `stalled` in an unconfirmed-stop state: `subagent_send` rejects follow-up work while retaining evidence. If publishing the stop directive fails, it likewise enters a retryable failed-stop state rather than remaining permanently stop-pending. Request `subagent_stop` again to publish another directive and make another bounded exit check, or spawn a new specialist. Timeout notices belong to one stop attempt and wait for a live parent API across reload and session-replacement gaps. Notification failures are contained and retried. A new stop attempt, verified process exit, or quitting cancels the old notice, including pending evidence reads and retry timers. If exit is confirmed after a stop timeout or publication failure, the parent receives one terminal stopped update and a stopped ledger entry. A pane or process disappearance without a stop directive produces one facts-only crash notice; persistent sessions cannot be resumed in v1, so spawn a new specialist. There is no automatic restart, replay, or revival.
+Use `subagent_stop({ id|name })` to request graceful shutdown. If a task is active, stop becomes `stop-pending` and the task reaches its terminal outcome first. An uncertain launch's initial task does not hold stop pending. Its bounded exit wait starts immediately. The parent reports `stopped` only after process-exit evidence is confirmed, then closes an ordinary pane it created and releases the name. If confirmation times out, the specialist is `stalled` in an unconfirmed-stop state: `subagent_send` rejects follow-up work while retaining evidence. If publishing the stop directive fails, it likewise enters a retryable failed-stop state rather than remaining permanently stop-pending. Request `subagent_stop` again to publish another directive and make another bounded exit check, or spawn a new specialist. Timeout notices belong to one stop attempt and wait for a live parent API across reload and session-replacement gaps. Notification failures are contained and retried. A new stop attempt, verified process exit, or quitting cancels the old notice, including pending evidence reads and retry timers. If exit is confirmed after a stop timeout or publication failure, the parent receives one terminal stopped update and a stopped ledger entry. A pane or process disappearance without a stop directive produces one facts-only crash notice; persistent sessions cannot be resumed in v1, so spawn a new specialist. There is no automatic restart, replay, or revival.
 
 A persistent completion sidecar records the child's intended outcome before
 shutdown. It does not prove process exit. The host retains lifetime ownership
@@ -348,7 +353,7 @@ subagent_cancel({ name: "Scout" });
 
 Target resolution matches `subagent_interrupt`: an exact running ID or an exact, unambiguous display name. Persistent specialists are rejected; use `subagent_stop`, whose graceful v1 semantics are unchanged.
 
-The cancel intent is recorded before anything is aborted or killed. From then on the run never advances its model shortlist, retries, or recovers, even when terminating the pane makes the watcher observe a lost pane, and even when a fallback launch was already in flight. The result reports one status:
+The cancel intent is recorded before anything is aborted or killed. From then on the run never advances its model shortlist or starts another execution attempt, even when terminating the pane makes the watcher observe a lost pane, and even when a fallback launch was already in flight. The result reports one status:
 
 | Status | Meaning |
 | --- | --- |
@@ -356,6 +361,13 @@ The cancel intent is recorded before anything is aborted or killed. From then on
 | `requested` | A launch or fallback acquisition is still in flight. Its owner is terminated as soon as it is acquired; no later model is tried. |
 | `unconfirmed` | Termination failed (the error is reported). The run stays live, owned, and supervised, and nothing is delivered or cleaned up. Call `subagent_cancel` again to retry. |
 | `already-terminal` | The run already took a natural result or was retired; nothing was cancelled. |
+
+If a watcher fails while cancellation remains unconfirmed, the host retries
+observation of the same owner with bounded backoff. A failed watcher is not exit
+evidence and does not trigger another kernel termination attempt. Once real
+completion evidence arrives, the producer makes one confirmation attempt. If
+termination is still unconfirmed, an explicit cancel retry or shutdown releases
+that wait.
 
 Repeated cancels join an in-flight termination and keep the first request time. The parent receives exactly one `subagent_result` whose details carry `error: "cancelled"` and a `cancellation` record (`requestedAt`, `termination`, `confirmedAt`). Its message says the run was cancelled and lists any models already attempted. It is never presented as a provider failure. A child's natural result taken before the cancel stays authoritative. A cancel while a provider error is still eligible for fallback wins and stops that fallback. A cancel while the parent re-runs an [accept check](#accept-checks) stops that check and delivers the cancelled result with `Check: skipped (cancelled)`.
 

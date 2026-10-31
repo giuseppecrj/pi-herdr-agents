@@ -39,6 +39,12 @@ export function persistentSpecialistState(
 	running: RunningSubagent,
 ): "idle" | "working" | "stalled" | "stopped" {
 	const projection = projectLifecycle(running.lifecycle, Date.now()).kind;
+	if (
+		projection === "completed" ||
+		projection === "failed" ||
+		projection === "finalizing"
+	)
+		return "stopped";
 	if (running.stopState === "failed" || asPiRecord(running).launchFailure)
 		return "stalled";
 	if (running.stopState)
@@ -56,12 +62,6 @@ export function persistentSpecialistState(
 		projection === "running"
 	)
 		return "working";
-	if (
-		projection === "completed" ||
-		projection === "failed" ||
-		projection === "finalizing"
-	)
-		return "stopped";
 	return "idle";
 }
 
@@ -299,12 +299,17 @@ export function createPersistentControls({
 	): void {
 		if (
 			running.stopTimeout ||
+			persistentSpecialistState(running) === "stopped" ||
 			(running.stopState !== "requested" && running.stopState !== "pending")
 		)
 			return;
 		running.stopTimeout = setTimeout(() => {
 			running.stopTimeout = undefined;
-			if (!runningSubagents.has(running.id)) return;
+			if (
+				!runningSubagents.has(running.id) ||
+				persistentSpecialistState(running) === "stopped"
+			)
+				return;
 			if (
 				running.stopState === "requested" ||
 				running.stopState === "pending"
@@ -333,6 +338,13 @@ export function createPersistentControls({
 		}
 		const running = resolved.running;
 		const shownName = encodeHostValue(running.name);
+		if (persistentSpecialistState(running) === "stopped") {
+			const error = `Persistent specialist "${shownName}" is already stopped.`;
+			return {
+				content: [{ type: "text", text: error }],
+				details: { error, id: running.id, name: running.name },
+			};
+		}
 		if (running.stopState === "requested" || running.stopState === "pending") {
 			const error = `Stop is already requested for persistent specialist "${shownName}".`;
 			return {
@@ -340,15 +352,8 @@ export function createPersistentControls({
 				details: { error, id: running.id, name: running.name },
 			};
 		}
-		const state = persistentSpecialistState(running);
-		if (state === "stopped") {
-			const error = `Persistent specialist "${shownName}" is already stopped.`;
-			return {
-				content: [{ type: "text", text: error }],
-				details: { error, id: running.id, name: running.name },
-			};
-		}
-		const pending = running.taskId != null;
+		const pending =
+			running.taskId != null && !asPiRecord(running).launchFailure;
 		running.stopAttempt?.cancelNotice?.();
 		running.stopAttempt = {};
 		running.stopState = pending ? "pending" : "requested";
@@ -399,7 +404,8 @@ export function createPersistentControls({
 		const running = resolved.running;
 		const shownName = encodeHostValue(running.name);
 		const task = randomUUID();
-		if (running.stopState === "failed") {
+		const state = persistentSpecialistState(running);
+		if (running.stopState === "failed" && state !== "stopped") {
 			io.rejectBusy(asPiRecord(running), task);
 			const error = `Persistent specialist "${shownName}" is in an unconfirmed-stop state; task ${task} was rejected-busy. Process exit is unconfirmed and evidence is retained at session ${encodeHostValue(running.sessionFile, HOST_PATH_CHARS)}. Request subagent_stop again or spawn a new specialist.`;
 			return {
@@ -407,7 +413,6 @@ export function createPersistentControls({
 				details: { error, task, outcome: "rejected-busy" },
 			};
 		}
-		const state = persistentSpecialistState(running);
 		if (state !== "idle") {
 			io.rejectBusy(asPiRecord(running), task);
 			const error = `Persistent specialist "${shownName}" is ${state}; task ${task} was rejected-busy. Resend after the pending result.`;

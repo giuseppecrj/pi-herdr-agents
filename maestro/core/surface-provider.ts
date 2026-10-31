@@ -254,7 +254,11 @@ export interface SurfaceProvider {
 	// pi-herdr-agents extension
 	setupHint(): string;
 
-	/** Write a script file and run it in the surface; today's runScriptInPane (terminal.ts:115). */
+	/**
+	 * Write a script file and run it in the surface; today's runScriptInPane (terminal.ts:115).
+	 * Rejects with a command-dispatch {@link AcquisitionUncertainError} when the
+	 * command may have reached the surface; any other rejection dispatched nothing.
+	 */
 	// pi-herdr-agents extension
 	runScript(
 		surfaceId: string,

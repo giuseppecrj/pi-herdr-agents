@@ -30,7 +30,10 @@ import {
 	type PiRunningChild,
 	type ResumePiLaunchRequest,
 } from "./launch.ts";
-import { AcquisitionUncertainError } from "../../core/surface-provider.ts";
+import {
+	AcquisitionUncertainError,
+	isAcquisitionUncertainError,
+} from "../../core/surface-provider.ts";
 
 export async function launchResumedPiSubagent(
 	callerRequest: ResumePiLaunchRequest,
@@ -151,7 +154,7 @@ export async function launchResumedPiSubagent(
 			"subagent-scripts",
 			`${safeName(request.name) || "resume"}-resume-${Date.now()}.sh`,
 		);
-		running = {
+		const initialized: PiRunningChild = {
 			id,
 			name: request.name,
 			task: request.message ?? "resumed session",
@@ -167,22 +170,32 @@ export async function launchResumedPiSubagent(
 			lifecycle: createLifecycle(startTime),
 		};
 		request.acquisitionSignal?.throwIfAborted();
-		running.launchScriptFile = await operations.runScript(
-			surface,
-			`${command}; echo '__SUBAGENT_DONE_'$?'__'`,
-			{
-				scriptPath: launchScriptFile,
-				scriptPreamble: [
-					shellComment(`Subagent resume script for ${request.name}`),
-					shellComment(`Generated: ${new Date().toISOString()}`),
-					shellComment(`Session: ${request.sessionFile}`),
-					shellComment(`Surface: ${surface}`),
-					...(messageFile
-						? [shellComment(`Resume message file: ${messageFile}`)]
-						: []),
-				].join("\n"),
-			},
-		);
+		try {
+			initialized.launchScriptFile = await operations.runScript(
+				surface,
+				`${command}; echo '__SUBAGENT_DONE_'$?'__'`,
+				{
+					scriptPath: launchScriptFile,
+					scriptPreamble: [
+						shellComment(`Subagent resume script for ${request.name}`),
+						shellComment(`Generated: ${new Date().toISOString()}`),
+						shellComment(`Session: ${request.sessionFile}`),
+						shellComment(`Surface: ${surface}`),
+						...(messageFile
+							? [shellComment(`Resume message file: ${messageFile}`)]
+							: []),
+					].join("\n"),
+				},
+			);
+		} catch (error) {
+			if (
+				isAcquisitionUncertainError(error) &&
+				error.uncertainty.kind === "command-dispatch"
+			)
+				running = initialized;
+			throw error;
+		}
+		running = initialized;
 		return running;
 	} catch (error) {
 		try {

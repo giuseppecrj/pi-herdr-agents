@@ -49,6 +49,11 @@ export interface PiLaunchOperations {
 		control?: AcquisitionControl,
 	): MaybePromise<WorktreeSurfaceForLaunch>;
 	waitForShellReady(surface: string): Promise<void>;
+	/**
+	 * Rejects with a command-dispatch `AcquisitionUncertainError` only when Pi
+	 * may have started; any other rejection means nothing was dispatched, so the
+	 * launch rolls back as a definite failure.
+	 */
 	runScript(
 		surface: string,
 		command: string,
