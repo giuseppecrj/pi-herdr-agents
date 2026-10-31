@@ -211,11 +211,15 @@ interface RunEntry {
 	acquiring: boolean;
 	/** The producer took a natural terminal result; cancel arrives too late. */
 	settled: boolean;
+	/** Delay between failed supervision/termination probes of an uncertain owner. */
+	uncertainRetryDelayMs: number;
 	cancel?: CancelState;
 }
 
 const ABORT_MESSAGE = "Aborted while waiting for subagent to finish";
 const CANCELLED_BEFORE_LAUNCH = "Subagent was cancelled before launch.";
+const UNCERTAIN_RETRY_INITIAL_MS = 1_000;
+const UNCERTAIN_RETRY_MAX_MS = 30_000;
 
 // pi-herdr-agents extension
 export function createRunSession(options: RunSessionOptions): RunSession {
@@ -240,6 +244,7 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 			released: false,
 			acquiring: false,
 			settled: false,
+			uncertainRetryDelayMs: UNCERTAIN_RETRY_INITIAL_MS,
 		};
 		entries.set(task.id, entry);
 		return entry;
@@ -435,6 +440,7 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 				state.termination = "confirmed";
 				state.confirmedAt = Date.now();
 				state.error = undefined;
+				entry.uncertainRetryDelayMs = UNCERTAIN_RETRY_INITIAL_MS;
 				entry.controller.abort();
 			} catch (error) {
 				state.termination = "unconfirmed";
@@ -514,6 +520,22 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 		);
 	}
 
+	function waitForUncertainRetry(entry: RunEntry): Promise<void> {
+		const signal = entry.controller.signal;
+		if (signal.aborted) return Promise.resolve();
+		const delay = entry.uncertainRetryDelayMs;
+		entry.uncertainRetryDelayMs = Math.min(delay * 2, UNCERTAIN_RETRY_MAX_MS);
+		return new Promise((resolve) => {
+			const finish = () => {
+				clearTimeout(timer);
+				signal.removeEventListener("abort", finish);
+				resolve();
+			};
+			const timer = setTimeout(finish, delay);
+			signal.addEventListener("abort", finish, { once: true });
+		});
+	}
+
 	async function produce(entry: RunEntry): Promise<RunResult> {
 		for (;;) {
 			const owner = entry.active;
@@ -525,6 +547,7 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 					owner.handle,
 					entry.controller.signal,
 				);
+				entry.uncertainRetryDelayMs = UNCERTAIN_RETRY_INITIAL_MS;
 				result = evidenceResult(owner.handle, evidence);
 			} catch (error) {
 				if (owner.handle.launchFailure && !entry.cancel && !entry.suppressed) {
@@ -532,9 +555,11 @@ export function createRunSession(options: RunSessionOptions): RunSession {
 					// Retain this same owner and retry supervision, never acquisition.
 					try {
 						await owner.adapter.kill(owner.handle);
+						entry.uncertainRetryDelayMs = UNCERTAIN_RETRY_INITIAL_MS;
 					} catch {
-						await new Promise((resolve) => setTimeout(resolve, 1_000));
-						continue;
+						await waitForUncertainRetry(entry);
+						// Suppression or confirmed cancel ends the wait without another probe.
+						if (!entry.controller.signal.aborted) continue;
 					}
 				}
 				result = rejectedResult(owner.handle, error);
