@@ -60,9 +60,9 @@ implements it. Other surfaces return no report. Core does not import Herdr.
 A failed report is a warning. The checkout removal still succeeds. Nothing in
 this path polls, retries, or sleeps.
 
-### Blocking time
+### Time budgets
 
-A worktree launch adds at most three synchronous Herdr calls, each bounded at
+A worktree launch adds at most three asynchronous Herdr calls, each bounded at
 3 seconds:
 
 1. `herdr worktree list --cwd` before create
@@ -72,9 +72,12 @@ A worktree launch adds at most three synchronous Herdr calls, each bounded at
    after snapshot shows a new primary workspace with a repo key and checkout
    path
 
-If each runs to its timeout, the extra blocking time is 9 seconds. A failed
-before-snapshot skips the later two. `herdr worktree create` itself is an
-existing call and is not given a new timeout here.
+If each runs to its timeout, the reads consume up to 9 seconds of wall time
+without blocking the event loop. A failed before-snapshot skips the later two.
+The reads, worktree creation, and optional retained-root grouping share a
+120-second acquisition budget. A timed-out mutation remains uncertain because
+stopping the CLI does not cancel the server request. Recovery inspection has a
+separate 6-second budget and never authorizes late Pi dispatch.
 
 Explicit removal adds at most three asynchronous calls, each bounded at
 3 seconds, and only when this process holds a claim for the removed source

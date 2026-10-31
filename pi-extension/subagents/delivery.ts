@@ -15,7 +15,6 @@ import {
 	type RunningSubagent,
 	type SubagentRuntime,
 	shouldDeliverSubagentCompletion,
-	selectCompletionApi,
 	holdDelivery,
 } from "./state.ts";
 import {
@@ -53,8 +52,6 @@ export function createDelivery({
 	startPersistentStopTimeout,
 }: DeliveryDeps) {
 	const runningSubagents = runtime.runningSubagents;
-
-	const inFlightPersistentTaskDeliveries = new Set<string>();
 
 	/**
 	 * Issuance lives in parent memory: the record's current task and the IDs
@@ -108,21 +105,23 @@ export function createDelivery({
 			event.generation !== running.generationId
 		)
 			return;
-		const deliveryKey = `${running.id}:${event.type}:${event.task}`;
-		if (inFlightPersistentTaskDeliveries.has(deliveryKey)) return;
+		const deliveryKey = `${event.type}:${event.task}`;
+		const deliveries = (running.persistentTaskDeliveries ??= new Map());
+		const progress = deliveries.get(deliveryKey);
+		if (progress === "sending" || progress === "acknowledged") return;
 		if (!isIssuedTask(running, event.task))
 			return ignoreUnrecognizedTaskEvent(running, event, api);
 		const ledger = ledgerSnapshot ?? io.readLedger(asPiRecord(running));
 		if (event.type === "help-request") {
 			if (
+				progress !== "sent" &&
 				ledger.some(
 					(entry) =>
 						entry.task === event.task && entry.outcome === "help-requested",
 				)
 			)
 				return;
-			inFlightPersistentTaskDeliveries.add(deliveryKey);
-			try {
+			sendAndAcknowledge(() =>
 				sendParentMessage(
 					api,
 					"subagent_ping",
@@ -147,21 +146,18 @@ export function createDelivery({
 						message: event.message ?? "",
 						sessionFile: running.sessionFile,
 					},
-				);
-				ledger.push(io.acknowledge(asPiRecord(running), event));
-			} finally {
-				inFlightPersistentTaskDeliveries.delete(deliveryKey);
-			}
+				),
+			);
 			return;
 		}
 		if (
+			progress !== "sent" &&
 			ledger.some(
 				(entry) => entry.task === event.task && entry.outcome === "delivered",
 			)
 		)
 			return;
-		inFlightPersistentTaskDeliveries.add(deliveryKey);
-		try {
+		sendAndAcknowledge(() => {
 			const completed = (running.tasksCompleted ?? 0) + 1;
 			const summary = summaryMessage(
 				io.readTaskSummary(asPiRecord(running)),
@@ -189,11 +185,24 @@ export function createDelivery({
 					policyHash: running.policyHash!,
 				},
 			);
-			ledger.push(io.acknowledge(asPiRecord(running), event));
-			if (running.stopState === "pending")
-				startPersistentStopTimeout(running, api, running.stopTimeoutMs, io);
-		} finally {
-			inFlightPersistentTaskDeliveries.delete(deliveryKey);
+		});
+
+		function sendAndAcknowledge(send: () => void): void {
+			try {
+				if (progress !== "sent") {
+					deliveries.set(deliveryKey, "sending");
+					send();
+					deliveries.set(deliveryKey, "sent");
+				}
+				ledger.push(io.acknowledge(asPiRecord(running), event));
+				deliveries.set(deliveryKey, "acknowledged");
+				if (running.stopState === "pending")
+					startPersistentStopTimeout(running, api, running.stopTimeoutMs, io);
+			} catch (error) {
+				if (deliveries.get(deliveryKey) === "sending")
+					deliveries.delete(deliveryKey);
+				throw error;
+			}
 		}
 	}
 
@@ -209,19 +218,12 @@ export function createDelivery({
 			if (!running.persistent || event.generation !== running.generationId)
 				continue;
 			if (
-				inFlightPersistentTaskDeliveries.has(
-					`${running.id}:${event.type}:${event.task}`,
-				)
+				running.persistentTaskDeliveries?.get(`${event.type}:${event.task}`) ===
+				"sending"
 			)
-				continue;
+				return;
 			ledger ??= io.readLedger(asPiRecord(running));
-			deliverPersistentTaskEvent(
-				running,
-				event,
-				selectCompletionApi(api, runtime.pi),
-				io,
-				ledger,
-			);
+			deliverPersistentTaskEvent(running, event, api, io, ledger);
 		}
 		running.observedTaskEvents = events.length;
 	}
@@ -261,6 +263,9 @@ export function createDelivery({
 	): "delivered" | "suppressed" | Promise<"delivered" | "suppressed"> {
 		const running: RunningSubagent = record;
 		if (running.stopTimeout) clearTimeout(running.stopTimeout);
+		// Verified process exit supersedes a timeout before waiting for a live API:
+		// the notice may be earlier than this completion in the held queue.
+		running.stopAttempt?.cancelNotice?.();
 		if (!shouldDeliverSubagentCompletion(running)) return suppress(running);
 		const api = runtime.liveApi;
 		if (api) return settle(api, record, result, task, io);
@@ -295,10 +300,7 @@ export function createDelivery({
 			// terminal PROCESS handoff; failed terminal delivery retires runtime ownership.
 			drainPersistentTaskEvents(running, api, io);
 			running.lifecycle = markDelivery(running.lifecycle, "delivered");
-			if (
-				running.stopState === "requested" ||
-				running.stopState === "pending"
-			) {
+			if (running.stopState) {
 				io.recordStopped(record);
 				const facts = persistentSpecialistFacts(running, io, result.worktree);
 				sendParentMessage(
@@ -310,8 +312,7 @@ export function createDelivery({
 					},
 					{ status: "stopped", facts },
 				);
-			} else if (running.stopState !== "failed")
-				notifyPersistentCrash(running, api, io, result.worktree);
+			} else notifyPersistentCrash(running, api, io, result.worktree);
 			runningSubagents.delete(running.id);
 			updateWidget();
 			return "delivered";

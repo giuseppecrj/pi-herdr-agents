@@ -113,6 +113,7 @@ export type PiWorktreeHandoff = WorktreeHandoff;
 /** Structural view of the adapter's actual mutable child, not a copied registry row. */
 // pi-herdr-agents extension
 export interface PiRunRecord {
+	launchFailure?: string;
 	id: string;
 	name: string;
 	task: string;
@@ -161,7 +162,8 @@ export interface PiStartedMetadata {
 	runtimePlan?: ResolvedRuntimePlan;
 	worktree?: PiWorktreeLaunch;
 	warning?: string;
-	status: "started";
+	status: "started" | "uncertain";
+	launchFailure?: string;
 }
 // pi-herdr-agents extension
 export interface PiCompletedMetadata {
@@ -226,7 +228,7 @@ export type PiStopAcknowledgement =
 export interface PiPersistentIO {
 	/** Raw events only; cursor indexes this array before generation filtering. */
 	readEvents(record: PiRunRecord): PiPersistentEvent[];
-	inspectWorktree(record: PiRunRecord): PiWorktreeHandoff | undefined;
+	inspectWorktree(record: PiRunRecord): Promise<PiWorktreeHandoff | undefined>;
 	/** Explicit lazy read, once per drain with eligible post-cursor events. */
 	readLedger(record: PiRunRecord): PiLedgerEntry[];
 	/** Transcript read only for an undelivered task-done, never help/quiet wakes. */

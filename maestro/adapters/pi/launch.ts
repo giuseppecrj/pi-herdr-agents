@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -17,7 +18,11 @@ import {
 } from "../../core/declared-skills.ts";
 import { shellQuote } from "../../core/shell.ts";
 import { ACCEPT_FILE_ENV, type AcceptSpec } from "../../core/accept.ts";
-import { WorktreeProvisioningError } from "../../core/surface-provider.ts";
+import {
+	AcquisitionUncertainError,
+	isAcquisitionUncertainError,
+	WorktreeProvisioningError,
+} from "../../core/surface-provider.ts";
 import type {
 	FailedWorktreeManifest,
 	WorktreeLaunch,
@@ -28,9 +33,11 @@ import {
 	type PiProcessIdentity,
 } from "./process-identity.ts";
 import {
+	appendPersistentDeliveryLedger,
 	createWorktreeSessionFork,
 	seedSubagentSessionFile,
 	writeSubagentSessionPolicy,
+	type SubagentSessionPolicyV2,
 } from "./session.ts";
 import {
 	buildSubagentToolAllowlist,
@@ -53,6 +60,7 @@ type SubagentSessionMode = "standalone" | "lineage-only" | "fork";
 
 export interface FreshPiLaunchRequest {
 	kind: "fresh";
+	acquisitionSignal?: AbortSignal;
 	id?: string;
 	name: string;
 	task: string;
@@ -98,6 +106,7 @@ export interface FreshPiLaunchRequest {
 
 export interface ResumePiLaunchRequest {
 	kind: "resume";
+	acquisitionSignal?: AbortSignal;
 	id?: string;
 	name: string;
 	sessionFile: string;
@@ -119,11 +128,15 @@ export interface ResumePiLaunchRequest {
 export type PiLaunchRequest = FreshPiLaunchRequest | ResumePiLaunchRequest;
 
 export interface PiRunningChild {
+	/** Dispatch/rollback failed; this real owner remains controlled until exit. */
+	launchFailure?: string;
 	id: string;
 	name: string;
 	task: string;
 	agent?: string;
 	surface: string;
+	/** Only an ordinary pane created by this transaction may be closed. */
+	ownsSurface: boolean;
 	startTime: number;
 	sessionFile: string;
 	launchScriptFile: string;
@@ -160,6 +173,20 @@ export interface PiRunningChild {
 	processIdentityError?: string;
 }
 
+/** Ownership transfer, not a retryable rejection. The initialized child is real. */
+export class AcquiredPiLaunchError extends Error {
+	readonly child: PiRunningChild;
+	constructor(child: PiRunningChild, cause: unknown) {
+		super(
+			`Launch outcome uncertain; ${child.worktree ? `worktree retained at ${child.worktree.path} (workspace ${child.worktree.workspaceId}); ` : `pane ${child.surface}; `}owner retained, no fallback: ${errorMessage(cause)}`,
+			{ cause },
+		);
+		this.name = "AcquiredPiLaunchError";
+		this.child = child;
+		child.launchFailure = this.message;
+	}
+}
+
 interface ResolvedLaunch {
 	request: FreshPiLaunchRequest;
 	id: string;
@@ -183,6 +210,8 @@ interface PreparedSurface {
 interface PreparedSession extends PreparedSurface {
 	sessionFile: string;
 	activityFile: string;
+	policy: SubagentSessionPolicyV2;
+	initialTaskId?: string;
 	processIdentityFile?: string;
 }
 
@@ -247,9 +276,12 @@ async function launchFreshPiSubagent(
 ): Promise<PiRunningChild> {
 	const resolved = resolveLaunchRequest(request);
 	let surface: PreparedSurface | undefined;
+	let running: PiRunningChild | undefined;
 
 	try {
+		request.acquisitionSignal?.throwIfAborted();
 		surface = await prepareLaunchSurface(resolved, operations);
+		request.acquisitionSignal?.throwIfAborted();
 		const session = prepareChildSession(resolved, surface, operations);
 		const handoffArtifacts = request.handoff
 			? prepareTaskArtifacts(resolved, session, operations)
@@ -257,13 +289,35 @@ async function launchFreshPiSubagent(
 		await confirmShellReady(session, operations);
 		const artifacts =
 			handoffArtifacts ?? prepareTaskArtifacts(resolved, session, operations);
+		request.acquisitionSignal?.throwIfAborted();
 		const command = buildPiCommand(resolved, artifacts);
-		const launchScriptFile = await startPiProcess(
-			resolved,
-			artifacts,
-			command,
-			operations,
-		);
+		if (artifacts.worktree && !request.handoff) {
+			requireWorktreeOperations(operations).persistWorktreeResult(
+				artifacts.worktree,
+				"running",
+			);
+		}
+		request.acquisitionSignal?.throwIfAborted();
+		// Complete fallible initialization while this transaction still owns the
+		// surface, before any child can run or mutate its session artifacts.
+		const initialized = createRunningChild(resolved, artifacts);
+		try {
+			initialized.launchScriptFile = await startPiProcess(
+				resolved,
+				artifacts,
+				command,
+				initialized.launchScriptFile,
+				operations,
+			);
+		} catch (error) {
+			if (
+				isAcquisitionUncertainError(error) &&
+				error.uncertainty.kind === "command-dispatch"
+			)
+				running = initialized;
+			throw error;
+		}
+		running = initialized;
 		if (request.handoff) {
 			if (!operations.waitForPiReady) {
 				throw new Error("Pi startup confirmation is unavailable");
@@ -280,23 +334,62 @@ async function launchFreshPiSubagent(
 				);
 			}
 		}
-		const running = createRunningChild(resolved, artifacts, launchScriptFile);
 		startProcessIdentityCapture(running, operations);
 		return running;
 	} catch (error) {
 		if (!surface) throw error;
+		if (running) startProcessIdentityCapture(running, operations);
 		if (!surface.worktree) {
 			if (!request.surface) {
 				try {
 					await operations.closePane(surface.surface);
-				} catch {
-					// The launch error remains authoritative when cleanup also fails.
+				} catch (rollback) {
+					if (running)
+						throw new AcquiredPiLaunchError(
+							running,
+							new Error(
+								`${errorMessage(error)}; rollback unconfirmed: ${errorMessage(rollback)}`,
+								{ cause: error },
+							),
+						);
+					throw new AcquisitionUncertainError(
+						`${errorMessage(error)}; rollback unconfirmed: ${errorMessage(rollback)}; pane retained: ${surface.surface}; no fallback`,
+						{
+							kind: "surface-create",
+							placement: "tab",
+							observedSurfaceId: surface.surface,
+						},
+						{ cause: error },
+					);
 				}
 			}
+			if (running) throw new AcquiredPiLaunchError(running, error);
 			throw error;
 		}
+		if (running) {
+			try {
+				const worktreeOps = requireWorktreeOperations(operations);
+				// Interactive handoffs have no runtime finalizer. Watched children capture there once.
+				const handoff = request.handoff
+					? await worktreeOps.captureWorktreeHandoff(surface.worktree)
+					: undefined;
+				worktreeOps.persistWorktreeResult(surface.worktree, "failed", handoff);
+				worktreeOps.writeWorktreeManifest(surface.worktree.manifestFile, {
+					acquisitionUncertain: true,
+					error: errorMessage(error),
+				});
+			} catch {
+				/* transfer ownership even if evidence persistence fails */
+			}
+			throw new AcquiredPiLaunchError(running, error);
+		}
 		const worktreeOps = requireWorktreeOperations(operations);
-		const handoff = worktreeOps.captureWorktreeHandoff(surface.worktree);
+		let handoff;
+		try {
+			handoff = await worktreeOps.captureWorktreeHandoff(surface.worktree);
+		} catch {
+			/* preserve launch failure */
+		}
 		try {
 			worktreeOps.persistWorktreeResult(surface.worktree, "failed", handoff);
 		} catch {
@@ -356,7 +449,9 @@ async function prepareLaunchSurface(
 		return {
 			surface:
 				request.surface ??
-				(await operations.createPane(request.name, resolved.sourceCwd)),
+				(await operations.createPane(request.name, resolved.sourceCwd, {
+					signal: request.acquisitionSignal,
+				})),
 			targetCwd: resolved.sourceCwd,
 			effectiveAgentDir: resolved.localAgentDir ?? resolved.agentDir,
 			localAgentDir: resolved.localAgentDir,
@@ -367,8 +462,11 @@ async function prepareLaunchSurface(
 
 	const worktreeOps = requireWorktreeOperations(operations);
 	const baseRef = request.worktree.base ?? "HEAD";
-	const baseSha = worktreeOps.resolveGitCommit(resolved.sourceCwd, baseRef);
-	const provisionCwd = worktreeOps.resolveWorktreeProvisionCwd(
+	const baseSha = await worktreeOps.resolveGitCommit(
+		resolved.sourceCwd,
+		baseRef,
+	);
+	const provisionCwd = await worktreeOps.resolveWorktreeProvisionCwd(
 		resolved.sourceCwd,
 	);
 	const manifestFile = join(
@@ -397,6 +495,7 @@ async function prepareLaunchSurface(
 			provisionCwd,
 			request.worktree.branch,
 			baseSha,
+			{ signal: request.acquisitionSignal },
 		);
 	} catch (error) {
 		const failedManifest: FailedWorktreeManifest = {
@@ -406,8 +505,26 @@ async function prepareLaunchSurface(
 		if (error instanceof WorktreeProvisioningError) {
 			Object.assign(failedManifest, error.recoveredWorktree);
 		}
+		if (
+			isAcquisitionUncertainError(error) &&
+			error.uncertainty.kind === "worktree-create"
+		) {
+			Object.assign(failedManifest, error.uncertainty.recovered, {
+				acquisitionUncertain: true,
+			});
+		}
 		failedManifest.error = errorMessage(error);
-		worktreeOps.writeWorktreeManifest(manifestFile, failedManifest);
+		try {
+			worktreeOps.writeWorktreeManifest(manifestFile, failedManifest);
+		} catch {
+			/* original acquisition failure remains authoritative */
+		}
+		if (isAcquisitionUncertainError(error))
+			throw new AcquisitionUncertainError(
+				`${error.message}; ownership manifest retained at ${manifestFile}`,
+				error.uncertainty,
+				{ cause: error },
+			);
 		throw error;
 	}
 
@@ -421,11 +538,18 @@ async function prepareLaunchSurface(
 		manifestFile,
 	};
 	if (created.diagnostics?.length) worktree.diagnostics = created.diagnostics;
-	worktreeOps.writeWorktreeManifest(manifestFile, {
-		state: "provisioned",
-		...ownership,
-		...worktree,
-	});
+	try {
+		worktreeOps.writeWorktreeManifest(manifestFile, {
+			state: "provisioned",
+			...ownership,
+			...worktree,
+		});
+	} catch (error) {
+		// Preserve the known retained root even when a manifest update fails.
+		(worktree.diagnostics ??= []).push(
+			`Manifest update failed: ${errorMessage(error)}`,
+		);
+	}
 	const isolatedAgentDir = join(created.path, ".pi", "agent");
 	const hasIsolatedAgentDir = existsSync(isolatedAgentDir);
 	return {
@@ -463,7 +587,7 @@ function prepareChildSession(
 			{ sessionFile },
 		);
 	}
-	writeSubagentSessionPolicy(sessionFile, {
+	const policy = writeSubagentSessionPolicy(sessionFile, {
 		owner: surface.worktree ? "managed-worktree" : "public",
 		tools: resolved.request.behavior.tools,
 		deniedTools: resolved.request.behavior.deniedTools,
@@ -487,9 +611,14 @@ function prepareChildSession(
 		...surface,
 		sessionFile,
 		activityFile,
+		policy,
+		initialTaskId: policy.persistent
+			? (resolved.request.behavior.taskId ?? randomUUID())
+			: undefined,
 		// A handoff Pi loads no child protocol extension, so it records nothing.
 		processIdentityFile:
-			surface.worktree && !resolved.request.handoff
+			(surface.worktree || resolved.request.surface) &&
+			!resolved.request.handoff
 				? getSubagentProcessIdentityFile(sessionFile)
 				: undefined,
 	};
@@ -683,11 +812,9 @@ function buildPiCommand(
 		if (request.behavior.persistent) {
 			env.push("PI_SUBAGENT_PERSISTENT=1");
 			env.push(
-				`PI_SUBAGENT_GENERATION_ID=${shellQuote(request.behavior.generationId ?? "")}`,
+				`PI_SUBAGENT_GENERATION_ID=${shellQuote(artifacts.policy.generationId)}`,
 			);
-			env.push(
-				`PI_SUBAGENT_TASK_ID=${shellQuote(request.behavior.taskId ?? "")}`,
-			);
+			env.push(`PI_SUBAGENT_TASK_ID=${shellQuote(artifacts.initialTaskId!)}`);
 		}
 		env.push(`PI_SUBAGENT_SESSION=${shellQuote(artifacts.sessionFile)}`);
 		env.push(`PI_SUBAGENT_ID=${shellQuote(resolved.id)}`);
@@ -711,19 +838,9 @@ async function startPiProcess(
 	resolved: ResolvedLaunch,
 	artifacts: PreparedArtifacts,
 	command: string,
+	launchScriptFile: string,
 	operations: PiLaunchOperations,
 ): Promise<string> {
-	const launchScriptFile = join(
-		resolved.artifactDir,
-		"subagent-scripts",
-		`${safeName(resolved.request.name) || "subagent"}-${resolved.id}.sh`,
-	);
-	if (artifacts.worktree && !resolved.request.handoff) {
-		requireWorktreeOperations(operations).persistWorktreeResult(
-			artifacts.worktree,
-			"running",
-		);
-	}
 	return await operations.runScript(artifacts.surface, command, {
 		scriptPath: launchScriptFile,
 		scriptPreamble: [
@@ -738,17 +855,21 @@ async function startPiProcess(
 function createRunningChild(
 	resolved: ResolvedLaunch,
 	artifacts: PreparedArtifacts,
-	launchScriptFile: string,
 ): PiRunningChild {
-	return {
+	const child: PiRunningChild = {
 		id: resolved.id,
 		name: resolved.request.name,
 		task: resolved.request.task,
 		agent: resolved.request.agent,
 		surface: artifacts.surface,
+		ownsSurface: !artifacts.worktree && !resolved.request.surface,
 		startTime: resolved.startTime,
 		sessionFile: artifacts.sessionFile,
-		launchScriptFile,
+		launchScriptFile: join(
+			resolved.artifactDir,
+			"subagent-scripts",
+			`${safeName(resolved.request.name) || "subagent"}-${resolved.id}.sh`,
+		),
 		activityFile: artifacts.activityFile,
 		interactive: resolved.request.behavior.interactive,
 		runtimePlan: resolved.request.runtimePlan,
@@ -759,6 +880,30 @@ function createRunningChild(
 		lifecycle: createLifecycle(resolved.startTime),
 		processIdentityFile: artifacts.processIdentityFile,
 	};
+	const { policy, initialTaskId } = artifacts;
+	if (policy.persistent) {
+		Object.assign(child, {
+			persistent: true,
+			logicalId: policy.logicalId,
+			generationId: policy.generationId,
+			policyHash: policy.policyHash,
+			policyTools: policy.tools,
+			policyDeniedTools: policy.deniedTools,
+			tasksCompleted: 0,
+			taskId: initialTaskId,
+			issuedTaskIds: [initialTaskId!],
+			inboxSequence: 0,
+			observedTaskEvents: 0,
+		});
+		appendPersistentDeliveryLedger(child.sessionFile, {
+			task: initialTaskId!,
+			outcome: "dispatched",
+			generation: policy.generationId,
+			logicalId: policy.logicalId,
+			policyHash: policy.policyHash,
+		});
+	}
+	return child;
 }
 
 // Capture runs beside the launch so readiness never delays the acknowledgement;

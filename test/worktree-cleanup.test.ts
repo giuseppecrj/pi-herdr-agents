@@ -736,8 +736,24 @@ describe("cleanup operating-system probes", () => {
 			assert.equal(result.status, "blocked");
 			assert.match(result.message, /ETIMEDOUT/);
 			assert.deepEqual(f.calls, []);
-			await assert.rejects(async () => ops.listWorktrees("/repo"), /ETIMEDOUT/);
-			assert.throws(() => ops.removeWorkspace("fixture"), /ETIMEDOUT/);
+			await __herdrTest__.withMockHerdrExec(
+				(_args, timeout, mode) => {
+					assert.equal(timeout, 30_000);
+					assert.equal(mode, "async");
+					calls.push("herdr");
+					throw new Error("ETIMEDOUT");
+				},
+				async () => {
+					await assert.rejects(
+						async () => ops.listWorktrees("/repo"),
+						/ETIMEDOUT/,
+					);
+					await assert.rejects(
+						async () => ops.removeWorkspace("fixture"),
+						/ETIMEDOUT/,
+					);
+				},
+			);
 			assert.deepEqual(calls, ["git", "herdr", "herdr"]);
 		} finally {
 			mocked.mock.restore();

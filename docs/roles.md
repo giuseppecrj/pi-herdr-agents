@@ -170,6 +170,11 @@ subagent({
 });
 ```
 
+Role files accept LF or CRLF line endings and an optional leading UTF-8 BOM.
+An invalid or unreadable global or project definition blocks that role name
+at its precedence layer rather than exposing a lower-priority definition.
+Discovery reports the file error and continues loading unrelated roles.
+
 Agent files are read when definitions are listed or launched, so creating or
 editing one normally does not require `/reload`. Installing, removing, updating,
 or changing the extension code of a role pack uses Pi's normal `/reload` flow.
@@ -298,7 +303,7 @@ Choose how a subagent session starts:
 
 - `standalone` — default fresh session with no lineage link to the caller
 - `lineage-only` — fresh blank child session with `parentSession` linkage, but no copied turns from the caller
-- `fork` — linked child session seeded with the caller's prior conversation context
+- `fork` creates a linked child session from the caller's active conversation branch before the triggering user turn. It excludes abandoned branches and preserves the relationships between retained compaction and lineage entries.
 
 `lineage-only` is useful when you want session discovery and fork lineage UX to show the relationship later, but you do **not** want the child to inherit the parent's turns.
 

@@ -312,6 +312,7 @@ export default function subagentsExtension(
 			hooks: {
 				onSpawned(record) {
 					runningSubagents.set(record.id, record);
+					runtime.persistentReservations?.delete(record.id);
 					startWidgetRefresh();
 					startStatusRefresh(runtime.pi!);
 				},
@@ -461,6 +462,7 @@ export default function subagentsExtension(
 		const session = runtime.session;
 		const shutdown = session?.shutdown(event.reason);
 		if (!shouldPreserveSubagentsOnShutdown(event.reason)) {
+			runtime.persistentReservations?.clear();
 			for (const running of runningSubagents.values())
 				if (running.stopTimeout) clearTimeout(running.stopTimeout);
 			// Also gate/abort legacy rows retained from a pre-composition reload.

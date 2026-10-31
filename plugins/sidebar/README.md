@@ -112,7 +112,7 @@ Each action writes one message to its log. Read it with `herdr plugin log list -
 | `2` | The action name was not `focus`, `all`, or `restore`. |
 | `3` | All left another tool's view in place. |
 
-A Herdr server restart drops the view and every marker. The startup hook and the next detected agent apply Focus again, unless you chose All. With Herdr's socket but no state directory, the actions still work but save nothing, and `restore` acts as Focus. If you run All while a hook is applying Focus, the hook rereads your choice and clears its own Focus again. If a save fails, the log says so and the action still runs.
+A Herdr server restart drops the view and every marker. The startup hook and the next detected agent apply Focus again, unless you chose All. With Herdr's socket but no state directory, the actions still work but save nothing, and `restore` acts as Focus. If you run All while a hook is applying Focus, the hook rereads your choice and clears its own Focus again. That compensating clear is checked like All: a failed or malformed response, or this plugin's view remaining active, returns status `1`; a foreign view is left intact and returns status `3`. The hook does not claim successful restoration when clearing failed. If a save fails, the log says so and the action still runs.
 
 ## Troubleshooting
 

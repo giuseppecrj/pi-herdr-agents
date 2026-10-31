@@ -22,7 +22,7 @@ Delegate investigation, implementation, and review without blocking the parent s
 
 ## Features
 
-- **Non-blocking delegation.** `subagent` acknowledges the launch at once, and the parent keeps working.
+- **Non-blocking delegation.** `subagent` acknowledges resource acquisition without waiting for the child's task. Launch subprocesses run asynchronously so parent supervision can continue.
 - **Parallel execution.** Run independent scouts, workers, and reviewers at the same time.
 - **Live supervision.** Pi's subagent widget tracks process and turn state. You can interrupt one child turn without ending its session.
 - **Managed worktrees.** Writing agents can run in retained Herdr workspaces with explicit Git ownership and recovery details.
@@ -81,7 +81,7 @@ A bare launch needs no installed role. Ask Pi to delegate in plain language:
 Use two subagents in parallel to map the authentication flow and the session schema, then summarize their findings.
 ```
 
-Pi can also call the tool directly. Each call returns at once, and each result comes back on its own:
+Pi can also call the tool directly. Each call acknowledges acquisition without waiting for the task, and each result comes back on its own:
 
 ```typescript
 subagent({ name: "auth-research", model: "<provider>/<fast-tier-id>", thinking: "low", task: "Map the authentication flow" });
@@ -106,7 +106,7 @@ The parent is the coordinator. Give each child one bounded outcome with its goal
 
 ![Pi Herdr Agents lifecycle: spawn a child, run it in Herdr, supervise live state, and deliver one bounded result to the parent.](https://raw.githubusercontent.com/giuseppecrj/pi-herdr-agents/main/docs/assets/async-subagent-lifecycle.png)
 
-A `subagent` call selects the target checkout, reuses its Herdr workspace, and gives the child a pane in an extension-owned `Agents` tab. Four panes fit in each tab by default, and overflow opens another tab in the same workspace. The call launches a child Pi session and returns `started`. The parent watches Herdr process state and child activity and shows the result in a live widget:
+A `subagent` call selects the target checkout, reuses its Herdr workspace, and gives the child a pane in an extension-owned `Agents` tab. Four panes fit in each tab by default, and overflow opens another tab in the same workspace. The call provisions its resources, launches a child Pi session, and returns `started`. If dispatch is uncertain but an owner was acquired, it returns `uncertain` and keeps that owner supervised instead of trying another model. Do not blindly relaunch an uncertain request. The parent watches Herdr process state and child activity and shows the result in a live widget:
 
 ```text
 ╭─ Subagents ──────────────────── 1 active · 1 open ─╮
@@ -127,7 +127,7 @@ The parent session gets these tools:
 
 | Tool | Use |
 | --- | --- |
-| `subagent` | Launch a child in a Herdr pane. Returns at once. |
+| `subagent` | Launch a child in a Herdr pane. Acknowledges acquisition without waiting for the task. |
 | `subagent_interrupt` | Stop the current turn of a running child. The session stays open. |
 | `subagent_cancel` | End an ordinary run. No fallback model is tried, and one cancelled result is delivered. |
 | `subagent_send` | Send the next task to an idle persistent specialist. |
@@ -165,7 +165,7 @@ A `model` value can also be an ordered fallback list, such as `provider/preferre
 /subagents-init Prefer capability over price for implementation; keep recon inexpensive
 ```
 
-Ordinary non-persistent runs try later candidates after a launch failure or a provider or agent error, never after a completed negative result. Persistent specialists do not advance after a running-child error. Worktrees use the first authenticated candidate only. A catalog-listed model can still be rejected by your provider account at request time.
+Ordinary non-persistent runs try later candidates after a safe launch failure or a provider or agent error, never after a completed negative result. An uncertain resource creation or command dispatch blocks fallback because another attempt could duplicate work. Persistent specialists do not advance after a running-child error. Worktrees use the first authenticated candidate only. A catalog-listed model can still be rejected by your provider account at request time.
 
 Cross-family independent review requires a reviewer from a different model family than the author. `task:review` alone does not establish that. For ordinary review, prefer a different authenticated model family. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback. See [Model resolution and fallback](docs/configuration.md#model-resolution-and-fallback), [Task routing](docs/configuration.md#task-routing), and [Draft task-model preferences](docs/configuration.md#draft-task-model-preferences).
 

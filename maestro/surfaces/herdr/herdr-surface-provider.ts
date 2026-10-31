@@ -28,7 +28,6 @@ import {
 	sendHerdrKeys,
 } from "./herdr.ts";
 import {
-	getHerdrPaneProcessInfo,
 	getHerdrPaneProcessInfoAsync,
 	inspectHerdrPane,
 	listHerdrPanes,
@@ -50,7 +49,7 @@ export class HerdrSurfaceProvider implements SurfaceProvider {
 		return isHerdrAvailable();
 	}
 
-	createSurface(opts: CreateSurfaceOptions): string {
+	createSurface(opts: CreateSurfaceOptions): Promise<string> {
 		const placement = opts.placement ?? { kind: "grouped" };
 		if (placement.kind === "grouped") {
 			return createHerdrGroupedSurface(
@@ -58,23 +57,29 @@ export class HerdrSurfaceProvider implements SurfaceProvider {
 				opts.cwd,
 				this.#paneConfig.maxPerTab,
 				this.#paneConfig.direction,
+				opts,
 			);
 		}
 		if (placement.kind === "split") {
-			return createHerdrSurfaceSplit(opts.name, placement.direction, opts.cwd);
+			return createHerdrSurfaceSplit(
+				opts.name,
+				placement.direction,
+				opts.cwd,
+				opts,
+			);
 		}
-		return createHerdrSurface(opts.name, opts.cwd);
+		return createHerdrSurface(opts.name, opts.cwd, opts);
 	}
 
-	runCommand(surfaceId: string, command: string): void {
-		sendHerdrCommand(surfaceId, command);
+	runCommand(surfaceId: string, command: string): Promise<void> {
+		return sendHerdrCommand(surfaceId, command);
 	}
 
 	runScript(
 		surfaceId: string,
 		command: string,
 		options: { scriptPath: string; scriptPreamble: string },
-	): string {
+	): Promise<string> {
 		return runScriptInPane(surfaceId, command, options);
 	}
 
@@ -82,8 +87,8 @@ export class HerdrSurfaceProvider implements SurfaceProvider {
 		return readHerdrScreenAsync(surfaceId, lines);
 	}
 
-	closeSurface(surfaceId: string): void {
-		closeHerdrSurface(surfaceId);
+	closeSurface(surfaceId: string): Promise<void> {
+		return closeHerdrSurface(surfaceId);
 	}
 
 	async listSurfaces(opts?: { timeoutMs?: number }): Promise<SurfaceInfo[]> {
@@ -109,12 +114,16 @@ export class HerdrSurfaceProvider implements SurfaceProvider {
 		};
 	}
 
-	createWorktreeSurface(opts: CreateWorktreeSurfaceOptions): WorktreeSurface {
-		const worktree = createHerdrWorktree(
+	async createWorktreeSurface(
+		opts: CreateWorktreeSurfaceOptions,
+	): Promise<WorktreeSurface> {
+		const worktree = await createHerdrWorktree(
 			opts.name,
 			opts.cwd,
 			opts.branch,
 			opts.base,
+			undefined,
+			opts,
 		);
 		const surface: WorktreeSurface = {
 			path: worktree.path,
@@ -135,8 +144,8 @@ export class HerdrSurfaceProvider implements SurfaceProvider {
 	removeWorktreeSurface(
 		workspaceId: string,
 		opts?: { timeoutMs?: number },
-	): void {
-		removeHerdrWorktree(workspaceId, opts?.timeoutMs);
+	): Promise<void> {
+		return removeHerdrWorktree(workspaceId, opts?.timeoutMs);
 	}
 
 	setupHint(): string {
@@ -149,20 +158,15 @@ export class HerdrSurfaceProvider implements SurfaceProvider {
 		return result;
 	}
 
-	sendKeys(surfaceId: string, keys: string): void {
-		sendHerdrKeys(surfaceId, keys);
+	sendKeys(surfaceId: string, keys: string): Promise<void> {
+		return sendHerdrKeys(surfaceId, keys);
 	}
 
 	async getProcessInfo(
 		surfaceId: string,
 		opts?: { timeoutMs?: number },
 	): Promise<SurfaceProcessInfo> {
-		// Preserve ordinary asynchronous inspection; explicit cleanup probes retain
-		// the bounded synchronous CLI deadline used by the shipped cleanup path.
-		const info =
-			opts?.timeoutMs === undefined
-				? await getHerdrPaneProcessInfoAsync(surfaceId)
-				: getHerdrPaneProcessInfo(surfaceId, opts.timeoutMs);
+		const info = await getHerdrPaneProcessInfoAsync(surfaceId, opts?.timeoutMs);
 		return {
 			shellPid: info.shellPid,
 			foregroundProcessGroupId: info.foregroundProcessGroupId,
@@ -197,17 +201,20 @@ export class HerdrSurfaceProvider implements SurfaceProvider {
 		cwd?: string;
 		timeoutMs?: number;
 	}): Promise<WorktreeSurfaceInfo[]> {
-		return listHerdrWorktrees(opts?.cwd, opts?.timeoutMs).map((worktree) => ({
-			...worktree,
-		}));
+		return (await listHerdrWorktrees(opts?.cwd, opts?.timeoutMs)).map(
+			(worktree) => ({
+				...worktree,
+			}),
+		);
 	}
 
-	focusWorkspace(workspaceId: string): void {
-		focusHerdrWorkspace(workspaceId);
+	focusWorkspace(workspaceId: string): Promise<void> {
+		return focusHerdrWorkspace(workspaceId);
 	}
 
-	setTitle(target: "tab" | "workspace", title: string): void {
-		if (target === "tab") renameHerdrTab(title);
-		else renameHerdrWorkspace(title);
+	setTitle(target: "tab" | "workspace", title: string): Promise<void> {
+		return target === "tab"
+			? renameHerdrTab(title)
+			: renameHerdrWorkspace(title);
 	}
 }

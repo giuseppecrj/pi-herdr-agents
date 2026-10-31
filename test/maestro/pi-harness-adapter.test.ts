@@ -148,11 +148,11 @@ describe("PiHarnessAdapter", () => {
 		usingFixture(async (f) => {
 			const effects = createWorktreeOperations();
 			const probes: string[] = [];
-			effects.resolveGitCommit = (_cwd, ref) => {
+			effects.resolveGitCommit = async (_cwd, ref) => {
 				probes.push(ref);
 				return "base-sha";
 			};
-			effects.resolveWorktreeProvisionCwd = (cwd) => cwd;
+			effects.resolveWorktreeProvisionCwd = async (cwd) => cwd;
 			const adapter = new PiHarnessAdapter({
 				surface: f.surface,
 				paneConfig,

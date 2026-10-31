@@ -19,7 +19,7 @@ export function createPiPersistentIO(state: {
 	readonly worktreeOperations: WorktreeOperations;
 }): PiPersistentIO {
 	const io: PiPersistentIO = {
-		inspectWorktree: (r) =>
+		inspectWorktree: async (r) =>
 			r.worktree
 				? state.worktreeOperations.captureWorktreeHandoff(r.worktree)
 				: undefined,
@@ -51,7 +51,18 @@ export function createPiPersistentIO(state: {
 		},
 		requestStop(r) {
 			const task = r.taskId ?? "stop";
-			if (r.taskId) ledger(r, task, "stop-pending");
+			if (
+				r.taskId &&
+				!io
+					.readLedger(r)
+					.some(
+						(row) =>
+							row.task === task &&
+							row.generation === r.generationId &&
+							row.outcome === "stop-pending",
+					)
+			)
+				ledger(r, task, "stop-pending");
 			writePersistentTaskInbox(
 				r.sessionFile,
 				(r.inboxSequence = (r.inboxSequence ?? 0) + 1),

@@ -51,7 +51,7 @@ This page is the detailed reference for the tools, commands, and run lifecycle o
 ## Async Subagent Flow
 
 ```
-1. Agent calls subagent()          → returns immediately ("started")
+1. Agent calls subagent()          → acknowledges acquisition, not task completion
 2. Sub-agent runs in herdr pane    → widget shows live status
 3. User keeps chatting             → main session fully interactive
 4. Sub-agent finishes              → result steered back as a normal completion/failure
@@ -224,6 +224,57 @@ An ownership manifest is written under the parent session's `artifacts/<session-
 
 The extension does **not** push, create a PR, merge, cherry-pick, or remove the worktree or branch automatically. For task selection, lifecycle states, review commands, failure recovery, and safe cleanup, read [Worktree subagents](worktree-subagents.md). The [research report](research/worktree-subagent-orchestration.md) records the rationale and deferred roadmap.
 
+### Launch deadlines and uncertainty
+
+Launch, pane inspection, and Git handoff subprocesses run asynchronously with
+finite budgets. The acknowledgement follows provisioning and command dispatch;
+it does not wait for the child's task. These are separate operation limits, not
+an end-to-end launch deadline.
+
+| Operation | Budget |
+| --- | --- |
+| Ordinary Herdr request | 10 seconds |
+| Pane placement, including queue wait | 30 seconds |
+| Worktree acquisition, including advisory snapshots and optional grouping | 120 seconds |
+| Recovery inspection after uncertain worktree creation | 6 seconds total |
+| Each primary-workspace snapshot | 3 seconds |
+| Cosmetic pane or tab rename | 1 second |
+| Shell or Pi readiness | 10 seconds |
+| Pane-absence confirmation | 5 seconds |
+| Git base resolution | 10 seconds |
+| Git principal-checkout resolution | 15 seconds |
+| Complete Git handoff inspection | 15 seconds |
+
+Herdr and Git clients capture at most 1 MiB per output stream. Failed, timed-out,
+oversized, or malformed Git inspection produces unknown handoff fields, not a
+clean-state claim. Readiness queries consume the remaining readiness budget and
+cannot establish success after it expires.
+
+A definite failure before command dispatch, such as an unwritable launch script,
+is a normal launch failure. Ordinary rollback must confirm pane absence before
+model fallback can proceed. Worktree launches retain the checkout and report the
+failure without supervising a child that never started.
+
+A timed-out Herdr client does not prove that the server cancelled its operation.
+Uncertain creation or dispatch never advances the model fallback list. A launch
+with no identified owner fails with the observed resource identities and any
+retained manifest. The host never adopts or closes a resource by its label.
+
+When a real initialized owner exists but dispatch or rollback is uncertain, the
+acknowledgement carries `status: "uncertain"` and `launchFailure`. The host keeps
+that owner controlled and supervised until termination is confirmed. It attempts
+owned termination, retains unconfirmed owners, and delivers a result after exit
+confirmation. If both supervision and termination probes keep failing, retry
+waits increase from 1 second to a 30-second cap. They never trigger model
+fallback or discard the owner. Suppression or confirmed cancellation releases
+the retry wait immediately. Worktree roots and caller-provided panes remain retained. A
+persistent specialist with an uncertain launch cannot accept follow-up tasks.
+Do not blindly retry an uncertain launch. See [recovery](troubleshooting.md#an-acquisition-or-dispatch-is-uncertain).
+
+Explicit cleanup Git commands and macOS process enumeration remain bounded
+synchronous operations. Filesystem and Pi SDK operations can also run
+synchronously. This change does not make all host I/O nonblocking.
+
 ### Accept checks
 
 Pass `accept` to turn a finished run into an accepted or rejected outcome. The host runs the caller's command; it ships no checks and no default command ([ADR-0017](adr/0017-accept-check.md)).
@@ -261,9 +312,16 @@ Each model attempt also appends one line to the [outcome ledger](configuration.m
 
 Set `persistent: true` on a `subagent` launch to create one logical specialist with one v1 session generation. Its resolved tools, denied tools, model, thinking level, and optional worktree binding are snapshotted at launch and do not change when work is sent later. `subagents_list` shows each live specialist's logical ID, generation ID, state, completed-task count, and effective policy.
 
-The initial task and each `subagent_send({ id|name, message })` task are delivered exactly once with a task ID. A specialist accepts one task at a time. Sends while it is working are recorded as `rejected-busy`; no queue is retained. After a task result arrives, it is idle and accepts the next task. A persistent child's `caller_ping` records a help request but keeps the session alive; answer with `subagent_send`.
+The initial task and each `subagent_send({ id|name, message })` task are dispatched with a task ID. Parent-owned in-process bookkeeping prevents a successful task-result or help notification from being sent again when its ledger acknowledgment fails; the acknowledgment alone is retried, including across `/reload`. This bookkeeping does not survive a full process crash and is not a durable exactly-once messaging guarantee. A specialist accepts one task at a time. Sends while it is working are recorded as `rejected-busy`; no queue is retained. After a task result arrives, it is idle and accepts the next task while its process remains open. Once process exit is observed, sends and stop requests are rejected even while the final Git handoff is pending. A persistent child's `caller_ping` records a help request but keeps the session alive; answer with `subagent_send`.
 
-Use `subagent_stop({ id|name })` to request graceful shutdown. If a task is active, stop becomes `stop-pending` and the task reaches its terminal outcome first. The parent reports `stopped` only after process-exit evidence is confirmed, then closes an ordinary pane it created and releases the name. If confirmation times out, the specialist is `stalled` in an unconfirmed-stop state: `subagent_send` rejects follow-up work while retaining evidence. Request `subagent_stop` again to make another bounded exit check, or spawn a new specialist. A pane or process disappearance without a stop directive produces one facts-only crash notice; persistent sessions cannot be resumed in v1, so spawn a new specialist. There is no automatic restart, replay, or revival.
+Use `subagent_stop({ id|name })` to request graceful shutdown. If a task is active, stop becomes `stop-pending` and the task reaches its terminal outcome first. An uncertain launch's initial task does not hold stop pending. Its bounded exit wait starts immediately. The parent reports `stopped` only after process-exit evidence is confirmed, then closes an ordinary pane it created and releases the name. If confirmation times out, the specialist is `stalled` in an unconfirmed-stop state: `subagent_send` rejects follow-up work while retaining evidence. If publishing the stop directive fails, it likewise enters a retryable failed-stop state rather than remaining permanently stop-pending. Request `subagent_stop` again to publish another directive and make another bounded exit check, or spawn a new specialist. Timeout notices belong to one stop attempt and wait for a live parent API across reload and session-replacement gaps. Notification failures are contained and retried. A new stop attempt, verified process exit, or quitting cancels the old notice, including pending evidence reads and retry timers. If exit is confirmed after a stop timeout or publication failure, the parent receives one terminal stopped update and a stopped ledger entry. A pane or process disappearance without a stop directive produces one facts-only crash notice; persistent sessions cannot be resumed in v1, so spawn a new specialist. There is no automatic restart, replay, or revival.
+
+A persistent completion sidecar records the child's intended outcome before
+shutdown. It does not prove process exit. The host retains lifetime ownership
+until a verified process identity has exited, the shell has emitted its post-exit
+marker, or pane absence confirms termination when no identity is known alive.
+A known-live identity prevents a stale marker or missing pane from establishing
+exit. Task events can still arrive while shutdown is pending.
 
 A persistent specialist with a worktree holds that lease for its entire lifetime. It cannot be re-bound to another checkout. Otherwise it runs in an ordinary pane.
 
@@ -295,7 +353,7 @@ subagent_cancel({ name: "Scout" });
 
 Target resolution matches `subagent_interrupt`: an exact running ID or an exact, unambiguous display name. Persistent specialists are rejected; use `subagent_stop`, whose graceful v1 semantics are unchanged.
 
-The cancel intent is recorded before anything is aborted or killed. From then on the run never advances its model shortlist, retries, or recovers, even when terminating the pane makes the watcher observe a lost pane, and even when a fallback launch was already in flight. The result reports one status:
+The cancel intent is recorded before anything is aborted or killed. From then on the run never advances its model shortlist or starts another execution attempt, even when terminating the pane makes the watcher observe a lost pane, and even when a fallback launch was already in flight. The result reports one status:
 
 | Status | Meaning |
 | --- | --- |
@@ -303,6 +361,13 @@ The cancel intent is recorded before anything is aborted or killed. From then on
 | `requested` | A launch or fallback acquisition is still in flight. Its owner is terminated as soon as it is acquired; no later model is tried. |
 | `unconfirmed` | Termination failed (the error is reported). The run stays live, owned, and supervised, and nothing is delivered or cleaned up. Call `subagent_cancel` again to retry. |
 | `already-terminal` | The run already took a natural result or was retired; nothing was cancelled. |
+
+If a watcher fails while cancellation remains unconfirmed, the host retries
+observation of the same owner with bounded backoff. A failed watcher is not exit
+evidence and does not trigger another kernel termination attempt. Once real
+completion evidence arrives, the producer makes one confirmation attempt. If
+termination is still unconfirmed, an explicit cancel retry or shutdown releases
+that wait.
 
 Repeated cancels join an in-flight termination and keep the first request time. The parent receives exactly one `subagent_result` whose details carry `error: "cancelled"` and a `cancellation` record (`requestedAt`, `termination`, `confirmedAt`). Its message says the run was cancelled and lists any models already attempted. It is never presented as a provider failure. A child's natural result taken before the cancel stays authoritative. A cancel while a provider error is still eligible for fallback wins and stops that fallback. A cancel while the parent re-runs an [accept check](#accept-checks) stops that check and delivers the cancelled result with `Check: skipped (cancelled)`.
 
@@ -382,7 +447,7 @@ Parent sessions can call `worktree_remove({ target: "<path|branch|workspace-id>"
 
 Eligibility is rechecked at removal time: canonical source-repository cwd containment, registered linked checkout, no detected process holder, known live child, or persistent lease, and clean Git state with no untracked files or conflicts. A successful launch from a linked checkout does not itself authorize its removal; cleanup uses the canonical principal/source repository under the invoking parent session's cwd, not `manifest.sourceCwd` or shared Git identity. Start the parent Pi session rooted at that principal checkout or an ancestor containing it, then use normal explicit cleanup; `cd` inside an existing Pi session does not change the session cwd. A source repository that is a Git submodule is located through the `core.worktree` setting of its shared Git directory under the superproject's `.git/modules`, not through that directory's parent. Unknown inspection, identity disagreements, detached HEAD, locked checkouts, and initialized submodules block removal. Out-of-scope repositories are never eligible. Open worktree workspaces use Herdr removal. The source repository's primary workspace is never closed automatically. If this process recorded that worktree creation appeared to open it and a read taken just before the report still shows it untouched, removal adds `wX appears to have been opened by worktree creation; if you haven't used it, close it with herdr workspace close wX`; a missing or wrong-typed field, another open workspace for the repository, another session, or a restarted process reports nothing. Orphans use Git removal and registration pruning after checkout absence is verified. Owned reachable manifests are marked `removed`; manifests from other sessions are not required or rewritten. Stale removed manifests never govern a recreated checkout. Missing or dangling manifest paths do not affect unrelated checkouts; undecidable or conflicting manifest identity still blocks removal. A failed manifest update after removal is reported as a warning. Symlinked ancestors are supported; checkout symlinks escaping the canonical managed root are blocked. Process inspection covers observable same-user processes across sessions, regardless of runtime name, exempting only Herdr-confirmed idle retained shells, never runtimes at the same PID. Unreadable individual process details produce non-blocking warnings without an override flag; scanning continues so another observable holder still blocks removal. Human and structured inventory/removal results disclose incomplete coverage, including warnings seen before a later recheck or failure. Same-user inspection is permission-limited, and other-user processes are not inspected: a protected process could hold the checkout undetected. Warnings aggregate counts and bounded PID samples, not commands or environments. Linux uses `/proc`; macOS uses same-user `lsof` cwd records and warns for unreadable individual records. Unsupported platforms, failed global enumeration (including a failed `lsof` with partial output), and other unverifiable eligibility evidence still block removal. Cleanup Git and Herdr calls have 30-second timeouts.
 
-A worktree launch may add three synchronous Herdr snapshots (`worktree list` before create, `worktree list` after create, and `pane list` for the opened primary), each bounded at 3 seconds, 9 seconds if all three run to their timeouts. A failed snapshot claims nothing and is returned as a launch diagnostic, shown in the `subagent` acknowledgement and the `/worktree` notice; it is not written to the console. Claims are kept only in this process and are not written to the manifest. Ordinary non-worktree launches add no Herdr calls. Explicit removal adds a primary-workspace report only when this process holds a claim for the removed source repository: `worktree list`, `workspace get`, and `pane list`, each asynchronous and bounded at 3 seconds, taken after the checkout is removed. That is at most three calls and 9 seconds of wall time, without blocking the event loop. These report calls sit on top of the existing cleanup Git and Herdr calls, which stay at 30 seconds each.
+A worktree launch may add three asynchronous Herdr snapshots (`worktree list` before create, `worktree list` after create, and `pane list` for the opened primary), each bounded at 3 seconds. Together they can add up to 9 seconds of wall time within the worktree-acquisition budget without blocking the event loop. A failed snapshot claims nothing and is returned as a launch diagnostic, shown in the `subagent` acknowledgement and the `/worktree` notice; it is not written to the console. Claims are kept only in this process and are not written to the manifest. Ordinary non-worktree launches add no Herdr calls. Explicit removal adds a primary-workspace report only when this process holds a claim for the removed source repository: `worktree list`, `workspace get`, and `pane list`, each asynchronous and bounded at 3 seconds, taken after the checkout is removed. That is at most three calls and 9 seconds of wall time, without blocking the event loop. These report calls sit on top of the existing cleanup Git and Herdr calls, which stay at 30 seconds each.
 
 Cleanup never deletes or rewrites branches, uses force flags, or runs automatically. It never closes the source repository's primary workspace. Session startup does not scan worktree inventory, avoiding blocking Pi initialization; use `/worktree list` or `worktree_list` for an explicit inventory. Child sessions retain `/worktree list` and `/worktree <name>`, but receive neither cleanup tools nor the remove subcommand. Their repository-local listing labels detached entries `(detached HEAD)`; a detached sibling does not prevent inspection of named branches. See [cleanup and recovery](worktree-subagents.md#cleanup) for details.
 

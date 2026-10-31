@@ -215,8 +215,13 @@ describe("opened primary workspace snapshots", () => {
 				"worktree create": [created()],
 				"pane list": [paneList()],
 			});
-			await __herdrTest__.withMockHerdrExec(script.exec, () => {
-				const surface = createHerdrWorktree("task", "/repo", "task", "HEAD");
+			await __herdrTest__.withMockHerdrExec(script.exec, async () => {
+				const surface = await createHerdrWorktree(
+					"task",
+					"/repo",
+					"task",
+					"HEAD",
+				);
 				assert.equal(surface.workspaceId, "w2");
 				assert.equal(surface.diagnostics, undefined);
 			});
@@ -247,9 +252,9 @@ describe("opened primary workspace snapshots", () => {
 				"worktree list": [worktreeList("w1")],
 				"worktree create": [created()],
 			});
-			await __herdrTest__.withMockHerdrExec(script.exec, () => {
-				createHerdrWorktree("task", "/repo", "task", "HEAD");
-			});
+			await __herdrTest__.withMockHerdrExec(script.exec, () =>
+				createHerdrWorktree("task", "/repo", "task", "HEAD"),
+			);
 			assert.deepEqual(openedPrimaryWorkspaceClaims(), []);
 			assert.deepEqual(
 				herdrCalls(script.calls).filter((call) =>
@@ -354,9 +359,9 @@ describe("opened primary workspace snapshots", () => {
 					}),
 				],
 			});
-			await __herdrTest__.withMockHerdrExec(script.exec, () => {
-				createHerdrWorktree("task", "/repo", "task", "HEAD");
-			});
+			await __herdrTest__.withMockHerdrExec(script.exec, () =>
+				createHerdrWorktree("task", "/repo", "task", "HEAD"),
+			);
 			assert.deepEqual(openedPrimaryWorkspaceClaims(), []);
 		} finally {
 			clearOpenedPrimaryWorkspaceClaims();

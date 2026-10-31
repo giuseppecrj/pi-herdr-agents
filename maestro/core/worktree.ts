@@ -83,10 +83,10 @@ export function worktreeResultState(
 
 /** Launch and completion consume effects supplied by the runtime composition. */
 export interface WorktreeOperations {
-	resolveGitCommit(cwd: string, ref: string): string;
-	resolveWorktreeProvisionCwd(sourceCwd: string): string;
+	resolveGitCommit(cwd: string, ref: string): Promise<string>;
+	resolveWorktreeProvisionCwd(sourceCwd: string): Promise<string>;
 	writeWorktreeManifest(path: string, value: JsonObject): void;
-	captureWorktreeHandoff(worktree: WorktreeLaunch): WorktreeHandoff;
+	captureWorktreeHandoff(worktree: WorktreeLaunch): Promise<WorktreeHandoff>;
 	persistWorktreeResult(
 		worktree: WorktreeLaunch,
 		state: WorktreeResultState,

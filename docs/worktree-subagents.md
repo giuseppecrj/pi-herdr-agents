@@ -40,6 +40,14 @@ Omit `worktree` for an ordinary pane. If a generated tool client requires every 
 
 Worktrees isolate checkouts, indexes, and `HEAD`. They are **not security sandboxes**: worktrees still share the repository's object database and most refs, and the child process has the same host permissions as Pi.
 
+Host-managed Git commands select their checkout through their working directory,
+not inherited `GIT_DIR`, `GIT_WORK_TREE`, index/object-directory overrides, or
+command-local `GIT_CONFIG_*` overrides. The host removes those variables from a
+copy of its subprocess environment. Normal user/global configuration (including
+included files), identity, signing, credentials, and hooks remain enabled. This
+policy does not modify the parent environment, user shell commands, accept checks,
+or the environment of an already-running Herdr server.
+
 ## Launch contract
 
 For a worktree launch:
@@ -48,7 +56,7 @@ For a worktree launch:
 - `worktree.branch` is a new, unique branch name. Git/Herdr rejects a branch that cannot be created or is already checked out elsewhere.
 - `worktree.base` may be any revision that resolves to a commit in the source repository. It defaults to committed `HEAD`.
 - The extension resolves `base` to an exact SHA, writes an ownership manifest, then calls `herdr worktree create --no-focus`.
-- Herdr groups the new worktree with the source repository's primary workspace and opens one when none is open. The extension reads `herdr worktree list --cwd` before and after creation, and `herdr pane list` for the opened workspace's terminal, only to record a claim in this process. Each of those reads has a 3-second timeout. A worktree launch runs at most three of them; if each runs to its timeout, that is 9 seconds on top of create. A workspace you already had open is not claimed. An unreadable, timed-out, or incomplete snapshot claims nothing and is reported as a launch diagnostic in the `subagent` acknowledgement or `/worktree` notice, never on the console. A failed before-snapshot skips the later reads. Ordinary pane launches do not make these calls. The claim is not written to the manifest and is not kept after this process exits.
+- Herdr groups the new worktree with the source repository's primary workspace and opens one when none is open. The extension asynchronously reads `herdr worktree list --cwd` before and after creation, and `herdr pane list` for the opened workspace's terminal, only to record a claim in this process. Each read has a 3-second timeout. At most three reads consume up to 9 seconds of wall time within the 120-second worktree-acquisition budget without blocking the event loop. A workspace you already had open is not claimed. An unreadable, timed-out, or incomplete snapshot claims nothing and is reported as a launch diagnostic in the `subagent` acknowledgement or `/worktree` notice, never on the console. A failed before-snapshot skips the later reads. Ordinary pane launches do not make these calls. The claim is not written to the manifest and is not kept after this process exits.
 - The child starts at the root of the returned worktree, in that workspace's retained root pane and newly owned `Agents` tab. Finishing Pi returns to the interactive checkout shell; it does not close the root pane. A successful launch from a linked checkout does not itself authorize cleanup there: cleanup checks the canonical principal/source repository under the invoking parent session's cwd, not `manifest.sourceCwd` or shared Git identity. Start the parent Pi session rooted at the principal checkout or an ancestor containing it, then use normal explicit cleanup; changing directories inside an existing Pi session does not change its session cwd.
 - Uncommitted and untracked files from the parent checkout are not copied. Commit anything the child must see before spawning it, or pass the needed context in the task.
 - Worktree creation does not steal terminal focus.
@@ -138,7 +146,7 @@ The parent receives the normal child summary plus:
 
 With an [accept check](tools.md#accept-checks), the parent captures this handoff first and then re-runs the check in the worktree root, so build output the check writes is not in the reported state. The `Check:` line lists any changed or untracked files under the check's `paths`. A rejected verdict does not change the manifest state; a cancel during the re-check records `cancelled`.
 
-If Git inspection fails, SHA/count/state/file fields are reported as unknown rather than guessed, and the warning is included in the handoff. Inspect the retained workspace directly before integrating or deleting it. Every retained handoff points to `/worktree remove` and `worktree_remove`, with the raw Herdr command as an operator override after independent safety checks.
+The runtime captures one Git handoff for each watched attempt before the parent accept check. Its asynchronous probes share a 15-second budget and a 1 MiB limit per output stream. If Git inspection fails, times out, exceeds that limit, or returns malformed required evidence, SHA/count/state/file fields are reported as unknown rather than guessed, and the warning is included in the handoff. Inspect the retained workspace directly before integrating or deleting it. Every retained handoff points to `/worktree remove` and `worktree_remove`, with the raw Herdr command as an operator override after independent safety checks.
 
 ## Parallel pull-request review without new worktrees
 
@@ -193,8 +201,8 @@ The extension never pushes, creates a PR, merges, cherry-picks, or changes the p
 
 ## Failure, help, and restart behavior
 
-- **Ordinary launch failure:** if a fresh launch or `subagent_resume` fails after the extension creates its pane, the extension closes that pane and preserves the original launch error. It does not close a caller-supplied surface.
-- **Creation failure:** the manifest is marked failed. If Herdr created the branch but returned an incomplete response, the extension reconciles a unique branch match through `/worktree list` and records any recovered workspace/path.
+- **Ordinary launch failure:** if a fresh launch or `subagent_resume` fails after the extension creates its pane, rollback closes only that pane and requires absence confirmation. A definite pre-dispatch failure remains eligible for ordinary model fallback after confirmed rollback. A worktree script-write failure retains the checkout and reports the failure without supervising a nonexistent child. If dispatch or rollback remains uncertain, an initialized child stays owned and supervised rather than triggering fallback. The acknowledgement reports `uncertain`. The host does not close a caller-supplied surface.
+- **Creation failure:** the manifest is marked failed. A timeout, transport failure, or incomplete mutation response records `acquisitionUncertain: true` with only observed identities. The host makes one bounded recovery inspection for a unique branch match and records any recovered workspace or path. Recovery evidence does not authorize late Pi dispatch, fallback, or automatic removal. An empty immediate listing does not prove that the server will not finish creation later.
 - **Launch failure after creation:** the manifest is marked failed and the workspace, forked session, and path are retained. The destination is not focused unless Pi startup is confirmed.
 - **Sidebar marker:** the worktree child's root pane carries the delegated marker only while Herdr reports the child's own Pi session for it. The parent clears it when the run finalizes, so the retained shell, and any agent you later start in it, is not marked. After a parent crash the marker expires within 15 seconds of the last write Herdr applied. See the [sidebar plugin README](../plugins/sidebar/README.md#what-a-marker-proves).
 - **Worker failure:** summary and available Git state are returned; the workspace remains open. Auto-exit waits until Pi is fully settled, so a transient provider error followed by automatic compaction or retry does not end the worker early.

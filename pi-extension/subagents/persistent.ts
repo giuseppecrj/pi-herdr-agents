@@ -13,7 +13,7 @@ import type { WorktreeHandoff } from "../../maestro/core/worktree.ts";
 import {
 	type RunningSubagent,
 	type SubagentRuntime,
-	selectCompletionApi,
+	type HeldDelivery,
 } from "./state.ts";
 import type { Controls } from "./controls.ts";
 import {
@@ -39,7 +39,14 @@ export function persistentSpecialistState(
 	running: RunningSubagent,
 ): "idle" | "working" | "stalled" | "stopped" {
 	const projection = projectLifecycle(running.lifecycle, Date.now()).kind;
-	if (running.stopState === "failed") return "stalled";
+	if (
+		projection === "completed" ||
+		projection === "failed" ||
+		projection === "finalizing"
+	)
+		return "stopped";
+	if (running.stopState === "failed" || asPiRecord(running).launchFailure)
+		return "stalled";
 	if (running.stopState)
 		return projection === "stalled" ? "stalled" : "working";
 	if (running.taskId) return projection === "stalled" ? "stalled" : "working";
@@ -55,12 +62,6 @@ export function persistentSpecialistState(
 		projection === "running"
 	)
 		return "working";
-	if (
-		projection === "completed" ||
-		projection === "failed" ||
-		projection === "finalizing"
-	)
-		return "stopped";
 	return "idle";
 }
 
@@ -133,14 +134,8 @@ export function persistentFactsFields(
 
 function sendPersistentStopFailure(
 	api: Pick<ExtensionAPI, "sendMessage">,
-	running: RunningSubagent,
-	io: PiPersistentIO,
+	facts: PersistentSpecialistFacts,
 ): void {
-	const facts = persistentSpecialistFacts(
-		running,
-		io,
-		io.inspectWorktree(asPiRecord(running)),
-	);
 	sendParentMessage(
 		api,
 		"subagent_stop",
@@ -213,24 +208,108 @@ export function createPersistentControls({
 		const specialists = Array.from(runningSubagents.values()).filter(
 			(running) => running.persistent,
 		);
-		if (specialists.length < config.maxAgents) return undefined;
-		return `Persistent specialist cap (${config.maxAgents}) reached. Current specialists: ${specialists.map((running) => `${encodeHostValue(running.name)} (${persistentSpecialistState(running)}, ${running.tasksCompleted ?? 0} completed)`).join(", ")}.`;
+		const acquiring = [...(runtime.persistentReservations ?? [])].filter(
+			(id) => !runningSubagents.get(id)?.persistent,
+		).length;
+		if (specialists.length + acquiring < config.maxAgents) return undefined;
+		return `Persistent specialist cap (${config.maxAgents}) reached. Current specialists: ${specialists.map((running) => `${encodeHostValue(running.name)} (${persistentSpecialistState(running)}, ${running.tasksCompleted ?? 0} completed)`).join(", ")}. Launches acquiring resources: ${acquiring}.`;
+	}
+
+	function notifyStopFailure(
+		running: RunningSubagent,
+		io: PiPersistentIO,
+	): void {
+		let retry: ReturnType<typeof setTimeout> | undefined;
+		let busy = false,
+			cancelled = false;
+		const attempt = (running.stopAttempt ??= {});
+		attempt.cancelNotice?.();
+		const current = () =>
+			!cancelled &&
+			runningSubagents.get(running.id) === running &&
+			running.stopAttempt === attempt &&
+			running.stopState === "failed" &&
+			running.lifecycle.delivery === "pending" &&
+			!["finalizing", "completed", "failed"].includes(
+				running.lifecycle.process.kind,
+			);
+		const cancel = () => {
+			cancelled = true;
+			if (retry) clearTimeout(retry);
+			const queue = runtime.heldDeliveries;
+			const at = queue?.indexOf(notice) ?? -1;
+			if (at >= 0) queue?.splice(at, 1);
+			if (attempt.cancelNotice === cancel) attempt.cancelNotice = undefined;
+		};
+		attempt.cancelNotice = cancel;
+		const hold = () => {
+			if (!current() || (!runtime.liveApi && !runtime.reloadGap))
+				return cancel();
+			const queue = (runtime.heldDeliveries ??= []);
+			if (!queue.includes(notice)) queue.push(notice);
+			if (!runtime.liveApi) return;
+			retry = setTimeout(() => {
+				if (!runtime.liveApi && runtime.reloadGap) return;
+				const at = queue.indexOf(notice);
+				if (at < 0) return;
+				queue.splice(at, 1);
+				notice.release(runtime.liveApi);
+			}, 1_000);
+			retry.unref();
+		};
+		const notice: HeldDelivery = {
+			id: running.id,
+			release(api) {
+				if (retry) clearTimeout(retry);
+				if (!api || !current()) return cancel();
+				if (busy) return;
+				busy = true;
+				void (async () => {
+					try {
+						const worktree = await io.inspectWorktree(asPiRecord(running));
+						// Evidence collection can cross reload, successful exit, or another stop.
+						if (!current()) return cancel();
+						const liveApi = runtime.liveApi;
+						if (!liveApi) {
+							hold();
+							return;
+						}
+						sendPersistentStopFailure(
+							liveApi,
+							persistentSpecialistFacts(running, io, worktree),
+						);
+						cancel();
+					} catch {
+						hold();
+					} finally {
+						busy = false;
+					}
+				})();
+			},
+		};
+		if (runtime.liveApi) notice.release(runtime.liveApi);
+		else if (runtime.reloadGap) (runtime.heldDeliveries ??= []).push(notice);
 	}
 
 	function startPersistentStopTimeout(
 		running: RunningSubagent,
-		api: Pick<ExtensionAPI, "sendMessage">,
+		_api: Pick<ExtensionAPI, "sendMessage">,
 		stopTimeoutMs = 15_000,
 		io: PiPersistentIO,
 	): void {
 		if (
 			running.stopTimeout ||
+			persistentSpecialistState(running) === "stopped" ||
 			(running.stopState !== "requested" && running.stopState !== "pending")
 		)
 			return;
 		running.stopTimeout = setTimeout(() => {
 			running.stopTimeout = undefined;
-			if (!runningSubagents.has(running.id)) return;
+			if (
+				!runningSubagents.has(running.id) ||
+				persistentSpecialistState(running) === "stopped"
+			)
+				return;
 			if (
 				running.stopState === "requested" ||
 				running.stopState === "pending"
@@ -238,10 +317,7 @@ export function createPersistentControls({
 				running.stopState = "failed";
 				running.stopFailure =
 					"process exit was not confirmed within the bounded stop wait";
-				const completionApi = runtime.session?.getControlTaskId(running.id)
-					? selectCompletionApi(api, runtime.pi)
-					: api;
-				sendPersistentStopFailure(completionApi, running, io);
+				notifyStopFailure(running, io);
 			}
 		}, stopTimeoutMs);
 		running.stopTimeout.unref();
@@ -262,6 +338,13 @@ export function createPersistentControls({
 		}
 		const running = resolved.running;
 		const shownName = encodeHostValue(running.name);
+		if (persistentSpecialistState(running) === "stopped") {
+			const error = `Persistent specialist "${shownName}" is already stopped.`;
+			return {
+				content: [{ type: "text", text: error }],
+				details: { error, id: running.id, name: running.name },
+			};
+		}
 		if (running.stopState === "requested" || running.stopState === "pending") {
 			const error = `Stop is already requested for persistent specialist "${shownName}".`;
 			return {
@@ -269,18 +352,23 @@ export function createPersistentControls({
 				details: { error, id: running.id, name: running.name },
 			};
 		}
-		const state = persistentSpecialistState(running);
-		if (state === "stopped") {
-			const error = `Persistent specialist "${shownName}" is already stopped.`;
-			return {
-				content: [{ type: "text", text: error }],
-				details: { error, id: running.id, name: running.name },
-			};
-		}
-		const pending = running.taskId != null;
+		const pending =
+			running.taskId != null && !asPiRecord(running).launchFailure;
+		running.stopAttempt?.cancelNotice?.();
+		running.stopAttempt = {};
 		running.stopState = pending ? "pending" : "requested";
 		running.stopTimeoutMs = stopTimeoutMs;
-		io.requestStop(asPiRecord(running));
+		running.stopFailure = undefined;
+		try {
+			io.requestStop(asPiRecord(running));
+		} catch (error) {
+			running.stopState = "failed";
+			running.stopFailure = `stop publication failed: ${String(error)}`;
+			throw new Error(
+				`${running.stopFailure}. Evidence is retained and follow-up work is blocked; request subagent_stop again to retry.`,
+				{ cause: error },
+			);
+		}
 		if (!pending) startPersistentStopTimeout(running, api, stopTimeoutMs, io);
 		return {
 			content: [
@@ -316,7 +404,8 @@ export function createPersistentControls({
 		const running = resolved.running;
 		const shownName = encodeHostValue(running.name);
 		const task = randomUUID();
-		if (running.stopState === "failed") {
+		const state = persistentSpecialistState(running);
+		if (running.stopState === "failed" && state !== "stopped") {
 			io.rejectBusy(asPiRecord(running), task);
 			const error = `Persistent specialist "${shownName}" is in an unconfirmed-stop state; task ${task} was rejected-busy. Process exit is unconfirmed and evidence is retained at session ${encodeHostValue(running.sessionFile, HOST_PATH_CHARS)}. Request subagent_stop again or spawn a new specialist.`;
 			return {
@@ -324,7 +413,6 @@ export function createPersistentControls({
 				details: { error, task, outcome: "rejected-busy" },
 			};
 		}
-		const state = persistentSpecialistState(running);
 		if (state !== "idle") {
 			io.rejectBusy(asPiRecord(running), task);
 			const error = `Persistent specialist "${shownName}" is ${state}; task ${task} was rejected-busy. Resend after the pending result.`;

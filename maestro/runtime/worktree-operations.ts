@@ -15,6 +15,8 @@ import {
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isRecord, type JsonObject } from "../core/config/type-guards.ts";
+import { gitEnvironment } from "../core/git-environment.ts";
+import { Deadline } from "../core/deadline.ts";
 import type { SurfaceProvider } from "../core/surface-provider.ts";
 import type {
 	CleanupGitState,
@@ -41,19 +43,109 @@ function contained(root: string, path: string): boolean {
 	);
 }
 
-export function resolveGitCommit(cwd: string, ref: string): string {
-	return execFileSync("git", ["rev-parse", "--verify", `${ref}^{commit}`], {
-		cwd,
-		encoding: "utf8",
-	}).trim();
+export const GIT_BASE_TIMEOUT_MS = 10_000;
+export const GIT_SOURCE_TIMEOUT_MS = 15_000;
+export const GIT_HANDOFF_TIMEOUT_MS = 15_000;
+const GIT_OUTPUT_BYTES = 1024 * 1024;
+
+/** One owned read client; expiry bounds the wait even if descendants hold pipes. */
+async function gitRead(
+	cwd: string,
+	args: string[],
+	deadline: Deadline,
+): Promise<string> {
+	const timeout = deadline.remainingMs();
+	return new Promise((resolve, reject) => {
+		const child = spawn("git", args, {
+			cwd,
+			env: gitEnvironment(),
+			stdio: ["ignore", "pipe", "pipe"],
+			detached: process.platform !== "win32",
+		});
+		let settled = false,
+			bytes = 0,
+			errorBytes = 0;
+		const output: Buffer[] = [],
+			errors: Buffer[] = [];
+		const fail = (error: Error) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			try {
+				if (process.platform !== "win32" && child.pid)
+					process.kill(-child.pid, "SIGKILL");
+				else child.kill("SIGKILL");
+			} catch {
+				/* already exited */
+			}
+			child.stdout.destroy();
+			child.stderr.destroy();
+			child.unref();
+			reject(error);
+		};
+		const timer = setTimeout(
+			() => fail(new Error("Git inspection deadline exceeded")),
+			timeout,
+		);
+		child.on("error", fail);
+		child.stdout.on("data", (chunk: Buffer) => {
+			bytes += chunk.length;
+			if (bytes > GIT_OUTPUT_BYTES)
+				fail(new Error("Git output limit exceeded"));
+			else output.push(chunk);
+		});
+		child.stderr.on("data", (chunk: Buffer) => {
+			errorBytes += chunk.length;
+			if (errorBytes > GIT_OUTPUT_BYTES)
+				fail(new Error("Git error output limit exceeded"));
+			else errors.push(chunk);
+		});
+		child.on("close", (code, signal) => {
+			if (settled) return;
+			if (deadline.expired())
+				return fail(new Error("Git inspection deadline exceeded"));
+			if (code !== 0)
+				return fail(
+					new Error(
+						`Git exited ${code ?? signal}: ${Buffer.concat(errors).toString("utf8")}`,
+					),
+				);
+			settled = true;
+			clearTimeout(timer);
+			resolve(Buffer.concat(output).toString("utf8"));
+		});
+	});
 }
 
-export function resolveWorktreeProvisionCwd(sourceCwd: string): string {
+function gitSha(output: string): string {
+	const sha = output.trim();
+	if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(sha))
+		throw new Error("Git returned an invalid commit SHA");
+	return sha;
+}
+
+export async function resolveGitCommit(
+	cwd: string,
+	ref: string,
+): Promise<string> {
+	return gitSha(
+		await gitRead(
+			cwd,
+			["rev-parse", "--verify", `${ref}^{commit}`],
+			Deadline.after(GIT_BASE_TIMEOUT_MS),
+		),
+	);
+}
+
+export async function resolveWorktreeProvisionCwd(
+	sourceCwd: string,
+): Promise<string> {
+	const deadline = Deadline.after(GIT_SOURCE_TIMEOUT_MS);
 	let gitDir: string;
 	let commonDir: string;
 	try {
-		gitDir = resolveGitPath(sourceCwd, "--git-dir");
-		commonDir = resolveGitPath(sourceCwd, "--git-common-dir");
+		gitDir = await resolveGitPath(sourceCwd, "--git-dir", deadline);
+		commonDir = await resolveGitPath(sourceCwd, "--git-common-dir", deadline);
 	} catch (error) {
 		throw new Error(
 			`Unable to identify the Git checkout for worktree provisioning from ${sourceCwd}: ${errorMessage(error)}`,
@@ -62,11 +154,11 @@ export function resolveWorktreeProvisionCwd(sourceCwd: string): string {
 	if (gitDir === commonDir) return sourceCwd;
 
 	try {
-		const output = execFileSync(
-			"git",
+		const output = await gitRead(
+			sourceCwd,
 			["worktree", "list", "--porcelain", "-z"],
-			{ cwd: sourceCwd },
-		).toString("utf8");
+			deadline,
+		);
 		const principal = output
 			.split("\0")
 			.find((record) => record.startsWith("worktree "))
@@ -80,15 +172,18 @@ export function resolveWorktreeProvisionCwd(sourceCwd: string): string {
 	}
 }
 
-function resolveGitPath(
+async function resolveGitPath(
 	cwd: string,
 	flag: "--git-dir" | "--git-common-dir",
-): string {
-	const output = execFileSync(
-		"git",
+	deadline: Deadline,
+): Promise<string> {
+	const output = await gitRead(
+		cwd,
 		["rev-parse", "--path-format=absolute", flag],
-		{ cwd, encoding: "utf8" },
+		deadline,
 	);
+	if (!output || output === "\n")
+		throw new Error("Git returned no checkout path");
 	return output.endsWith("\n") ? output.slice(0, -1) : output;
 }
 
@@ -124,57 +219,79 @@ export function writeWorktreeManifest(path: string, value: JsonObject): void {
 	renameSync(tempPath, path);
 }
 
-function gitPathList(cwd: string, args: string[]): string[] {
-	return execFileSync("git", args, { cwd, encoding: "utf8" })
-		.split("\0")
-		.filter(Boolean);
+async function gitPathList(
+	cwd: string,
+	args: string[],
+	deadline: Deadline,
+): Promise<string[]> {
+	const output = await gitRead(cwd, args, deadline);
+	if (output && !output.endsWith("\0"))
+		throw new Error("Git returned an incomplete NUL filename list");
+	return output.split("\0").filter(Boolean);
 }
 
-export function captureWorktreeHandoff(
+export async function captureWorktreeHandoff(
 	worktree: WorktreeLaunch,
-): WorktreeHandoff {
+	timeoutMs = GIT_HANDOFF_TIMEOUT_MS,
+): Promise<WorktreeHandoff> {
+	const deadline = Deadline.after(timeoutMs);
 	try {
-		const headSha = resolveGitCommit(worktree.path, "HEAD");
-		const status = execFileSync(
-			"git",
-			["status", "--porcelain=v1", "--untracked-files=all", "-z"],
-			{ cwd: worktree.path, encoding: "utf8" },
+		const headSha = gitSha(
+			await gitRead(
+				worktree.path,
+				["rev-parse", "--verify", "HEAD^{commit}"],
+				deadline,
+			),
 		);
-		const untrackedFiles = gitPathList(worktree.path, [
-			"ls-files",
-			"--others",
-			"--exclude-standard",
-			"-z",
-		]);
-		const conflictedFiles = gitPathList(worktree.path, [
-			"diff",
-			"--name-only",
-			"--diff-filter=U",
-			"-z",
-		]);
+		const status = await gitRead(
+			worktree.path,
+			["status", "--porcelain=v1", "--untracked-files=all", "-z"],
+			deadline,
+		);
+		if (status && !status.endsWith("\0"))
+			throw new Error("Git returned incomplete status");
+		const untrackedFiles = await gitPathList(
+			worktree.path,
+			["ls-files", "--others", "--exclude-standard", "-z"],
+			deadline,
+		);
+		const conflictedFiles = await gitPathList(
+			worktree.path,
+			["diff", "--name-only", "--diff-filter=U", "-z"],
+			deadline,
+		);
 		const changedFiles = new Set([
-			...gitPathList(worktree.path, [
-				"diff",
-				"--name-only",
-				"-z",
-				`${worktree.baseSha}...HEAD`,
-			]),
-			...gitPathList(worktree.path, ["diff", "--name-only", "-z"]),
-			...gitPathList(worktree.path, ["diff", "--cached", "--name-only", "-z"]),
+			...(await gitPathList(
+				worktree.path,
+				["diff", "--name-only", "-z", `${worktree.baseSha}...HEAD`],
+				deadline,
+			)),
+			...(await gitPathList(
+				worktree.path,
+				["diff", "--name-only", "-z"],
+				deadline,
+			)),
+			...(await gitPathList(
+				worktree.path,
+				["diff", "--cached", "--name-only", "-z"],
+				deadline,
+			)),
 			...untrackedFiles,
 		]);
-		const commitsAhead = Number.parseInt(
-			execFileSync(
-				"git",
+		const count = (
+			await gitRead(
+				worktree.path,
 				["rev-list", "--count", `${worktree.baseSha}..HEAD`],
-				{ cwd: worktree.path, encoding: "utf8" },
-			).trim(),
-			10,
-		);
+				deadline,
+			)
+		).trim();
+		const commitsAhead = Number(count);
+		if (!/^(0|[1-9][0-9]*)$/.test(count) || !Number.isSafeInteger(commitsAhead))
+			throw new Error("Git returned an invalid commit count");
 		return {
 			...worktree,
 			headSha,
-			commitsAhead: Number.isFinite(commitsAhead) ? commitsAhead : 0,
+			commitsAhead,
 			clean: status.length === 0,
 			conflicted: conflictedFiles.length > 0,
 			changedFiles: [...changedFiles].sort(),
@@ -215,6 +332,7 @@ const CLEANUP_TIMEOUT_MS = 30_000;
 function git(cwd: string, args: string[]): string {
 	return execFileSync("git", args, {
 		cwd,
+		env: gitEnvironment(),
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "pipe"],
 		timeout: CLEANUP_TIMEOUT_MS,
@@ -313,6 +431,7 @@ function countIgnoredFiles(cwd: string): Promise<number> {
 			["ls-files", "--others", "--ignored", "--exclude-standard", "-z"],
 			{
 				cwd,
+				env: gitEnvironment(),
 				stdio: ["ignore", "pipe", "ignore"],
 				timeout: CLEANUP_TIMEOUT_MS,
 				killSignal: "SIGKILL",

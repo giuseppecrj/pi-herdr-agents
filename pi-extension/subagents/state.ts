@@ -135,7 +135,11 @@ export interface RunningSubagent {
 	ignoredTaskEvents?: number;
 	inboxSequence?: number;
 	observedTaskEvents?: number;
+	/** Parent-owned send/ack progress survives reload, not a process crash. */
+	persistentTaskDeliveries?: Map<string, "sending" | "sent" | "acknowledged">;
 	stopState?: "requested" | "pending" | "failed";
+	/** Identity changes before every stop publication, even one that fails. */
+	stopAttempt?: { cancelNotice?: () => void };
 	stopFailure?: string;
 	stopTimeout?: ReturnType<typeof setTimeout>;
 	stopTimeoutMs?: number;
@@ -146,7 +150,8 @@ export interface RunningSubagent {
 /**
  * Work held while no live parent API was bound: a settled completion, whose
  * running row stays delivery-pending and RunSession keeps ownership until it is
- * released, or a fallback attempt waiting to prepare from the live context.
+ * released, a stop-failure notice awaiting a live send, or a fallback attempt
+ * waiting to prepare from the live context.
  */
 export interface HeldDelivery {
 	/** Running-row id of the held completion or waiting attempt. */
@@ -157,6 +162,8 @@ export interface HeldDelivery {
 
 export interface SubagentRuntime {
 	runningSubagents: Map<string, RunningSubagent>;
+	/** Persistent launches acquiring resources but not yet represented by a row. */
+	persistentReservations?: Set<string>;
 	session?: PiRunSession;
 	/** The latest loaded extension API; it can be unbound or already invalidated. */
 	pi?: ExtensionAPI;
@@ -167,7 +174,7 @@ export interface SubagentRuntime {
 	 * across a reload or session-replacement gap, when nothing may be sent.
 	 */
 	liveApi?: ExtensionAPI;
-	/** Completions and fallback preparations held during a gap, released in order. Optional for older slots. */
+	/** Completions, stop notices and fallback preparations awaiting a live API. Optional for older slots. */
 	heldDeliveries?: HeldDelivery[];
 	/**
 	 * Set by a preserving session_shutdown (reload, new, resume, fork) and cleared
@@ -178,7 +185,7 @@ export interface SubagentRuntime {
 	modelCatalog?: string;
 }
 
-/** Bind the live parent API and release every completion held for it. */
+/** Bind the live parent API and release every delivery held for it. */
 export function bindLiveApi(runtime: SubagentRuntime, api: ExtensionAPI): void {
 	runtime.liveApi = api;
 	runtime.reloadGap = false;
@@ -231,11 +238,15 @@ export function holdDelivery(
 	});
 }
 
-/** Release each held completion exactly once, in settle order. */
+/** Release the current held batch once, in order; failed notices may requeue. */
 export function releaseHeldDeliveries(
 	runtime: SubagentRuntime,
 	api: ExtensionAPI | undefined,
 ): void {
+	// Include notices collecting asynchronous evidence, not just queued retries.
+	if (!api)
+		for (const running of runtime.runningSubagents.values())
+			running.stopAttempt?.cancelNotice?.();
 	for (const held of runtime.heldDeliveries?.splice(0) ?? []) held.release(api);
 }
 

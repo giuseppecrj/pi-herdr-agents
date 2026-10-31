@@ -24,11 +24,19 @@ children are grouped in extension-owned `Agents` tabs by default.
 
 ## Results arrive automatically: never poll
 
-`subagent` returns an acknowledgement. The child's result (or failure, or help
-request) is delivered to you as one bounded `subagent_result` message that
-starts a new turn. Never sleep, loop, tail session files, or repeatedly list
+`subagent` acknowledges acquisition after provisioning and command dispatch,
+not task completion. The child's result or failure arrives as one bounded
+`subagent_result` message. A help request arrives as `subagent_ping`.
+Each notification starts a new turn. Never sleep, loop, tail session files, or repeatedly list
 status to wait. If a child is merely slow, do nothing. Stalled or no-progress
 notices are facts, not instructions to act.
+
+An acknowledgement with `status: "uncertain"` retains the acquired owner under
+host control and supervision until termination is confirmed. Uncertain creation
+or dispatch never triggers model fallback. Do not blindly retry. An ownerless
+launch error reports only observed resource identities and any retained manifest;
+it does not prove that no resources exist. See
+[Launch deadlines and uncertainty](../../docs/tools.md#launch-deadlines-and-uncertainty).
 
 ## Launching: `subagent` parameters
 
@@ -44,7 +52,7 @@ notices are facts, not instructions to act.
 | `cwd` | Working directory (a role folder with its own config), or the source repository when `worktree` is set. |
 | `fork` | `true` forces a full-context fork of your session, `false` forces standalone; omit to follow the role's `session-mode`. |
 | `interactive` | Controls parent notifications only (silences stall/recovered pings); it does not affect terminal focus. Precedence: this argument, then the role's `interactive`, then the inverse of `auto-exit` (autonomous roles get pings, others stay quiet). Bare spawns default to autonomous auto-exit unless `interactive: true`. Exception: persistent specialists are always non-interactive unless this argument says otherwise (a persistent role's `interactive: true` is ignored), and they never auto-exit. |
-| `persistent` | Keep one specialist session alive for sequential tasks (see below). Rejected at the `persistent.maxAgents` cap (default 3). |
+| `persistent` | Keep one specialist session alive for sequential tasks (see below). Rejected at the `persistent.maxAgents` cap (default 3), including pending acquisitions. |
 | `worktree` | `{ branch, base? }` for an isolated Herdr-managed Git worktree (see below). Omit, or pass `null`, for an ordinary pane. |
 | `accept` | `{ run, maxRetries?, timeoutSec?, paths? }`: a shell check (exit 0 passes). The child runs it before it finishes and retries with the failing output (default 1 retry); then the parent re-runs it in the child's checkout and that run decides `Check: accepted`, `rejected`, `error` (timeout or no answer), or `skipped` (cancelled, help, provider error, failed exit). Unchecked runs read `Check: none`. Refused for persistent and non-auto-exit children. A rejected verdict starts no fallback. You supply the command; the host ships none. |
 
@@ -89,16 +97,26 @@ retained workspace instead) and cannot revive persistent specialists.
 `persistent: true` creates one logical specialist with one session generation;
 tools, model, thinking, and worktree binding are fixed at launch.
 
-- `subagent_send({ id|name, message })` delivers one task, exactly once. One task
-  at a time: a send while busy is `rejected-busy`; nothing is queued.
+- `subagent_send({ id|name, message })` dispatches one task with a task ID.
+  A send while busy is `rejected-busy`; nothing is queued.
+- Successful task-result and help notifications are not resent if their ledger
+  acknowledgement fails. Only that acknowledgement is retried. Deduplication
+  survives `/reload`, not a full process crash; it is not durable exactly-once
+  delivery.
 - `subagent_stop({ id|name })` is graceful: with an active task it becomes
   `stop-pending`, the task finishes first, and `stopped` is reported only after
   process-exit evidence.
 - A timed-out stop leaves it `stalled` with an unconfirmed stop; sends are
-  rejected. Retry `subagent_stop` or spawn a replacement.
+  rejected. Retry `subagent_stop` or spawn a replacement without overlapping work.
+  A retry or verified exit cancels the old timeout notice. Exit confirmed after
+  a timeout or stop-publication failure produces a terminal `stopped` update.
 - Persistent specialists cannot be resumed; after a crash or confirmed stop,
   spawn a new one. No automatic restart or revival.
 - A persistent worktree specialist holds its worktree for its lifetime.
+
+See [Persistent specialists](../../docs/tools.md#persistent-specialists) for the
+stop and notification contract, and [configuration](../../docs/configuration.md#persistent-specialist-limit)
+for admission limits, including pending acquisitions.
 
 ## Lifecycle control
 
@@ -242,7 +260,7 @@ changes. Without a real file, only non-model settings fall back to the example.
 | `models.agents` | Per-role model, keyed by role name |
 | `models.tasks` | Ordered exact-ID candidates per category for `task:<category>` |
 | `models.tasksMeta` | Provenance of the task preferences |
-| `persistent.maxAgents` | Retained specialist cap (default 3) |
+| `persistent.maxAgents` | Retained specialist and pending-acquisition cap (default 3) |
 | `supervision.*`, `panes.*` | Transport, hang advisory minutes, pane grouping |
 | `guidelines.launchRoster` | Ask for a markdown roster table after the final launch (default true) |
 | `outcomeLedger` | Append one line per model attempt to `herdr-agents/outcomes.jsonl` (default true; `false` turns it off) |

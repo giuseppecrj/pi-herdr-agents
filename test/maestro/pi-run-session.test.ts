@@ -44,6 +44,255 @@ import {
 import { createSubagentActivityRecorder } from "../../maestro/adapters/pi/activity-file.ts";
 import { FileWakeRegistry } from "../../maestro/core/wake.ts";
 import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
+import {
+	AcquisitionUncertainError,
+	isAcquisitionUncertainError,
+} from "../../maestro/core/surface-provider.ts";
+import { runScriptInPane } from "../../maestro/surfaces/herdr/terminal.ts";
+
+for (const resumed of [false, true])
+	test(`uncertain ${resumed ? "resume" : "dispatch"} with failed rollback transfers the real owner until cancel confirms exit`, () =>
+		fixture(async (f) => {
+			const input = f.input("dispatch-failed");
+			input.plans = [
+				input.plans[0],
+				{ ...input.plans[0], model: "test/two", modelId: "two" },
+			];
+			let dispatches = 0,
+				failClose = true;
+			f.operations.runScript = () => {
+				dispatches++;
+				throw new AcquisitionUncertainError("dispatch response lost", {
+					kind: "command-dispatch",
+					surfaceId: "owned",
+				});
+			};
+			const close = f.provider.closeSurface.bind(f.provider);
+			f.provider.closeSurface = (id) => {
+				if (failClose) throw new Error("rollback unavailable");
+				return close(id);
+			};
+			let handle;
+			if (resumed) {
+				const file = join(f.dir, "resume.jsonl");
+				writeFileSync(
+					file,
+					JSON.stringify({ type: "session", cwd: f.dir }) + "\n",
+				);
+				writeSubagentSessionPolicy(file, { owner: "public", deniedTools: [] });
+				handle = await f.session.resumePi({
+					taskId: input.task.id,
+					sessionPath: file,
+					name: "resume",
+				});
+			} else handle = await f.session.spawnPi(input);
+			assert.equal(f.session.getStarted(input.task.id)?.status, "uncertain");
+			assert.ok(handle.launchFailure);
+			const record = f.session.getRecord(input.task.id)!;
+			assert.equal(record.surface, handle.surfaceId);
+			let delivered = false;
+			const wait = f.session.supervise(
+				handle,
+				f.session.getTask(input.task.id)!,
+			);
+			void wait.then(() => {
+				delivered = true;
+			});
+			await turn();
+			assert.equal(
+				(await f.session.cancel(input.task.id)).status,
+				"unconfirmed",
+			);
+			assert.equal(delivered, false);
+			assert.equal(f.session.getRecord(input.task.id), record);
+			assert.equal(dispatches, 1);
+			failClose = false;
+			assert.equal((await f.session.cancel(input.task.id)).status, "confirmed");
+			assert.equal((await wait).outcome, "killed");
+			assert.equal(f.settled.length, 1);
+			assert.equal(dispatches, 1);
+		}));
+
+test("confirmed rollback of uncertain dispatch still blocks model fallback", () =>
+	fixture(async (f) => {
+		const input = f.input("rollback-confirmed");
+		input.plans = [input.plans[0], { ...input.plans[0], model: "test/two" }];
+		let dispatches = 0;
+		f.operations.runScript = (surface) => {
+			dispatches++;
+			throw new AcquisitionUncertainError("dispatch receipt lost", {
+				kind: "command-dispatch",
+				surfaceId: surface,
+			});
+		};
+		const handle = await f.session.spawnPi(input);
+		assert.ok(handle.launchFailure);
+		const result = await f.session.supervise(handle, input.task);
+		assert.equal(result.outcome, "failed");
+		assert.equal(dispatches, 1);
+		assert.equal(f.settled.length, 1);
+		assert.match(f.settled[0].errorMessage!, /dispatch receipt lost/);
+	}));
+
+async function withoutHerdr<T>(run: () => Promise<T>): Promise<T> {
+	const saved = process.env.HERDR_ENV;
+	delete process.env.HERDR_ENV;
+	try {
+		return await run();
+	} finally {
+		if (saved === undefined) delete process.env.HERDR_ENV;
+		else process.env.HERDR_ENV = saved;
+	}
+}
+
+test("a real script-write failure dispatches nothing, closes its pane, and falls back to the next model", () =>
+	fixture(async (f) => {
+		const input = f.input("script-write-fallback");
+		input.plans = [
+			input.plans[0],
+			{ ...input.plans[0], model: "test/two", modelId: "two" },
+		];
+		// A regular file where the script directory belongs: portable, even as root.
+		const scripts = join(
+			f.dir,
+			"sessions",
+			"artifacts",
+			"parent",
+			"subagent-scripts",
+		);
+		mkdirSync(dirname(scripts), { recursive: true });
+		writeFileSync(scripts, "obstruction\n");
+		const fake = f.operations.runScript;
+		const failures: unknown[] = [];
+		let attempts = 0;
+		f.operations.runScript = async (surface, command, options) => {
+			if (attempts++ > 0) return fake(surface, command, options);
+			assert.equal(dirname(options.scriptPath), scripts);
+			try {
+				return await runScriptInPane(surface, command, options);
+			} catch (error) {
+				failures.push(error);
+				throw error;
+			}
+		};
+		const handle = await withoutHerdr(() => f.session.spawnPi(input));
+		assert.equal(attempts, 2);
+		assert.equal(failures.length, 1);
+		assert.match(String(failures[0]), /EEXIST|ENOTDIR/);
+		assert.equal(f.commands.length, 1, "only the fallback was dispatched");
+		assert.equal(handle.launchFailure, undefined);
+		const started = f.session.getStarted(input.task.id);
+		assert.equal(started?.status, "started");
+		assert.equal(started?.model, "test/two");
+		assert.deepEqual(
+			f.provider.listSurfaces().map((surface) => surface.id),
+			[handle.surfaceId],
+			"the failed candidate's pane was closed",
+		);
+	}));
+
+test("a definite dispatch failure with unconfirmed rollback stays ownerless uncertainty and launches no fallback", () =>
+	fixture(async (f) => {
+		const input = f.input("rollback-unconfirmed");
+		input.plans = [input.plans[0], { ...input.plans[0], model: "test/two" }];
+		let dispatches = 0;
+		f.operations.runScript = () => {
+			dispatches++;
+			throw new Error("script write failed");
+		};
+		f.provider.closeSurface = () => {
+			throw new Error("rollback unavailable");
+		};
+		const error = await f.session.spawnPi(input).then(
+			() => assert.fail("an unconfirmed rollback must reject"),
+			(rejected: Error) => rejected,
+		);
+		assert.ok(isAcquisitionUncertainError(error));
+		assert.equal(error.uncertainty.kind, "surface-create");
+		assert.match(error.message, /script write failed; rollback unconfirmed/);
+		assert.equal(dispatches, 1, "no fallback after unproven rollback");
+		assert.equal(f.provider.listSurfaces().length, 1);
+		assert.equal(f.session.getRecord(input.task.id), undefined);
+	}));
+
+test("a definite resume dispatch failure closes its pane and leaves nothing to supervise", () =>
+	fixture(async (f) => {
+		const input = f.input("resume-definite");
+		const file = join(f.dir, "resume.jsonl");
+		writeFileSync(file, JSON.stringify({ type: "session", cwd: f.dir }) + "\n");
+		writeSubagentSessionPolicy(file, { owner: "public", deniedTools: [] });
+		f.operations.runScript = () => {
+			throw new Error("script write failed");
+		};
+		await assert.rejects(
+			f.session.resumePi({
+				taskId: input.task.id,
+				sessionPath: file,
+				name: "resume",
+			}),
+			/^Error: script write failed$/,
+		);
+		assert.equal(f.provider.listSurfaces().length, 0);
+		assert.equal(f.session.getRecord(input.task.id), undefined);
+		assert.equal(f.session.getStarted(input.task.id), undefined);
+	}));
+
+test("ownerless uncertainty on a running fallback preserves prior provider evidence and never launches the next candidate", () =>
+	fixture(async (f) => {
+		const input = f.input("fallback-uncertain");
+		input.plans = [
+			input.plans[0],
+			{ ...input.plans[0], model: "test/two" },
+			{ ...input.plans[0], model: "test/three" },
+		];
+		const handle = await f.session.spawnPi(input);
+		let attempts = 0;
+		f.operations.createPane = () => {
+			attempts++;
+			throw new AcquisitionUncertainError("remote tab outcome unknown", {
+				kind: "surface-create",
+				placement: "tab",
+			});
+		};
+		const wait = f.session.supervise(handle, input.task);
+		f.complete(f.latest()!, {
+			type: "error",
+			errorMessage: "first provider reason",
+		});
+		await wait;
+		assert.equal(attempts, 1);
+		assert.equal(f.settled.length, 1);
+		assert.match(
+			f.settled[0].errorMessage!,
+			/first provider reason[\s\S]*remote tab outcome unknown/,
+		);
+		assert.deepEqual(f.settled[0].fallbackAttempts, ["test/one", "test/two"]);
+	}));
+
+test("cancel during deferred creation transfers and terminates the returned pane without dispatch", () =>
+	fixture(async (f) => {
+		const input = f.input("creation-cancel");
+		let release!: () => void, entered!: () => void;
+		const started = new Promise<void>((done) => {
+			entered = done;
+		});
+		const gate = new Promise<void>((done) => {
+			release = done;
+		});
+		const create = f.operations.createPane;
+		f.operations.createPane = async (...args) => {
+			entered();
+			await gate;
+			return create(...args);
+		};
+		const launch = f.session.spawnPi(input);
+		await started;
+		assert.equal((await f.session.cancel(input.task.id)).status, "requested");
+		release();
+		await assert.rejects(launch, /cancelled before launch/);
+		assert.equal(f.commands.length, 0);
+		assert.equal(f.provider.listSurfaces().length, 0);
+	}));
 
 test("Task15 detached activity observation works before any factory and retains lifecycle rules", () => {
 	const dir = mkdtempSync(join(tmpdir(), "detached-activity-"));
@@ -513,7 +762,7 @@ test("injected worktree finalization precedes delivery and preserves inspection/
 		const calls: string[] = [];
 		const worktreeOps = createWorktreeOperations();
 		const write = worktreeOps.persistWorktreeResult;
-		worktreeOps.captureWorktreeHandoff = (worktree) => {
+		worktreeOps.captureWorktreeHandoff = async (worktree) => {
 			calls.push("capture");
 			return {
 				...worktree,
@@ -546,7 +795,6 @@ test("injected worktree finalization precedes delivery and preserves inspection/
 		f.options.hooks.onSettled = (_record, result) => {
 			calls.push("delivery");
 			assert.deepEqual(calls, [
-				"capture",
 				"capture",
 				"finalize:ready_for_review",
 				"delivery",
@@ -942,6 +1190,8 @@ test("resume settlement reader is scoped to its run, not shared with concurrent 
 				persistentInput.task,
 			);
 			f.complete(p);
+			// The sidecar is semantic evidence; the shell separately confirms exit.
+			f.provider.appendScreen(p.surface, "__SUBAGENT_DONE_0__");
 			await persistentWait;
 			assert.deepEqual(resumeIO.readResumeResult!(), {
 				summary: "Resumed session exited without new output",
@@ -1034,6 +1284,7 @@ test("local evidence drains persistent events without activity hydration while p
 		assert.equal(tickToolCall, "fresh-call");
 		assert.ok(drains > 0);
 		f.complete(r);
+		f.provider.appendScreen(r.surface, "__SUBAGENT_DONE_0__");
 		assert.equal((await wait).outcome, "completed");
 	}));
 
@@ -1115,6 +1366,7 @@ test("persistent events use raw demand-driven I/O, no duplicate initial row or p
 		io.requestStop(r);
 		assert.equal(r.taskId, "followup");
 		f.complete(r);
+		f.provider.appendScreen(r.surface, "__SUBAGENT_DONE_0__");
 		await wait;
 	}));
 
@@ -1196,16 +1448,17 @@ for (const persistent of [false, true])
 				input.plans[0],
 				{ ...input.plans[0], model: "test/two", modelId: "two" },
 			];
-			const run = f.operations.runScript;
+			const create = f.operations.createPane;
 			let launches = 0;
-			f.operations.runScript = (...args) => {
+			f.operations.createPane = (...args) => {
 				if (launches++ === 0) throw new Error("first launch raw");
-				return run(...args);
+				return create(...args);
 			};
 			const h = await f.session.spawnPi(input);
 			const r = f.latest()!;
 			assert.equal(r.persistent, persistent ? true : undefined);
 			f.complete(r);
+			if (persistent) f.provider.appendScreen(r.surface, "__SUBAGENT_DONE_0__");
 			await f.session.supervise(h, input.task);
 			assert.deepEqual(f.settled[0].fallbackAttempts, ["test/one", "test/two"]);
 			assert.deepEqual(f.settled[0].fallbackFailures, [
@@ -1222,7 +1475,7 @@ test("exhausted running fallback acquisition keeps prior provider error and atte
 		];
 		const h = await f.session.spawnPi(input);
 		const r = f.latest()!;
-		f.operations.runScript = () => {
+		f.operations.createPane = () => {
 			throw new Error("fallback raw launch failure");
 		};
 		const wait = f.session.supervise(h, input.task);
@@ -1254,6 +1507,7 @@ test("effective role-default persistence prevents running fallback but not launc
 		const r = f.latest()!;
 		const wait = f.session.supervise(h, input.task);
 		f.complete(r, { type: "error", errorMessage: "role-default error" });
+		f.provider.appendScreen(r.surface, "__SUBAGENT_DONE_1__");
 		await wait;
 		assert.equal(f.commands.length, 1);
 		assert.equal(r.persistent, true);
@@ -1291,11 +1545,11 @@ test("per-attempt normalization changes role and opaque generation, never the va
 			};
 		};
 		// Initial acquisition failure still advances when that effective attempt was persistent.
-		const run = f.operations.runScript;
+		const create = f.operations.createPane;
 		let launches = 0;
-		f.operations.runScript = (...args) => {
+		f.operations.createPane = (...args) => {
 			if (launches++ === 0) throw new Error("launch fails");
-			return run(...args);
+			return create(...args);
 		};
 		const h = await f.session.spawnPi(input);
 		const r = f.latest()!;
@@ -1651,6 +1905,7 @@ test("public, control, logical specialist, generation and inbox namespaces remai
 		assert.equal(next.taskId, "inbox-1");
 		assert.equal(f.session.getControlTaskId(next.id), "control");
 		f.complete(next);
+		f.provider.appendScreen(next.surface, "__SUBAGENT_DONE_0__");
 		await wait;
 	}));
 

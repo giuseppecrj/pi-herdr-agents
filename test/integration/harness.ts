@@ -336,12 +336,12 @@ export function createTestEnv(backend: MuxBackend): TestEnv {
 /**
  * Clean up all resources created during the test.
  */
-export function cleanupTestEnv(env: TestEnv): void {
+export async function cleanupTestEnv(env: TestEnv): Promise<void> {
 	// Close only surfaces explicitly owned by the harness. The dedicated
 	// workspace is then closed as a final safety net for extension-created panes.
 	for (const surface of env.surfaces) {
 		try {
-			closePane(surface);
+			await closePane(surface);
 		} catch {
 			// Best effort; workspace cleanup below closes remaining panes.
 		}
@@ -374,8 +374,11 @@ export function cleanupTestEnv(env: TestEnv): void {
 /**
  * Create a surface and register it for automatic cleanup.
  */
-export function createTrackedSurface(env: TestEnv, name: string): string {
-	const surface = createSubagentPane(name);
+export async function createTrackedSurface(
+	env: TestEnv,
+	name: string,
+): Promise<string> {
+	const surface = await createSubagentPane(name);
 	env.surfaces.push(surface);
 	return surface;
 }
@@ -404,12 +407,12 @@ export function untrackSurface(env: TestEnv, surface: string): void {
  * The command ends with a sentinel so we can detect when pi exits:
  *   `pi ...; echo '__TEST_DONE_'$?'__'`
  */
-export function startPi(
+export async function startPi(
 	surface: string,
 	testDir: string,
 	task: string,
 	opts?: { model?: string; extraArgs?: string },
-): void {
+): Promise<void> {
 	const model = opts?.model ?? TEST_MODEL;
 	const extra = opts?.extraArgs ?? "";
 	const agentDir = USE_TEST_PROVIDER ? join(testDir, ".pi", "agent") : "";
@@ -431,7 +434,7 @@ export function startPi(
 		.filter(Boolean)
 		.join(" ");
 
-	runScriptInPane(surface, `${cmd}; echo '__TEST_DONE_'$?'__'`, {
+	await runScriptInPane(surface, `${cmd}; echo '__TEST_DONE_'$?'__'`, {
 		scriptPath: join(testDir, `test-launch-${Date.now()}.sh`),
 	});
 }

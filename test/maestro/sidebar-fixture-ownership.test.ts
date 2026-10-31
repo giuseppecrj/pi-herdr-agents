@@ -101,6 +101,30 @@ describe("sidebar fixture worktree ownership", () => {
 		);
 	});
 
+	it("cannot prove absence from a provisioning-only intent and an empty inventory", () => {
+		const provisioning: LaunchRecord = {
+			id: "child-1",
+			state: "provisioning",
+			name: NAME,
+			sourceCwd: REPO,
+			branch: BRANCH,
+		};
+		assert.equal(
+			judgeWorktreeOwnership(expected, inventory([]), [provisioning]).kind,
+			"unknown",
+		);
+		for (const other of [
+			{ ...provisioning, name: "Someone-else" },
+			{ ...provisioning, sourceCwd: "/tmp/other" },
+			{ ...provisioning, branch: "foreign/marked" },
+			{ ...provisioning, state: "removed" },
+		])
+			assert.deepEqual(
+				judgeWorktreeOwnership(expected, inventory([]), [other]),
+				{ kind: "absent" },
+			);
+	});
+
 	it("owns a listed checkout whose workspace is already closed", () => {
 		const closed = { ...ownRow, open_workspace_id: undefined };
 		assert.deepEqual(
@@ -511,6 +535,53 @@ describe("sidebar fixture foreign canary", () => {
 				removed: [],
 				residue: [],
 			});
+		}));
+
+	it("keeps a provisioning-only source until its matching acquisition is observed", () =>
+		withScratch(async ({ fake, commands, acquire }) => {
+			const canary = planCanary("pending");
+			fake.fail = (call) => call === "worktree create";
+			await assert.rejects(acquire(canary), /worktree create failed/);
+			const stage = canary.stage;
+			assert.equal(stage.kind, "worktree");
+			// Model the parent's intent-only manifest while the server's
+			// creation outcome is unknown, not a confirmed server rejection.
+			stage.record.state = "provisioning";
+			const before = fake.calls.length;
+			const kept = releaseCanary(canary, commands);
+			assert.deepEqual(kept.removed, []);
+			assert.match(kept.residue.join("\n"), /provisioning intent/);
+			assert.ok(
+				existsSync(stage.repo),
+				"unknown cannot authorize source deletion",
+			);
+			assert.deepEqual(openWorkspaces(fake), [stage.source]);
+			assert.deepEqual(fake.calls.slice(before), [
+				`worktree list --cwd ${stage.repo} --json`,
+			]);
+
+			// A later successful acquisition supplies the receipt; even if its
+			// state still says provisioning, this is no longer intent alone.
+			fake.fail = () => false;
+			const acquired = JSON.parse(
+				commands.herdr([
+					"worktree",
+					"create",
+					"--workspace",
+					stage.source,
+					"--branch",
+					canary.branch,
+					"--no-focus",
+				]),
+			).result;
+			stage.record.path = acquired.worktree.path;
+			stage.record.workspaceId = acquired.workspace.workspace_id;
+			assert.deepEqual(releaseCanary(canary, commands), {
+				removed: [stage.record.path, stage.repo],
+				residue: [],
+			});
+			assert.ok(!existsSync(stage.repo));
+			assert.deepEqual(openWorkspaces(fake), []);
 		}));
 
 	it("removes a checkout whose workspace closed with Git before its source", () =>

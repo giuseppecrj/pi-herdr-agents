@@ -5,7 +5,9 @@ This page is the reference for the durable `config.json` settings, task-model pr
 ## Configuration file
 
 The durable user configuration is `$PI_CODING_AGENT_DIR/herdr-agents/config.json`,
-defaulting to `~/.pi/agent/herdr-agents/config.json`. It is not read from the
+defaulting to `~/.pi/agent/herdr-agents/config.json`. The host uses Pi's public
+agent-directory resolver: an empty `PI_CODING_AGENT_DIR` uses the default,
+and a leading `~` expands as it does in Pi. It is not read from the
 installed package root, so npm and git package upgrades do not overwrite it.
 Create it by copying the installed package's `config.json.example`, or run
 `/subagents-init` to seed and draft model task preferences.
@@ -203,8 +205,10 @@ filesystem transaction against arbitrary external writers.
 `task:<category>` values select subagent models; they are not slash commands and
 do not change the parent model. Ordered authenticated candidate plans resolve
 before launch. Ordinary nonpersistent runs can retry later candidates after
-launch failure or after a running child settles with a provider/agent error,
-not after a completed negative task result. Persistent specialists do not
+a safe launch failure or after a running child settles with a provider/agent error,
+not after a completed negative task result. Uncertain resource creation,
+command dispatch, or rollback blocks fallback because another attempt could
+duplicate work. Persistent specialists do not
 advance after a running-child error. This is not per-step routing; worktrees
 use the first authenticated candidate only, without fallback retries.
 Shortlists do not enforce reviewer independence. Cross-family independent
@@ -220,7 +224,7 @@ after writing preferences.
 
 ## Persistent specialist limit
 
-Set `persistent.maxAgents` to the maximum concurrently retained persistent specialists. It defaults to `3`; a persistent spawn at the cap is rejected before Herdr creates a pane or workspace, and no specialist is evicted.
+Set `persistent.maxAgents` to the maximum concurrently retained persistent specialists. It defaults to `3`; a persistent spawn at the cap is rejected before Herdr creates a pane or workspace, and no specialist is evicted. Admission reserves capacity before resource acquisition, so overlapping launches count toward the cap even before their running rows appear. Reservations survive reload and transfer to the running specialist or are released when acquisition fails; quitting clears pending reservations.
 
 ## Delegation depth limit
 
@@ -410,8 +414,18 @@ or shared pane inspection becomes unavailable, supervision quietly returns to
 the legacy one-second polling cadence. No caller action is required.
 
 Set `supervision.forcePolling` to `true` in the durable user `config.json` to
-disable wake-ups and use that legacy cadence deliberately. The setting is read
-when the coordinator is created, so run `/reload` after changing it.
+disable wake-ups and use that legacy cadence deliberately. Run `/reload` after
+changing it. The live coordinator switches transport without replacing its
+registrations or shared reconciliation timer. A parked wait releases its old
+watch reference or polling timer before the next wait uses the new transport.
+
+A coordinator retained from a version without live reconfiguration cannot apply
+a changed mode safely. Reload reports an explicit restart requirement instead of
+replacing that owner or ignoring the setting. Restore the previous setting and
+reload to keep using that session, then let its children finish before restarting
+Pi with the new setting. An unchanged mode still permits adoption across the
+upgrade.
+
 `subagents_list` reports the active transport mode (`wake+batch`,
 `polling(forced)`, or `polling(fallback)`) and watcher count.
 
@@ -463,6 +477,13 @@ Checkout matching uses Herdr's canonical `worktree.checkout_path` and includes d
 
 Explicit `panes.mode: "tab"` preserves one new tab per ordinary child in the caller's workspace. Explicit `"split"` preserves splits of the stable parent pane. `panes.direction` is `"right"` (default) or `"down"` and applies to grouped and legacy splits. `maxPerTab` does not affect these legacy modes. Managed worktrees retain their separate workspaces.
 
+A process-local queue serializes placement inspection, creation, and ownership
+recording across reloads. It does not hold other launches through Git checkout or
+Pi startup. A split with an uncertain outcome makes its tab unavailable for later
+placement in that process, because the server might still create the pane.
+Unknown new tabs are never adopted by label. Queue cancellation or expiry
+prevents the queued launch from issuing a later mutation.
+
 Ownership is tracked by returned pane/tab/workspace IDs, never labels. Separate parent processes own separate groups; `/reload` preserves a parent's in-memory ownership, but a full restart does not adopt old tabs. Placement never moves existing panes or renames user tabs. Background launches preserve focus; Herdr may resize sibling panes when splitting or closing. User-added panes are never closed by automatic tab cleanup. An owned tab remains reusable while user panes remain, even after all child panes close.
 
 Run `/reload` after changing role, model, or pane settings.
@@ -478,8 +499,9 @@ references. A value can contain an ordered comma-separated fallback list, for
 example `provider/preferred, provider/fallback`. The tool argument also accepts
 `task:<category>` as its complete value (not in a list), for configured
 `coding`, `review`, `recon`, `qa`, `architecture`, or `docs` preferences. The extension validates every
-candidate before launch, then launches later candidates only after the selected
-child settles with a provider/agent error. Pi owns any automatic transient
+candidate before launch, then launches later candidates only after a safe launch failure or the selected
+child settles with a provider/agent error. An uncertain creation or dispatch
+blocks fallback and retains any acquired owner until exit is confirmed. Pi owns any automatic transient
 retrying inside that child; the extension does not infer retry counts or
 permanence from the error text. A later candidate that launches after a parent
 `/reload`, `/new`, `/resume`, or `/fork` uses the live parent session for its

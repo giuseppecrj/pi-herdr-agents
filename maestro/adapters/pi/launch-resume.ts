@@ -25,7 +25,15 @@ import {
 	timestampForFile,
 } from "./launch-command.ts";
 import type { PiLaunchOperations } from "./launch-operations.ts";
-import type { PiRunningChild, ResumePiLaunchRequest } from "./launch.ts";
+import {
+	AcquiredPiLaunchError,
+	type PiRunningChild,
+	type ResumePiLaunchRequest,
+} from "./launch.ts";
+import {
+	AcquisitionUncertainError,
+	isAcquisitionUncertainError,
+} from "../../core/surface-provider.ts";
 
 export async function launchResumedPiSubagent(
 	callerRequest: ResumePiLaunchRequest,
@@ -83,9 +91,15 @@ export async function launchResumedPiSubagent(
 			"resume keeps a session's model, so launch a new subagent with an in-scope model instead",
 		);
 	}
-	const surface = await operations.createPane(request.name, cwd);
+	request.acquisitionSignal?.throwIfAborted();
+	const surface = await operations.createPane(request.name, cwd, {
+		signal: request.acquisitionSignal,
+	});
+	let running: PiRunningChild | undefined;
 	try {
+		request.acquisitionSignal?.throwIfAborted();
 		await operations.waitForShellReady(surface);
+		request.acquisitionSignal?.throwIfAborted();
 		const activityFile = getSubagentActivityFile(artifactDir, id);
 		mkdirSync(dirname(activityFile), { recursive: true });
 
@@ -135,45 +149,77 @@ export async function launchResumedPiSubagent(
 			shellQuote(join(SUBAGENTS_DIR, "child", "subagent-done.ts")),
 			...(messageFile ? [shellQuote(`@${messageFile}`)] : []),
 		].join(" ");
-		const launchScriptFile = await operations.runScript(
-			surface,
-			`${command}; echo '__SUBAGENT_DONE_'$?'__'`,
-			{
-				scriptPath: join(
-					artifactDir,
-					"subagent-scripts",
-					`${safeName(request.name) || "resume"}-resume-${Date.now()}.sh`,
-				),
-				scriptPreamble: [
-					shellComment(`Subagent resume script for ${request.name}`),
-					shellComment(`Generated: ${new Date().toISOString()}`),
-					shellComment(`Session: ${request.sessionFile}`),
-					shellComment(`Surface: ${surface}`),
-					...(messageFile
-						? [shellComment(`Resume message file: ${messageFile}`)]
-						: []),
-				].join("\n"),
-			},
+		const launchScriptFile = join(
+			artifactDir,
+			"subagent-scripts",
+			`${safeName(request.name) || "resume"}-resume-${Date.now()}.sh`,
 		);
-		return {
+		const initialized: PiRunningChild = {
 			id,
 			name: request.name,
 			task: request.message ?? "resumed session",
 			surface,
+			ownsSurface: true,
 			startTime,
 			sessionFile: request.sessionFile,
 			launchScriptFile,
 			activityFile,
 			interactive,
 			runtimePlan: undefined,
+			cwd,
 			lifecycle: createLifecycle(startTime),
 		};
+		request.acquisitionSignal?.throwIfAborted();
+		try {
+			initialized.launchScriptFile = await operations.runScript(
+				surface,
+				`${command}; echo '__SUBAGENT_DONE_'$?'__'`,
+				{
+					scriptPath: launchScriptFile,
+					scriptPreamble: [
+						shellComment(`Subagent resume script for ${request.name}`),
+						shellComment(`Generated: ${new Date().toISOString()}`),
+						shellComment(`Session: ${request.sessionFile}`),
+						shellComment(`Surface: ${surface}`),
+						...(messageFile
+							? [shellComment(`Resume message file: ${messageFile}`)]
+							: []),
+					].join("\n"),
+				},
+			);
+		} catch (error) {
+			if (
+				isAcquisitionUncertainError(error) &&
+				error.uncertainty.kind === "command-dispatch"
+			)
+				running = initialized;
+			throw error;
+		}
+		running = initialized;
+		return running;
 	} catch (error) {
 		try {
 			await operations.closePane(surface);
-		} catch {
-			// The launch error remains authoritative when cleanup also fails.
+		} catch (rollback) {
+			if (running)
+				throw new AcquiredPiLaunchError(
+					running,
+					new Error(
+						`${String(error)}; rollback unconfirmed: ${String(rollback)}`,
+						{ cause: error },
+					),
+				);
+			throw new AcquisitionUncertainError(
+				`${String(error)}; rollback unconfirmed: ${String(rollback)}; pane retained: ${surface}; no fallback`,
+				{
+					kind: "surface-create",
+					placement: "tab",
+					observedSurfaceId: surface,
+				},
+				{ cause: error },
+			);
 		}
+		if (running) throw new AcquiredPiLaunchError(running, error);
 		throw error;
 	}
 }

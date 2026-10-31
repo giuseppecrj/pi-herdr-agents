@@ -98,7 +98,10 @@ concise diagnostics, and an exact-name launch reports the matching diagnostic
 instead of treating an invalid contribution as a bare agent. An invalid
 capability declaration makes that role name unavailable at its precedence layer
 rather than falling through to a lower-priority role, and launch rejects it
-before Herdr creates a pane or worktree.
+before Herdr creates a pane or worktree. Local definitions with unreadable files
+or missing frontmatter likewise block their filename-derived role name without
+preventing unrelated definitions from loading. Role text accepts LF or CRLF
+line endings and an optional leading UTF-8 BOM.
 
 ## Reload and security
 

@@ -218,6 +218,19 @@ export function createDefaultRunSession(
 	let resumePi: (input: PiResumeInput) => Promise<AgentHandle>;
 	if (adopted) {
 		state = adopted;
+		const supervision = state.infrastructure.supervision;
+		if (supervision.setForcePolling) {
+			supervision.setForcePolling(options.forcePolling);
+		} else if (
+			(supervision.diagnostics().mode === "polling(forced)") !==
+			options.forcePolling
+		) {
+			// An owner created before live reconfiguration cannot transfer its
+			// registrations safely. Never silently replace it or ignore config.
+			throw new Error(
+				"Cannot change supervision.forcePolling on a pre-upgrade coordinator. Let active children finish, then restart Pi to apply it.",
+			);
+		}
 		state.options = options;
 		state.roles.splice(0, state.roles.length, ...options.roles);
 	} else {
@@ -551,7 +564,8 @@ export function createDefaultRunSession(
 				runtimePlan: child.runtimePlan,
 				worktree: child.worktree,
 				warning,
-				status: "started",
+				status: child.launchFailure ? "uncertain" : "started",
+				launchFailure: child.launchFailure,
 			},
 		};
 		if (suppressed)
@@ -564,10 +578,12 @@ export function createDefaultRunSession(
 			handle,
 			adapter: owner,
 			persistent: child.persistent ?? false,
-			closeTemporarySurface: temporarySurfaceRelease(
-				state.infrastructure.surfaceProvider,
-				child.surface,
-			),
+			closeTemporarySurface: child.ownsSurface
+				? temporarySurfaceRelease(
+						state.infrastructure.surfaceProvider,
+						child.surface,
+					)
+				: undefined,
 			observe: (at) => hydrate(child, at, "refresh"),
 			finalize: async (result, _task, control) => {
 				// Clear before delivery; a retained worktree root keeps its pane.
@@ -647,7 +663,9 @@ export function createDefaultRunSession(
 							summarySource: "host",
 						};
 				let worktree: PiWorktreeHandoff | undefined = child.worktree
-					? state.worktreeOperations.captureWorktreeHandoff(child.worktree)
+					? await state.worktreeOperations.captureWorktreeHandoff(
+							child.worktree,
+						)
 					: undefined;
 				// After the handoff capture, before the lifecycle and manifest marks:
 				// the parent re-check decides the verdict (ADR-0017).
@@ -817,6 +835,7 @@ export function createDefaultRunSession(
 					const owner = adapter(current.snapshot);
 					spawning = true;
 					const handle = await owner.spawn({
+						acquisitionSignal: cancelled,
 						name: input.task.name,
 						task: input.task.prompt,
 						cwd: current.task.cwd,

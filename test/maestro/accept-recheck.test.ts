@@ -399,7 +399,7 @@ function worktreeSession(f: Fixture) {
 	const states: string[] = [];
 	const worktreeOps = createWorktreeOperations();
 	const write = worktreeOps.persistWorktreeResult;
-	worktreeOps.captureWorktreeHandoff = (worktree) => ({
+	worktreeOps.captureWorktreeHandoff = async (worktree) => ({
 		...worktree,
 		headSha: "head",
 		commitsAhead: 1,

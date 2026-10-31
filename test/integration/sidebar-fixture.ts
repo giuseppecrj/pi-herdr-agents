@@ -38,9 +38,9 @@ export interface FixtureCommands {
 }
 
 /**
- * The real commands. Neither CLI call has a timeout: a call returns only
- * after Herdr answered or the request failed, so nothing it asked for can
- * appear after cleanup has looked.
+ * The real commands. Neither CLI call has a timeout. A failed request or a
+ * killed client does not cancel a mutation already accepted by Herdr; an
+ * empty inventory alone cannot settle a provisioning-only launch intent.
  */
 export const herdrCommands: FixtureCommands = {
 	herdr: (args) =>
@@ -146,7 +146,21 @@ export function judgeWorktreeOwnership(
 			record.sourceCwd === expected.repoRoot,
 	);
 	const rows = worktrees.filter((row) => row.branch === expected.branch);
-	if (rows.length === 0) return { kind: "absent" };
+	if (rows.length === 0) {
+		if (
+			matching.some(
+				(record) =>
+					record.state === "provisioning" &&
+					record.path === undefined &&
+					record.workspaceId === undefined,
+			)
+		)
+			return {
+				kind: "unknown",
+				reason: `provisioning intent for ${expected.branch} has no acquired resource receipt`,
+			};
+		return { kind: "absent" };
+	}
 	if (rows.length > 1 || matching.length !== 1)
 		return {
 			kind: "unknown",
@@ -706,10 +720,10 @@ export async function waitForHoldsToExit(
 }
 
 /**
- * Stops a pane's launch work so nothing it starts can create a resource
- * after cleanup scans for one. Every process is frozen first, so none can
- * start another. In-flight `herdr` requests then finish, and everything else
- * is killed. Returns the processes still alive after the bound.
+ * Stops a pane's local launch work. Every process is frozen first, so none
+ * can start another. Observed `herdr` clients are resumed; everything else is
+ * killed. This does not cancel or await server-side mutations whose clients
+ * have exited. Returns the scoped processes still alive after the bound.
  */
 export async function quiescePane(
 	scope: PaneProcessScope,

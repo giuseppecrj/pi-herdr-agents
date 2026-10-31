@@ -71,7 +71,7 @@ class TrackedSurfaceProvider implements SurfaceProvider {
 		surfaceId: string,
 		command: string,
 		options: { scriptPath: string; scriptPreamble: string },
-	): string {
+	): string | Promise<string> {
 		return this.#inner.runScript(surfaceId, command, options);
 	}
 
@@ -148,11 +148,11 @@ if (getAvailableBackends().length === 0) {
 					groupingCap: GROUPING_CAP,
 					async dispose() {
 						await provider.dispose();
-						cleanupTestEnv(env);
+						await cleanupTestEnv(env);
 					},
 				};
 			} catch (error) {
-				cleanupTestEnv(env);
+				await cleanupTestEnv(env);
 				throw error;
 			}
 		},

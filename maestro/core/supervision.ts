@@ -30,6 +30,7 @@ export interface SupervisionRegistration {
 }
 
 interface Entry {
+	sessionFile: string;
 	surface: string;
 	generation: number;
 	wakeRegistration?: WakeRegistration;
@@ -42,6 +43,7 @@ interface Entry {
 }
 
 interface ParkedWait {
+	polling: boolean;
 	resolve(reason: WakeReason): void;
 	reject(error: Error): void;
 }
@@ -66,7 +68,7 @@ export class SupervisionCoordinator {
 	private readonly inspectFallback: (
 		surface: string,
 	) => Promise<PaneInspection>;
-	private readonly forcePolling: boolean;
+	private forcePolling: boolean;
 	private readonly wakeRegistry: FileWakeRegistry;
 	private readonly timers: SupervisionTimers;
 	private timer: ReturnType<typeof setInterval> | undefined;
@@ -92,26 +94,16 @@ export class SupervisionCoordinator {
 
 	register(sessionFile: string, surface: string): SupervisionRegistration {
 		const entry: Entry = {
+			sessionFile,
 			surface,
 			generation: this.nextGeneration++,
 			fallback: this.forcePolling,
 			fileFallback: this.forcePolling,
 		};
 		this.entries.add(entry);
-		if (!this.forcePolling && process.platform !== "win32") {
-			entry.wakeRegistration = this.wakeRegistry.register(
-				sessionFile,
-				() => this.signal(entry, "wake"),
-				() => this.enterFallback(entry),
-			);
-			entry.fileFallback = !entry.wakeRegistration.watching;
-			entry.fallback = entry.fileFallback;
-		} else {
-			entry.fallback = true;
-			entry.fileFallback = true;
-			// Forced polling retains the legacy immediate probe, then 1s cadence.
-			entry.pending = "reconcile";
-		}
+		this.configureEntry(entry);
+		// Forced polling retains the legacy immediate probe, then 1s cadence.
+		if (entry.fileFallback) entry.pending = "reconcile";
 		this.ensureTimer();
 		if (!this.forcePolling) this.reconcile();
 		return {
@@ -119,6 +111,36 @@ export class SupervisionCoordinator {
 			inspectPane: () => this.inspect(entry),
 			unregister: () => this.unregister(entry),
 		};
+	}
+
+	/** Reconfigure the live owner; registration handles and its shared timer survive. */
+	setForcePolling(forcePolling: boolean): void {
+		if (this.forcePolling === forcePolling) return;
+		if (this.closed) throw new Error("Supervision coordinator is closed");
+		this.forcePolling = forcePolling;
+		for (const entry of this.entries) {
+			entry.wakeRegistration?.unregister();
+			entry.wakeRegistration = undefined;
+			entry.inspection = undefined;
+			this.configureEntry(entry);
+			// Finish the old transport's wait (and release its ref/timer). The
+			// existing consumer probes evidence once, then waits on the new mode.
+			if (entry.parked) entry.parked.resolve("reconcile");
+			else this.signal(entry, "reconcile");
+		}
+	}
+
+	private configureEntry(entry: Entry): void {
+		entry.fileFallback = true;
+		if (!this.forcePolling && process.platform !== "win32") {
+			entry.wakeRegistration = this.wakeRegistry.register(
+				entry.sessionFile,
+				() => this.signal(entry, "wake"),
+				() => this.enterFallback(entry),
+			);
+			entry.fileFallback = !entry.wakeRegistration.watching;
+		}
+		entry.fallback = entry.fileFallback || Date.now() < this.unhealthyUntil;
 	}
 
 	diagnostics(): SupervisionDiagnostics {
@@ -136,7 +158,7 @@ export class SupervisionCoordinator {
 		this.timer = undefined;
 		if (this.unhealthyTimer) this.timers.clearTimeout(this.unhealthyTimer);
 		this.unhealthyTimer = undefined;
-		for (const entry of this.entries) entry.wakeRegistration?.unregister();
+		for (const entry of this.entries) this.unregister(entry);
 		this.entries.clear();
 		this.wakeRegistry.close();
 	}
@@ -179,49 +201,44 @@ export class SupervisionCoordinator {
 			entry.pending = undefined;
 			return Promise.resolve(reason);
 		}
-		if (entry.fallback) return this.poll(signal);
 		return new Promise((resolve, reject) => {
-			// Polling keeps its own timer referenced. A wake wait has only this
-			// promise, so retain the unref'd directory watch until it settles.
-			const release = this.wakeRegistry.retain();
+			// Both transports have one owned wait, so a mode change can release
+			// the old timer or watch retain without replacing the registration.
+			const release = entry.fallback ? undefined : this.wakeRegistry.retain();
+			let timer: ReturnType<typeof setTimeout> | undefined;
 			let settled = false;
 			const finish = (settle: () => void) => {
 				if (settled) return;
 				settled = true;
 				signal.removeEventListener("abort", onAbort);
 				entry.parked = undefined;
-				release();
+				if (timer) this.timers.clearTimeout(timer);
+				release?.();
 				settle();
 			};
 			const onAbort = () => {
 				finish(() => reject(new Error(ABORT_MESSAGE)));
 			};
 			entry.parked = {
+				polling: entry.fallback,
 				resolve: (reason) => finish(() => resolve(reason)),
 				reject: (error) => finish(() => reject(error)),
 			};
 			signal.addEventListener("abort", onAbort, { once: true });
-		});
-	}
-
-	private poll(signal: AbortSignal): Promise<WakeReason> {
-		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => {
-				signal.removeEventListener("abort", onAbort);
-				resolve("reconcile");
-			}, POLLING_INTERVAL_MS);
-			const onAbort = () => {
-				clearTimeout(timer);
-				reject(new Error(ABORT_MESSAGE));
-			};
-			signal.addEventListener("abort", onAbort, { once: true });
+			if (entry.fallback)
+				timer = this.timers.setTimeout(
+					() => entry.parked?.resolve("reconcile"),
+					POLLING_INTERVAL_MS,
+				);
 		});
 	}
 
 	private signal(entry: Entry, reason: WakeReason): void {
 		if (this.closed) return;
 		if (reason === "wake") entry.inspection = undefined;
-		if (entry.parked) entry.parked.resolve(reason);
+		// Ordinary signals queue behind a poll's 1s cadence. Only a transport
+		// change explicitly settles that timer early.
+		if (entry.parked && !entry.parked.polling) entry.parked.resolve(reason);
 		// A wake must never downgrade a queued reconciliation: the reconcile
 		// reason carries the epoch's pane inspection, and skipping it would
 		// defer pane-disappearance detection past the documented 5s bound.
@@ -234,6 +251,7 @@ export class SupervisionCoordinator {
 		const snapshotGeneration = this.nextGeneration - 1;
 		try {
 			const snapshot = await this.listPanes();
+			if (this.closed) return;
 			if (!snapshot.complete) throw new Error("malformed pane list");
 			const bySurface = new Set(snapshot.panes.map((pane) => pane.paneId));
 			for (const entry of this.entries) {

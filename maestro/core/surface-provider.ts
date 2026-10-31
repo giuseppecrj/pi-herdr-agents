@@ -30,7 +30,100 @@ export interface SurfaceInfo {
 	workspaceId?: string;
 }
 
-export interface CreateSurfaceOptions {
+export interface AcquisitionControl {
+	/** Admission intent only; abort does not cancel a remote mutation. */
+	signal?: AbortSignal;
+}
+
+export type UncertainAcquisition =
+	| {
+			kind: "surface-create";
+			placement: "tab" | "split";
+			workspaceId?: string;
+			anchorSurfaceId?: string;
+			observedSurfaceId?: string;
+	  }
+	| {
+			kind: "worktree-create";
+			sourceCwd: string;
+			branch: string;
+			recovered?: RecoveredWorktreeProvisioning;
+	  }
+	| { kind: "command-dispatch"; surfaceId: string };
+
+/** A started mutating request has no proven outcome. Never retry it. */
+export class AcquisitionUncertainError extends Error {
+	readonly code = "PIHA_ACQUISITION_UNCERTAIN";
+	readonly uncertainty: UncertainAcquisition;
+	constructor(
+		message: string,
+		uncertainty: UncertainAcquisition,
+		options?: ErrorOptions,
+	) {
+		super(message, options);
+		this.name = "AcquisitionUncertainError";
+		this.uncertainty = uncertainty;
+	}
+}
+
+/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-runtime-typeof, anti-slop/no-unsafe-dictionary-type -- This harness-neutral error boundary validates unknown cross-load values without an SDK/schema dependency. */
+function isAcquisitionRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Structural so errors from an earlier extension load remain recognizable. */
+export function isAcquisitionUncertainError(
+	error: unknown,
+): error is AcquisitionUncertainError {
+	if (
+		!isAcquisitionRecord(error) ||
+		error.code !== "PIHA_ACQUISITION_UNCERTAIN" ||
+		typeof error.name !== "string" ||
+		typeof error.message !== "string" ||
+		(error.stack !== undefined && typeof error.stack !== "string") ||
+		typeof error.toString !== "function"
+	)
+		return false;
+	const value = error.uncertainty;
+	if (!isAcquisitionRecord(value)) return false;
+	switch (value.kind) {
+		case "surface-create":
+			return (
+				(value.placement === "tab" || value.placement === "split") &&
+				(value.workspaceId === undefined ||
+					typeof value.workspaceId === "string") &&
+				(value.anchorSurfaceId === undefined ||
+					typeof value.anchorSurfaceId === "string") &&
+				(value.observedSurfaceId === undefined ||
+					typeof value.observedSurfaceId === "string")
+			);
+		case "worktree-create": {
+			if (
+				typeof value.sourceCwd !== "string" ||
+				typeof value.branch !== "string"
+			)
+				return false;
+			const recovered = value.recovered;
+			return (
+				recovered === undefined ||
+				(isAcquisitionRecord(recovered) &&
+					typeof recovered.path === "string" &&
+					typeof recovered.branch === "string" &&
+					(recovered.workspaceId === undefined ||
+						typeof recovered.workspaceId === "string") &&
+					(recovered.paneId === undefined ||
+						typeof recovered.paneId === "string"))
+			);
+		}
+		case "command-dispatch":
+			return typeof value.surfaceId === "string";
+		default:
+			return false;
+	}
+}
+/* oxlint-enable anti-slop/no-unknown-parameters, anti-slop/no-runtime-typeof, anti-slop/no-unsafe-dictionary-type */
+
+export interface CreateSurfaceOptions extends AcquisitionControl {
 	name: string;
 	cwd: string;
 	/** Default: { kind: "grouped" }. */
@@ -38,7 +131,7 @@ export interface CreateSurfaceOptions {
 	placement?: SurfacePlacement;
 }
 
-export interface CreateWorktreeSurfaceOptions {
+export interface CreateWorktreeSurfaceOptions extends AcquisitionControl {
 	name: string;
 	cwd: string;
 	branch: string;
@@ -64,7 +157,7 @@ export interface ReportOpenedPrimaryWorkspaceInput {
 export type RecoveredWorktreeProvisioning = Pick<
 	WorktreeSurfaceInfo,
 	"path" | "branch" | "workspaceId"
->;
+> & { paneId?: string };
 
 export class WorktreeProvisioningError extends Error {
 	readonly recoveredWorktree: RecoveredWorktreeProvisioning;
@@ -161,13 +254,17 @@ export interface SurfaceProvider {
 	// pi-herdr-agents extension
 	setupHint(): string;
 
-	/** Write a script file and run it in the surface; today's runScriptInPane (terminal.ts:115). */
+	/**
+	 * Write a script file and run it in the surface; today's runScriptInPane (terminal.ts:115).
+	 * Rejects with a command-dispatch {@link AcquisitionUncertainError} when the
+	 * command may have reached the surface; any other rejection dispatched nothing.
+	 */
 	// pi-herdr-agents extension
 	runScript(
 		surfaceId: string,
 		command: string,
 		options: { scriptPath: string; scriptPreamble: string },
-	): string;
+	): string | Promise<string>;
 
 	// pi-herdr-agents extension
 	inspectSurface(surfaceId: string): Promise<PaneInspection>;
@@ -200,8 +297,8 @@ export interface SurfaceProvider {
 	}): Promise<WorktreeSurfaceInfo[]>;
 
 	// pi-herdr-agents extension
-	focusWorkspace(workspaceId: string): void;
+	focusWorkspace(workspaceId: string): void | Promise<void>;
 
 	// pi-herdr-agents extension
-	setTitle(target: "tab" | "workspace", title: string): void;
+	setTitle(target: "tab" | "workspace", title: string): void | Promise<void>;
 }

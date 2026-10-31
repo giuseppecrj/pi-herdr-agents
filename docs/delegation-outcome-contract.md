@@ -232,6 +232,18 @@ Later ones are only counted in `ignoredTaskEvents`. A notice is used rather
 than a widget-only warning because the parent model owns the specialist and
 should see the protocol violation.
 
+For issued persistent tasks, parent memory also records notification progress
+(`sending`, `sent`, `acknowledged`). Once a notification send succeeds, a failed
+ledger acknowledgment retries only the acknowledgment, not the notification.
+The record survives extension reload and is not erased by deleting the ledger.
+A failed send remains retryable. This is an in-process guarantee, not durable
+exactly-once delivery across a full parent crash.
+
+Stop-failure notices belong to one stop attempt. A retry or verified process exit
+invalidates the previous notice before waiting for a live parent API. A late
+verified exit after a failed stop produces one terminal `stopped` update and a
+stopped ledger entry. A queued timeout notice cannot follow that terminal update.
+
 The help request's head and `from` use the parent-owned run name. The name in
 the `.exit` sidecar goes to `details.reportedName` when it differs
 (`delivery.ts` `settle`).
@@ -337,6 +349,22 @@ closed set (`maestro/runtime/run-session.ts:119-120`,
 | `requested` | A launch is in flight. Its owner is terminated when acquired. |
 | `unconfirmed` | Termination failed. The run stays live, and nothing is delivered. |
 | `already-terminal` | The run already took a natural result. Nothing was cancelled. |
+
+## Launch acknowledgement uncertainty
+
+The request parameters are unchanged. A fresh or resumed launch normally returns
+`status: "started"`. When the host acquired a real initialized owner but cannot
+confirm dispatch or rollback, its acknowledgement instead carries
+`status: "uncertain"` and the raw `launchFailure` in structured details. The
+model-facing text encodes that failure and says that no fallback will launch.
+The owner remains controlled and supervised until termination is confirmed.
+An ownerless uncertain creation fails the launch and reports only observed
+identities and any retained manifest. Neither case proves server cancellation.
+
+Worktree manifests can record `acquisitionUncertain: true` with recovery
+evidence. That evidence never authorizes automatic cleanup or late dispatch.
+Runtime finalization captures one Git handoff before the accept check. Failed,
+timed-out, oversized, or malformed Git inspection reports unknown fields.
 
 ## Tool schemas and compatibility
 

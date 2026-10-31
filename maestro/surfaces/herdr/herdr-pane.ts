@@ -3,7 +3,8 @@ import {
 	isPlainObject,
 	isString,
 } from "../../core/config/type-guards.ts";
-import { herdrExec, herdrExecAsync, parseHerdrJson } from "./herdr-cli.ts";
+import { herdrExecAsync, parseHerdrJson } from "./herdr-cli.ts";
+import { Deadline } from "../../core/deadline.ts";
 
 export type {
 	PaneInspection,
@@ -139,10 +140,11 @@ export async function listHerdrPanes(
 
 export async function inspectHerdrPane(
 	surface: string,
+	timeout?: number,
 ): Promise<PaneInspectionResult> {
 	try {
 		return parsePaneGetOutput(
-			await herdrExecAsync(["pane", "get", surface]),
+			await herdrExecAsync(["pane", "get", surface], timeout),
 			surface,
 		);
 	} catch (error: any) {
@@ -218,21 +220,12 @@ export function parsePaneProcessInfo(
 	return result;
 }
 
-export function getHerdrPaneProcessInfo(
-	surface: string,
-	timeout?: number,
-): HerdrPaneProcessInfo {
-	return parsePaneProcessInfo(
-		herdrExec(["pane", "process-info", "--pane", surface], timeout),
-		surface,
-	);
-}
-
 export async function getHerdrPaneProcessInfoAsync(
 	surface: string,
+	timeout?: number,
 ): Promise<HerdrPaneProcessInfo> {
 	return parsePaneProcessInfo(
-		await herdrExecAsync(["pane", "process-info", "--pane", surface]),
+		await herdrExecAsync(["pane", "process-info", "--pane", surface], timeout),
 		surface,
 	);
 }
@@ -253,20 +246,27 @@ export async function waitForHerdrShellReady(
 ): Promise<void> {
 	const timeoutMs = options.timeoutMs ?? 10_000;
 	const intervalMs = options.intervalMs ?? 50;
-	const deadline = Date.now() + timeoutMs;
+	const deadline = Deadline.after(timeoutMs);
 	let lastError = "no interactive shell foreground process";
 
-	while (Date.now() <= deadline) {
+	while (!deadline.expired()) {
 		if (options.signal?.aborted)
 			throw new Error("Shell readiness wait cancelled.");
 		try {
-			if (isHerdrShellReady(await getHerdrPaneProcessInfoAsync(surface)))
-				return;
+			const info = await getHerdrPaneProcessInfoAsync(
+				surface,
+				deadline.remainingMs(),
+			);
+			deadline.remainingMs();
+			options.signal?.throwIfAborted();
+			if (isHerdrShellReady(info)) return;
 		} catch (error) {
 			lastError = error instanceof Error ? error.message : String(error);
 		}
-		if (Date.now() >= deadline) break;
-		await new Promise((resolve) => setTimeout(resolve, intervalMs));
+		if (deadline.expired()) break;
+		await new Promise((resolve) =>
+			setTimeout(resolve, Math.min(intervalMs, deadline.remainingMs())),
+		);
 	}
 	throw new Error(
 		`Timed out waiting for interactive shell in Herdr pane ${surface}: ${lastError}`,
@@ -313,19 +313,23 @@ export async function waitForHerdrPaneAbsence(
 	options: {
 		timeoutMs?: number;
 		intervalMs?: number;
-		inspect?: (surface: string) => Promise<PaneInspectionResult>;
+		inspect?: (
+			surface: string,
+			timeout?: number,
+		) => Promise<PaneInspectionResult>;
 	} = {},
 ): Promise<boolean> {
 	const inspect = options.inspect ?? inspectHerdrPane;
 	const timeoutMs = options.timeoutMs ?? 5_000;
 	const intervalMs = options.intervalMs ?? 50;
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() <= deadline) {
-		const inspection = await inspect(surface);
+	const deadline = Deadline.after(timeoutMs);
+	while (!deadline.expired()) {
+		const inspection = await inspect(surface, deadline.remainingMs());
+		if (deadline.expired()) return false;
 		if (inspection.kind === "missing") return true;
-		if (Date.now() >= deadline) break;
-		await new Promise((resolve) => setTimeout(resolve, intervalMs));
+		await new Promise((resolve) =>
+			setTimeout(resolve, Math.min(intervalMs, deadline.remainingMs())),
+		);
 	}
-	const finalInspection = await inspect(surface);
-	return finalInspection.kind === "missing";
+	return false;
 }
