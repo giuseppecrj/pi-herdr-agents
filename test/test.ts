@@ -701,7 +701,9 @@ async function withAdapterHost(run: (f: any) => Promise<void>) {
 			writeFileSync(`${child.sessionFile}.exit`, JSON.stringify(result));
 			// Observe this actual attempt, not the logical producer that may continue
 			// through another candidate. The real adapter/coordinator still reads it.
-			const deadline = Date.now() + 3_000;
+			// Persistent shell evidence waits for the shared reconciliation cadence,
+			// not just a local sidecar wake (which cannot prove process exit).
+			const deadline = Date.now() + (child.persistent ? 8_000 : 3_000);
 			while (
 				child.lifecycle.process.kind !== "completed" &&
 				child.lifecycle.process.kind !== "failed"
@@ -1386,6 +1388,8 @@ describe("host adapter migration", () => {
 				1,
 			);
 			child.stopState = "requested";
+			// Stopping Pi produces shell exit evidence independently of its sidecar.
+			f.surface.appendScreen(child.surface, "__SUBAGENT_DONE_0__");
 			await f.finish(child);
 			assert.equal(f.registrations(), 1);
 			assert.equal(f.closed.length, 1);

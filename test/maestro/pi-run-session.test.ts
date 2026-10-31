@@ -942,6 +942,8 @@ test("resume settlement reader is scoped to its run, not shared with concurrent 
 				persistentInput.task,
 			);
 			f.complete(p);
+			// The sidecar is semantic evidence; the shell separately confirms exit.
+			f.provider.appendScreen(p.surface, "__SUBAGENT_DONE_0__");
 			await persistentWait;
 			assert.deepEqual(resumeIO.readResumeResult!(), {
 				summary: "Resumed session exited without new output",
@@ -1034,6 +1036,7 @@ test("local evidence drains persistent events without activity hydration while p
 		assert.equal(tickToolCall, "fresh-call");
 		assert.ok(drains > 0);
 		f.complete(r);
+		f.provider.appendScreen(r.surface, "__SUBAGENT_DONE_0__");
 		assert.equal((await wait).outcome, "completed");
 	}));
 
@@ -1115,6 +1118,7 @@ test("persistent events use raw demand-driven I/O, no duplicate initial row or p
 		io.requestStop(r);
 		assert.equal(r.taskId, "followup");
 		f.complete(r);
+		f.provider.appendScreen(r.surface, "__SUBAGENT_DONE_0__");
 		await wait;
 	}));
 
@@ -1206,6 +1210,7 @@ for (const persistent of [false, true])
 			const r = f.latest()!;
 			assert.equal(r.persistent, persistent ? true : undefined);
 			f.complete(r);
+			if (persistent) f.provider.appendScreen(r.surface, "__SUBAGENT_DONE_0__");
 			await f.session.supervise(h, input.task);
 			assert.deepEqual(f.settled[0].fallbackAttempts, ["test/one", "test/two"]);
 			assert.deepEqual(f.settled[0].fallbackFailures, [
@@ -1254,6 +1259,7 @@ test("effective role-default persistence prevents running fallback but not launc
 		const r = f.latest()!;
 		const wait = f.session.supervise(h, input.task);
 		f.complete(r, { type: "error", errorMessage: "role-default error" });
+		f.provider.appendScreen(r.surface, "__SUBAGENT_DONE_1__");
 		await wait;
 		assert.equal(f.commands.length, 1);
 		assert.equal(r.persistent, true);
@@ -1651,6 +1657,7 @@ test("public, control, logical specialist, generation and inbox namespaces remai
 		assert.equal(next.taskId, "inbox-1");
 		assert.equal(f.session.getControlTaskId(next.id), "control");
 		f.complete(next);
+		f.provider.appendScreen(next.surface, "__SUBAGENT_DONE_0__");
 		await wait;
 	}));
 
