@@ -263,6 +263,9 @@ export function createDelivery({
 	): "delivered" | "suppressed" | Promise<"delivered" | "suppressed"> {
 		const running: RunningSubagent = record;
 		if (running.stopTimeout) clearTimeout(running.stopTimeout);
+		// Verified process exit supersedes a timeout before waiting for a live API:
+		// the notice may be earlier than this completion in the held queue.
+		running.stopAttempt?.cancelNotice?.();
 		if (!shouldDeliverSubagentCompletion(running)) return suppress(running);
 		const api = runtime.liveApi;
 		if (api) return settle(api, record, result, task, io);
@@ -297,10 +300,7 @@ export function createDelivery({
 			// terminal PROCESS handoff; failed terminal delivery retires runtime ownership.
 			drainPersistentTaskEvents(running, api, io);
 			running.lifecycle = markDelivery(running.lifecycle, "delivered");
-			if (
-				running.stopState === "requested" ||
-				running.stopState === "pending"
-			) {
+			if (running.stopState) {
 				io.recordStopped(record);
 				const facts = persistentSpecialistFacts(running, io, result.worktree);
 				sendParentMessage(
@@ -312,8 +312,7 @@ export function createDelivery({
 					},
 					{ status: "stopped", facts },
 				);
-			} else if (running.stopState !== "failed")
-				notifyPersistentCrash(running, api, io, result.worktree);
+			} else notifyPersistentCrash(running, api, io, result.worktree);
 			runningSubagents.delete(running.id);
 			updateWidget();
 			return "delivered";

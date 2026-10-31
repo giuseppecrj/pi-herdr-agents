@@ -138,6 +138,8 @@ export interface RunningSubagent {
 	/** Parent-owned send/ack progress survives reload, not a process crash. */
 	persistentTaskDeliveries?: Map<string, "sending" | "sent" | "acknowledged">;
 	stopState?: "requested" | "pending" | "failed";
+	/** Identity changes before every stop publication, even one that fails. */
+	stopAttempt?: { cancelNotice?: () => void };
 	stopFailure?: string;
 	stopTimeout?: ReturnType<typeof setTimeout>;
 	stopTimeoutMs?: number;
@@ -241,6 +243,10 @@ export function releaseHeldDeliveries(
 	runtime: SubagentRuntime,
 	api: ExtensionAPI | undefined,
 ): void {
+	// Include notices collecting asynchronous evidence, not just queued retries.
+	if (!api)
+		for (const running of runtime.runningSubagents.values())
+			running.stopAttempt?.cancelNotice?.();
 	for (const held of runtime.heldDeliveries?.splice(0) ?? []) held.release(api);
 }
 

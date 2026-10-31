@@ -221,20 +221,30 @@ export function createPersistentControls({
 	): void {
 		let retry: ReturnType<typeof setTimeout> | undefined;
 		let busy = false,
-			sent = false;
-		const generation = running.generationId;
-		const sequence = running.inboxSequence;
-		const failure = running.stopFailure;
+			cancelled = false;
+		const attempt = (running.stopAttempt ??= {});
+		attempt.cancelNotice?.();
 		const current = () =>
-			!sent &&
+			!cancelled &&
 			runningSubagents.get(running.id) === running &&
-			running.generationId === generation &&
-			running.inboxSequence === sequence &&
+			running.stopAttempt === attempt &&
 			running.stopState === "failed" &&
-			running.stopFailure === failure &&
-			running.lifecycle.delivery !== "suppressed";
+			running.lifecycle.delivery === "pending" &&
+			!["finalizing", "completed", "failed"].includes(
+				running.lifecycle.process.kind,
+			);
+		const cancel = () => {
+			cancelled = true;
+			if (retry) clearTimeout(retry);
+			const queue = runtime.heldDeliveries;
+			const at = queue?.indexOf(notice) ?? -1;
+			if (at >= 0) queue?.splice(at, 1);
+			if (attempt.cancelNotice === cancel) attempt.cancelNotice = undefined;
+		};
+		attempt.cancelNotice = cancel;
 		const hold = () => {
-			if (!current() || (!runtime.liveApi && !runtime.reloadGap)) return;
+			if (!current() || (!runtime.liveApi && !runtime.reloadGap))
+				return cancel();
 			const queue = (runtime.heldDeliveries ??= []);
 			if (!queue.includes(notice)) queue.push(notice);
 			if (!runtime.liveApi) return;
@@ -251,13 +261,14 @@ export function createPersistentControls({
 			id: running.id,
 			release(api) {
 				if (retry) clearTimeout(retry);
-				if (!api || busy || !current()) return;
+				if (!api || !current()) return cancel();
+				if (busy) return;
 				busy = true;
 				void (async () => {
 					try {
 						const worktree = await io.inspectWorktree(asPiRecord(running));
 						// Evidence collection can cross reload, successful exit, or another stop.
-						if (!current()) return;
+						if (!current()) return cancel();
 						const liveApi = runtime.liveApi;
 						if (!liveApi) {
 							hold();
@@ -267,7 +278,7 @@ export function createPersistentControls({
 							liveApi,
 							persistentSpecialistFacts(running, io, worktree),
 						);
-						sent = true;
+						cancel();
 					} catch {
 						hold();
 					} finally {
@@ -338,6 +349,8 @@ export function createPersistentControls({
 			};
 		}
 		const pending = running.taskId != null;
+		running.stopAttempt?.cancelNotice?.();
+		running.stopAttempt = {};
 		running.stopState = pending ? "pending" : "requested";
 		running.stopTimeoutMs = stopTimeoutMs;
 		running.stopFailure = undefined;
