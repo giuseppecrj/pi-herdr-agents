@@ -35,6 +35,7 @@ Former bundled roles, `/plan`, its plan skill, and `/skill:orchestrate` now belo
 - `plugins/sidebar/` — optional standalone Node companion Herdr plugin; it imports nothing from the extension
 - `maestro/core/roles/discovery.ts`, `maestro/core/config/` — role parsing/discovery, injected-directory config loaders, and task-model init prompt construction
 - `maestro/core/worktree.ts`, `worktree-cleanup.ts` — manifest schema/state, handoff types, and cleanup eligibility/formatting
+- `maestro/core/git-environment.ts` — repository-local environment isolation for host-managed Git commands; preserves user configuration, identity, and hooks
 - `maestro/core/host-text.ts` — the one encoding for variable values in parent-facing host lines, lossless command-argument serializers, and display normalization for child text
 - `maestro/adapters/pi/` — `PiHarnessAdapter`, launch transactions, completion evidence, session I/O, activity files, SDK model glue, and task-model registry projection; `launch.ts` is the fresh launch transaction, `launch-resume.ts` the resumed one, `launch-command.ts` the child command-line pieces both share, and `launch-operations.ts` the `PiLaunchOperations` seam with its surface-backed readiness and process-identity capture
 - `maestro/core/declared-skills.ts`, `maestro/adapters/pi/child/declared-skills.ts` — declared skill names (validated by the parent, passed in `PI_SUBAGENT_SKILLS`) and the child's first-run injection of the skills its own Pi loaded, with bounded reads

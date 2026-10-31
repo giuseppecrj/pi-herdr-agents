@@ -15,6 +15,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isRecord, type JsonObject } from "../core/config/type-guards.ts";
+import { gitEnvironment } from "../core/git-environment.ts";
 import type { SurfaceProvider } from "../core/surface-provider.ts";
 import type {
 	CleanupGitState,
@@ -44,6 +45,7 @@ function contained(root: string, path: string): boolean {
 export function resolveGitCommit(cwd: string, ref: string): string {
 	return execFileSync("git", ["rev-parse", "--verify", `${ref}^{commit}`], {
 		cwd,
+		env: gitEnvironment(),
 		encoding: "utf8",
 	}).trim();
 }
@@ -65,7 +67,7 @@ export function resolveWorktreeProvisionCwd(sourceCwd: string): string {
 		const output = execFileSync(
 			"git",
 			["worktree", "list", "--porcelain", "-z"],
-			{ cwd: sourceCwd },
+			{ cwd: sourceCwd, env: gitEnvironment() },
 		).toString("utf8");
 		const principal = output
 			.split("\0")
@@ -87,7 +89,7 @@ function resolveGitPath(
 	const output = execFileSync(
 		"git",
 		["rev-parse", "--path-format=absolute", flag],
-		{ cwd, encoding: "utf8" },
+		{ cwd, env: gitEnvironment(), encoding: "utf8" },
 	);
 	return output.endsWith("\n") ? output.slice(0, -1) : output;
 }
@@ -125,7 +127,11 @@ export function writeWorktreeManifest(path: string, value: JsonObject): void {
 }
 
 function gitPathList(cwd: string, args: string[]): string[] {
-	return execFileSync("git", args, { cwd, encoding: "utf8" })
+	return execFileSync("git", args, {
+		cwd,
+		env: gitEnvironment(),
+		encoding: "utf8",
+	})
 		.split("\0")
 		.filter(Boolean);
 }
@@ -138,7 +144,7 @@ export function captureWorktreeHandoff(
 		const status = execFileSync(
 			"git",
 			["status", "--porcelain=v1", "--untracked-files=all", "-z"],
-			{ cwd: worktree.path, encoding: "utf8" },
+			{ cwd: worktree.path, env: gitEnvironment(), encoding: "utf8" },
 		);
 		const untrackedFiles = gitPathList(worktree.path, [
 			"ls-files",
@@ -167,7 +173,7 @@ export function captureWorktreeHandoff(
 			execFileSync(
 				"git",
 				["rev-list", "--count", `${worktree.baseSha}..HEAD`],
-				{ cwd: worktree.path, encoding: "utf8" },
+				{ cwd: worktree.path, env: gitEnvironment(), encoding: "utf8" },
 			).trim(),
 			10,
 		);
@@ -215,6 +221,7 @@ const CLEANUP_TIMEOUT_MS = 30_000;
 function git(cwd: string, args: string[]): string {
 	return execFileSync("git", args, {
 		cwd,
+		env: gitEnvironment(),
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "pipe"],
 		timeout: CLEANUP_TIMEOUT_MS,
@@ -313,6 +320,7 @@ function countIgnoredFiles(cwd: string): Promise<number> {
 			["ls-files", "--others", "--ignored", "--exclude-standard", "-z"],
 			{
 				cwd,
+				env: gitEnvironment(),
 				stdio: ["ignore", "pipe", "ignore"],
 				timeout: CLEANUP_TIMEOUT_MS,
 				killSignal: "SIGKILL",

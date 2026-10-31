@@ -37,6 +37,9 @@ provider; fakes are for conformance tests only.
   config loaders with injected directories, and task-model init prompt logic.
 - `maestro/core/worktree.ts`, `maestro/core/worktree-cleanup.ts` — manifest
   schema/state, handoff types, and cleanup eligibility/formatting.
+- `maestro/core/git-environment.ts` — removes inherited repository-selection and
+  command-local Git configuration overrides from host-managed Git subprocesses,
+  while retaining user configuration, identity, and hooks.
 - `maestro/core/host-text.ts` — the one encoding for variable values in
   parent-facing host lines, lossless command-argument serializers, and display
   normalization for child text.

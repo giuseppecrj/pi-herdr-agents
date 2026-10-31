@@ -40,6 +40,14 @@ Omit `worktree` for an ordinary pane. If a generated tool client requires every 
 
 Worktrees isolate checkouts, indexes, and `HEAD`. They are **not security sandboxes**: worktrees still share the repository's object database and most refs, and the child process has the same host permissions as Pi.
 
+Host-managed Git commands select their checkout through their working directory,
+not inherited `GIT_DIR`, `GIT_WORK_TREE`, index/object-directory overrides, or
+command-local `GIT_CONFIG_*` overrides. The host removes those variables from a
+copy of its subprocess environment. Normal user/global configuration (including
+included files), identity, signing, credentials, and hooks remain enabled. This
+policy does not modify the parent environment, user shell commands, accept checks,
+or the environment of an already-running Herdr server.
+
 ## Launch contract
 
 For a worktree launch:
