@@ -37,7 +37,11 @@ export function shouldMarkUserTookOver(agentStarted: boolean): boolean {
 export function shouldAutoExitOnAgentEnd(
 	_userTookOver: boolean,
 	messages: any[] | undefined,
+	runAborted = false,
 ): boolean {
+	// Escape during a tool lets Pi start the next provider request on the
+	// aborted signal, which lazyStream records as stopReason "error".
+	if (runAborted) return false;
 	// Manual input should not strand an auto-exit subagent. If the latest agent
 	// turn completed normally, close the session. Escape/abort still leaves it
 	// open for inspection or another prompt.
@@ -303,8 +307,9 @@ export default function (pi: ExtensionAPI) {
 		});
 
 	pi.on("agent_settled", (event, ctx) => {
+		const runAborted = event?.aborted === true;
 		if (doneNudge && !completionFinalized) {
-			doneNudge.settled(latestAgentMessages, event?.aborted === true, ctx);
+			doneNudge.settled(latestAgentMessages, runAborted, ctx);
 		}
 		if (persistent && !completionFinalized) {
 			let messages = latestAgentMessages;
@@ -318,7 +323,10 @@ export default function (pi: ExtensionAPI) {
 			} catch {
 				// Fall back to the latest low-level run when session evidence is unavailable.
 			}
-			if (currentTask && shouldAutoExitOnAgentEnd(userTookOver, messages)) {
+			if (
+				currentTask &&
+				shouldAutoExitOnAgentEnd(userTookOver, messages, runAborted)
+			) {
 				appendPersistentTaskEvent(
 					process.env.PI_SUBAGENT_SESSION ?? "",
 					buildPersistentTaskEvent(currentTask, generation),
@@ -340,7 +348,7 @@ export default function (pi: ExtensionAPI) {
 			// Fall back to the latest low-level run when session evidence is unavailable.
 		}
 
-		if (!shouldAutoExitOnAgentEnd(userTookOver, messages)) return;
+		if (!shouldAutoExitOnAgentEnd(userTookOver, messages, runAborted)) return;
 		// Children this session launched deliver their results as steers. Exiting
 		// now would drop them, so wait: the last delivery starts a new turn, and
 		// its settlement reaches this point again. A settled error still exits so

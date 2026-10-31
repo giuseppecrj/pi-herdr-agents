@@ -8717,6 +8717,110 @@ describe("subagent-done.ts", () => {
 		}
 	});
 
+	it("stays open when Escape aborts a tool and Pi records the abort as an error", () => {
+		const dir = createTestDir();
+		const previousAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+		const previousSession = process.env.PI_SUBAGENT_SESSION;
+		const sessionFile = join(dir, "child.jsonl");
+		process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+		process.env.PI_SUBAGENT_SESSION = sessionFile;
+		try {
+			const { api, eventHandlers } = createMockExtensionApi();
+			subagentDoneExtension(api);
+			let shutdowns = 0;
+			const messages: any[] = [
+				{
+					role: "toolResult",
+					content: [{ type: "text", text: "Command aborted" }],
+				},
+				{
+					role: "assistant",
+					stopReason: "error",
+					errorMessage: "This operation was aborted",
+				},
+			];
+			const ctx = {
+				shutdown: () => shutdowns++,
+				sessionManager: {
+					getBranch: () =>
+						messages.map((message) => ({ type: "message", message })),
+				},
+			};
+
+			eventHandlers.get("agent_end")?.[0]({ messages: [...messages] }, ctx);
+			eventHandlers.get("agent_settled")?.[0]({ aborted: true }, ctx);
+			assert.equal(existsSync(`${sessionFile}.exit`), false);
+			assert.equal(shutdowns, 0);
+
+			messages.push({ role: "assistant", stopReason: "stop" });
+			eventHandlers.get("agent_end")?.[0]({ messages: [...messages] }, ctx);
+			eventHandlers.get("agent_settled")?.[0]({ aborted: false }, ctx);
+			assert.deepEqual(
+				JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8")),
+				{ type: "done" },
+			);
+			assert.equal(shutdowns, 1);
+		} finally {
+			restoreEnvVar("PI_SUBAGENT_AUTO_EXIT", previousAutoExit);
+			restoreEnvVar("PI_SUBAGENT_SESSION", previousSession);
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("does not settle a persistent task when Pi reports an aborted run", () => {
+		const dir = createTestDir();
+		const previousPersistent = process.env.PI_SUBAGENT_PERSISTENT;
+		const previousSession = process.env.PI_SUBAGENT_SESSION;
+		const previousTask = process.env.PI_SUBAGENT_TASK_ID;
+		const previousGeneration = process.env.PI_SUBAGENT_GENERATION_ID;
+		const previousAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+		const sessionFile = join(dir, "persistent-aborted.jsonl");
+		process.env.PI_SUBAGENT_PERSISTENT = "1";
+		process.env.PI_SUBAGENT_SESSION = sessionFile;
+		process.env.PI_SUBAGENT_TASK_ID = "task-1";
+		process.env.PI_SUBAGENT_GENERATION_ID = "generation";
+		delete process.env.PI_SUBAGENT_AUTO_EXIT;
+		let shutdown: Function | undefined;
+		try {
+			const { api, eventHandlers } = createMockExtensionApi();
+			subagentDoneExtension(api);
+			shutdown = eventHandlers.get("session_shutdown")?.[0];
+			const messages: any[] = [
+				{
+					role: "assistant",
+					stopReason: "error",
+					errorMessage: "This operation was aborted",
+				},
+			];
+			const ctx = {
+				sessionManager: {
+					getBranch: () =>
+						messages.map((message) => ({ type: "message", message })),
+				},
+			};
+
+			eventHandlers.get("agent_end")?.[0]({ messages: [...messages] }, ctx);
+			eventHandlers.get("agent_settled")?.[0]({ aborted: true }, ctx);
+			assert.deepEqual(readPersistentTaskEvents(sessionFile), []);
+
+			messages.push({ role: "assistant", stopReason: "stop" });
+			eventHandlers.get("agent_end")?.[0]({ messages: [...messages] }, ctx);
+			eventHandlers.get("agent_settled")?.[0]({ aborted: false }, ctx);
+			assert.deepEqual(
+				readPersistentTaskEvents(sessionFile).map((event) => event.task),
+				["task-1"],
+			);
+		} finally {
+			shutdown?.({ reason: "reload" });
+			restoreEnvVar("PI_SUBAGENT_PERSISTENT", previousPersistent);
+			restoreEnvVar("PI_SUBAGENT_SESSION", previousSession);
+			restoreEnvVar("PI_SUBAGENT_TASK_ID", previousTask);
+			restoreEnvVar("PI_SUBAGENT_GENERATION_ID", previousGeneration);
+			restoreEnvVar("PI_SUBAGENT_AUTO_EXIT", previousAutoExit);
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("leaves non-auto-exit coordinators open until subagent_done", async () => {
 		const dir = createTestDir();
 		const previousAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
@@ -8792,6 +8896,18 @@ describe("subagent-done.ts", () => {
 		it("stays open after Escape aborts the run", () => {
 			const messages = [{ role: "assistant", stopReason: "aborted" }];
 			assert.equal(shouldAutoExitOnAgentEnd(false, messages), false);
+		});
+
+		it("stays open when Pi reports an aborted run whatever the stop reason", () => {
+			const messages = [
+				{
+					role: "assistant",
+					stopReason: "error",
+					errorMessage: "This operation was aborted",
+				},
+			];
+			assert.equal(shouldAutoExitOnAgentEnd(false, messages, true), false);
+			assert.equal(shouldAutoExitOnAgentEnd(false, messages, false), true);
 		});
 
 		it("still exits when the latest turn ended with stopReason=error", () => {
