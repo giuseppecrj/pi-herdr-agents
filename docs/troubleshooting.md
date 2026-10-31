@@ -21,7 +21,27 @@ pi install git:github.com/giuseppecrj/pi-herdr-agents@main
 
 Smoke-test delivery with an autonomous subagent instructed to return one exact marker. Success means the marker itself—not only a generic wake-up notice—automatically appears in the parent turn.
 
-Subagent tabs, panes, and worktree workspaces are created without stealing keyboard focus. Launch commands target child panes by explicit ID, so focus and command delivery are independent. If a fresh or resumed launch fails, the extension closes the ordinary pane that it created and preserves the original launch error. It does not close a caller-supplied surface, and managed worktree workspaces remain retained on failure. Note: the `interactive` option controls parent status notifications, not terminal focus.
+Subagent tabs, panes, and worktree workspaces are created without stealing keyboard focus. Launch commands target child panes by explicit ID, so focus and command delivery are independent. If a fresh or resumed launch fails, the extension attempts confirmed rollback of the ordinary pane it created and preserves the original launch error. Unconfirmed rollback retains ownership instead of claiming cleanup succeeded. It does not close a caller-supplied surface, and managed worktree workspaces remain retained on failure. Note: the `interactive` option controls parent status notifications, not terminal focus.
+
+## An acquisition or dispatch is uncertain
+
+Do not repeat the launch immediately. A timed-out Herdr client does not establish
+that the server stopped creating a resource or delivering a command.
+
+1. Read the exact pane, workspace, session, and manifest identities in the error
+   or acknowledgement. Never choose a resource by its display label.
+2. For an acknowledgement with `status: "uncertain"`, use the existing run's
+   control tools. Its acquired owner stays supervised, and fallback is disabled.
+   A result follows confirmed termination. An unconfirmed control response does
+   not mean that the process stopped.
+3. For an ownerless creation failure, inspect the reported resources and retained
+   manifest before deciding whether another launch is safe. Worktree recovery
+   evidence does not authorize automatic removal or reuse of the same branch.
+
+Launch and handoff subprocesses have [finite operation budgets](tools.md#launch-deadlines-and-uncertainty).
+A failed Git handoff reports unknown state. Inspect the retained checkout before
+integration or cleanup. Explicit cleanup Git commands still run synchronously
+with their existing timeouts.
 
 ## A child is stalled or makes no progress
 

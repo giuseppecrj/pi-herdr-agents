@@ -45,6 +45,20 @@ implementation. Fake coverage is local; real Pi and Herdr coverage uses the
 deterministic integration suite.
 _Avoid_: Second supported harness, fake-only behavior proof, release certification
 
+**Acquisition uncertainty**:
+A resource-creation or command-dispatch request whose remote outcome is not
+proved. Stopping a timed-out Herdr client does not cancel the server request.
+The host blocks model fallback and retains observed identities. An initialized
+child stays owned and supervised until confirmed termination; an ownerless
+failure records only recovery evidence and never invents a handle.
+_Avoid_: Definite failure, permission to retry, server cancellation
+
+**Placement reservation**:
+The process-local, reload-surviving queue around pane inspection, creation, and
+ownership recording. It excludes Git checkout and Pi startup. An uncertain split
+makes its tab unavailable for later placement because the split may still finish.
+_Avoid_: Durable lock, cross-process capacity guarantee, adoption by label
+
 **Child wake-up signal**:
 An internal indication that prompts fresh inspection of an owned child. It does
 not itself establish completion, failure, or a help request.
