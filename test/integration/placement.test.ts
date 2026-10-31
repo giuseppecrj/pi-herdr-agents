@@ -587,9 +587,11 @@ writeFileSync(${JSON.stringify(report)}, JSON.stringify(result));
 						);
 						return;
 					}
+					// Fallback attempt panes close independently after accepted delivery.
+					// The first pane disappearing does not mean all attempts are released.
 					while (
 						panes(env.workspaceId).some(
-							(pane) => pane.pane_id === child.pane_id,
+							(pane) => !baseline.has(pane.pane_id),
 						) &&
 						Date.now() < deadline
 					)
