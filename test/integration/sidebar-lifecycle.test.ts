@@ -470,15 +470,17 @@ for (const backend of backends) {
 				() => (subagentResults(run.parentSession) >= 2 ? true : undefined),
 				"both child results",
 			);
-			// The worktree root pane is retained as a shell and loses its marker.
+			// Root marker retirement and ordinary pane cleanup are independent.
+			// Wait for both, retaining the worktree root as an unmarked shell.
 			const root = await waitFor(
 				() => {
-					const pane = listPanes().find(
-						(entry) => entry.pane === run.worktree.pane,
-					);
-					return pane && pane.token === undefined ? pane : undefined;
+					const panes = ownedPanes(run.worktree.workspace);
+					const pane = panes.find((entry) => entry.pane === run.worktree.pane);
+					return pane && panes.every((entry) => entry.token === undefined)
+						? pane
+						: undefined;
 				},
-				"cleared retained worktree root",
+				"cleared retained worktree root and all owned markers",
 				20_000,
 			);
 			assert.equal(root.workspace, run.worktree.workspace);
