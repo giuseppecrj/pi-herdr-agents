@@ -172,8 +172,8 @@ interface Launch {
 interface LaunchOptions {
 	/** How long the fixture's own children may take to show their markers. */
 	markerTimeoutMs?: number;
-	/** Fail as soon as the worktree launch record appears, mid-acquisition. */
-	failOnLaunchRecord?: boolean;
+	/** Fail after the manifest receipt and inventory agree on the acquired worktree. */
+	failAfterWorktreeAcquired?: boolean;
 	readParentScreen?: (pane: string) => string;
 }
 
@@ -248,9 +248,9 @@ for (const backend of backends) {
 		});
 
 		/**
-		 * Stops the parent's launch work first, so nothing it started can
-		 * create a resource after the scan, then removes the one worktree its
-		 * records and Herdr agree it owns. Never throws.
+		 * Stops the parent's local launch work, then removes the one worktree
+		 * its records and Herdr agree it owns. Unsettled provisioning remains
+		 * residue: killing a client cannot cancel Herdr's mutation. Never throws.
 		 */
 		async function releaseLaunch(
 			owned: Omit<Launch, "release">,
@@ -291,7 +291,7 @@ for (const backend of backends) {
 		async function launchHeldChildren(options: LaunchOptions = {}) {
 			const {
 				markerTimeoutMs = 30_000,
-				failOnLaunchRecord = false,
+				failAfterWorktreeAcquired = false,
 				readParentScreen = (pane: string) => readPane(pane, 200),
 			} = options;
 			const id = uniqueId();
@@ -345,15 +345,24 @@ for (const backend of backends) {
 				{ extraArgs: `--session ${shellQuote(parentSession)}` },
 			);
 			try {
-				if (failOnLaunchRecord) {
-					const record = await waitFor(
-						() => readLaunchRecords(env.dir)?.find((r) => r.branch === branch),
-						"the worktree launch record",
+				if (failAfterWorktreeAcquired) {
+					const acquired = await waitFor(
+						() => {
+							const found = findOwnedWorktree(owned.expected, env.dir);
+							return found.kind === "open" &&
+								found.record.path === found.path &&
+								found.record.workspaceId === found.workspace
+								? found
+								: undefined;
+						},
+						"the acquired worktree receipt and workspace",
 						PI_TIMEOUT,
 						25,
 					);
+					// No child startup or completion is required, but remote creation
+					// is confirmed. This tests cleanup, not cancellation of creation.
 					throw new Error(
-						`injected failure with the worktree launch record ${record.state ?? "unknown"}`,
+						`injected failure after worktree acquisition ${acquired.workspace} ${acquired.path}`,
 					);
 				}
 				await waitForFile(startOrdinary, PI_TIMEOUT, /START_ORD_/);
@@ -699,10 +708,10 @@ for (const backend of backends) {
 			assert.ok(!open.includes(source) && !open.includes(record.workspaceId));
 		});
 
-		it("quiesces a launch that fails mid-acquisition and cleans up even when diagnostics fail", async (t) => {
+		it("cleans up an acquired worktree even when launch diagnostics fail", async (t) => {
 			let reads = 0;
 			const failure = await launchHeldChildren({
-				failOnLaunchRecord: true,
+				failAfterWorktreeAcquired: true,
 				readParentScreen: () => {
 					reads++;
 					throw new Error("pane read failed");
@@ -712,10 +721,7 @@ for (const backend of backends) {
 				(error: Error) => error.message,
 			);
 			t.diagnostic(failure.split("\n")[0]);
-			assert.match(
-				failure,
-				/^injected failure with the worktree launch record/,
-			);
+			assert.match(failure, /^injected failure after worktree acquisition/);
 			assert.match(failure, /Parent screen:\nunavailable: pane read failed/);
 			assert.equal(reads, 1);
 			assert.ok(launch);
@@ -723,12 +729,16 @@ for (const backend of backends) {
 			t.diagnostic(`cleanup ${JSON.stringify(report)}`);
 			assert.deepEqual(report.residue, []);
 			assert.deepEqual(paneProcesses(launch.scope), []);
-			await sleep(3_000);
 			assert.deepEqual(findOwnedWorktree(launch.expected, env.dir), {
 				kind: "absent",
 			});
 			const records = readLaunchRecords(env.dir) ?? [];
 			assert.equal(records.length, 1, "the launch recorded its worktree");
+			const [record] = records;
+			assert.ok(record.path && record.workspaceId, "the resource was acquired");
+			assert.deepEqual(report.removed, [record.path]);
+			assert.ok(!existsSync(record.path), "the acquired checkout is absent");
+			assert.ok(!workspaceIds().includes(record.workspaceId));
 		});
 	});
 }
