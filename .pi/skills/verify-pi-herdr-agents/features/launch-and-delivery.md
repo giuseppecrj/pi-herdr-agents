@@ -1,10 +1,10 @@
 # Launch and result delivery
 
-A parent calls `subagent`, gets an immediate acknowledgement, the child runs in its own Herdr pane, and on exit the result arrives in the parent as one `subagent_result` steer message. The child's text is inside `<subagent_report from="<name>" kind="result">` and the host lines are outside it. The parent then continues, and the child pane is closed after delivery is accepted.
+A parent calls `subagent` and gets an acknowledgement after provisioning and command dispatch, without waiting for task completion. The child runs in its own Herdr pane, and on exit the result arrives in the parent as a `subagent_result` steer message. The child's text is inside `<subagent_report from="<name>" kind="result">` and the host lines are outside it. The parent then continues, and the child pane is closed after delivery is accepted.
 
 ## Sub-features
 
-- `launch-ack`: `subagent` returns at once with `Sub-agent "<name>" launched and is now running in the background`.
+- `launch-ack`: after acquisition and command dispatch, `subagent` returns `Sub-agent "<name>" launched and is now running in the background`. An uncertain launch instead carries `status: "uncertain"` and retains the acquired owner under supervision; do not blindly retry. See [Launch deadlines and uncertainty](../../../../docs/tools.md#launch-deadlines-and-uncertainty).
 - `launch-pane`: the child gets a pane in an extension-owned `Agents` tab of the caller's workspace.
 - `deliver-envelope`: exactly one `subagent_result`. The child text is inside the envelope; the head line `Sub-agent "<name>" completed (...)`, the session reference and `Parent action: ...` are outside it.
 - `deliver-continue`: the parent produces an assistant turn after the delivery, with no extra user message.

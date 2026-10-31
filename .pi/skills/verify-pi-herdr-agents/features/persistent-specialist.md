@@ -1,6 +1,6 @@
 # Persistent specialist
 
-`subagent` with `persistent: true` creates one long-lived specialist with a launch-time policy snapshot. Each task, the initial one and each `subagent_send({ id|name, message })`, is delivered exactly once as a `task-result`. A send while the specialist is busy is rejected (`rejected-busy`) and never queued. `subagent_stop` ends it gracefully and reports `stopped` only after process-exit evidence, then closes the ordinary pane.
+`subagent` with `persistent: true` creates one long-lived specialist with a launch-time policy snapshot. The initial task and each `subagent_send({ id|name, message })` have a task ID and produce a `task-result`. Successful task-result and help notifications are not resent when their ledger acknowledgement fails; only the acknowledgement is retried. This deduplication survives `/reload`, not a full process crash, and is not durable exactly-once delivery. A send while the specialist is busy is rejected (`rejected-busy`) and never queued. `subagent_stop` ends it gracefully and reports `stopped` only after process-exit evidence, then closes the ordinary pane. A stop retry or verified exit cancels the old timeout notice. Exit confirmed after a timeout or stop-publication failure produces a terminal `stopped` update. See [Persistent specialists](../../../../docs/tools.md#persistent-specialists).
 
 ## Sub-features
 
