@@ -220,6 +220,7 @@ import {
 } from "../maestro/core/routing.ts";
 import { wrapPiModelRegistry } from "../maestro/adapters/pi/model-registry.ts";
 import { FakeSurfaceProvider } from "../maestro/surfaces/fake/fake-surface-provider.ts";
+import { AcquisitionUncertainError } from "../maestro/core/surface-provider.ts";
 
 // Tool-registration behavior is environment-sensitive for child subagents.
 // Isolate the unit suite from inherited parent/child capability variables.
@@ -14201,8 +14202,11 @@ describe("subagent interruption", () => {
 						},
 						createWorktree: () => worktree,
 						waitForShellReady: async () => {},
-						runScript: () => {
-							throw new Error("pane rejected command");
+						runScript: (surface) => {
+							throw new AcquisitionUncertainError("pane rejected command", {
+								kind: "command-dispatch",
+								surfaceId: surface,
+							});
 						},
 						closePane: () => {
 							throw new Error("must retain worktree");

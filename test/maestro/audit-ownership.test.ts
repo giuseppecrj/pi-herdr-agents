@@ -8,7 +8,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { PiHarnessAdapter } from "../../maestro/adapters/pi/pi-harness-adapter.ts";
 import { launchOperationsFromSurface } from "../../maestro/adapters/pi/launch-operations.ts";
@@ -25,7 +25,9 @@ import {
 } from "../../maestro/adapters/pi/session.ts";
 import type { SpawnOptions } from "../../maestro/core/harness-adapter.ts";
 import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
+import { AcquisitionUncertainError } from "../../maestro/core/surface-provider.ts";
 import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
+import { runScriptInPane } from "../../maestro/surfaces/herdr/terminal.ts";
 
 function fixture() {
 	const root = mkdtempSync(join(tmpdir(), "audit-ownership-"));
@@ -63,8 +65,11 @@ function fixture() {
 		bootId: "fixture",
 		pidNamespace: "fixture",
 	};
-	const kernel = { alive: true };
-	operations.captureProcessIdentity = async () => identity;
+	const kernel = { alive: true, identityCaptures: 0 };
+	operations.captureProcessIdentity = async () => {
+		kernel.identityCaptures++;
+		return identity;
+	};
 	const supervision = new SupervisionCoordinator(
 		async () => ({ complete: true, panes: [] }),
 		(id) => surface.inspectSurface(id),
@@ -137,6 +142,24 @@ async function usingFixture(
 
 const nextTurn = () => new Promise<void>((resolve) => setImmediate(resolve));
 
+function uncertainDispatch(message: string, surfaceId: string) {
+	return new AcquisitionUncertainError(message, {
+		kind: "command-dispatch",
+		surfaceId,
+	});
+}
+
+async function withoutHerdr<T>(run: () => Promise<T>): Promise<T> {
+	const saved = process.env.HERDR_ENV;
+	delete process.env.HERDR_ENV;
+	try {
+		return await run();
+	} finally {
+		if (saved === undefined) delete process.env.HERDR_ENV;
+		else process.env.HERDR_ENV = saved;
+	}
+}
+
 function commandSession(command: string): string {
 	const session = command.match(/--session '([^']+)'/)?.[1];
 	assert.ok(session);
@@ -147,8 +170,8 @@ describe("audited launch ownership", () => {
 	it("uncertain dispatch on a caller-provided surface never closes that surface", async () =>
 		usingFixture(async (f) => {
 			const id = f.surface.createSurface({ name: "caller", cwd: f.root });
-			f.operations.runScript = () => {
-				throw new Error("receipt lost");
+			f.operations.runScript = (surface) => {
+				throw uncertainDispatch("receipt lost", surface);
 			};
 			const handle = await f.adapter.spawn({
 				...f.options,
@@ -165,8 +188,8 @@ describe("audited launch ownership", () => {
 		}));
 	it("transfers uncertain worktree dispatch without closing its root or fabricating process exit", async () =>
 		usingFixture(async (f) => {
-			f.operations.runScript = () => {
-				throw new Error("dispatch response lost");
+			f.operations.runScript = (surface) => {
+				throw uncertainDispatch("dispatch response lost", surface);
 			};
 			const handle = await f.adapter.spawn({
 				...f.options,
@@ -193,6 +216,62 @@ describe("audited launch ownership", () => {
 			assert.match(result.errorMessage!, /dispatch response lost/);
 			assert.equal(f.surface.listSurfaces().length, 1);
 		}));
+	it("a real script-write failure in a worktree dispatches nothing and fails plainly with its root retained", async () =>
+		usingFixture(async (f) => {
+			// A regular file where the script directory belongs: portable, even as root.
+			const scripts = join(f.root, "artifacts", "parent", "subagent-scripts");
+			mkdirSync(dirname(scripts), { recursive: true });
+			writeFileSync(scripts, "obstruction\n");
+			const scriptPaths: string[] = [];
+			f.operations.runScript = (surface, command, options) => {
+				scriptPaths.push(options.scriptPath);
+				return runScriptInPane(surface, command, options);
+			};
+			await withoutHerdr(() =>
+				assert.rejects(
+					f.adapter.spawn({
+						...f.options,
+						behavior: { autoExit: true },
+						worktreeRequest: { branch: "retained" },
+					}),
+					/^Error: Failed to launch subagent; worktree retained at .*(EEXIST|ENOTDIR)/,
+				),
+			);
+			assert.equal(scriptPaths.length, 1);
+			assert.equal(dirname(scriptPaths[0]), scripts);
+			assert.equal(existsSync(scriptPaths[0]), false, "no script was written");
+			assert.equal(
+				f.kernel.identityCaptures,
+				0,
+				"no process exists to identify",
+			);
+			assert.equal(f.surface.listSurfaces().length, 1, "root retained");
+			const manifests = join(f.root, "artifacts", "parent", "worktree-runs");
+			const manifest = readWorktreeManifest(
+				join(manifests, readdirSync(manifests)[0]),
+			);
+			assert.equal(manifest?.state, "failed");
+			assert.equal(manifest?.acquisitionUncertain, undefined);
+		}));
+
+	it("a definite resume dispatch failure closes its pane and transfers no owner", async () =>
+		usingFixture(async (f) => {
+			const session = join(f.root, "resume.jsonl");
+			writeFileSync(
+				session,
+				JSON.stringify({ type: "session", cwd: f.root }) + "\n",
+			);
+			writeSubagentSessionPolicy(session, { owner: "public", deniedTools: [] });
+			f.operations.runScript = () => {
+				throw new Error("script write failed");
+			};
+			await assert.rejects(
+				f.adapter.resume({ name: "resumed", sessionId: session }),
+				/^Error: script write failed$/,
+			);
+			assert.equal(f.surface.listSurfaces().length, 0);
+		}));
+
 	it("initializes persistent policy and ledger before dispatch, without rereading child-writable policy", async () =>
 		usingFixture(async (f) => {
 			let ledgerAtDispatch = 0;

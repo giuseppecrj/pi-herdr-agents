@@ -36,6 +36,8 @@ import { createMockExtensionApi } from "../helpers/mock-extension-api.ts";
 import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
 import { launchOperationsFromSurface } from "../../maestro/adapters/pi/launch-operations.ts";
 import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
+import { MODEL_SCOPE_ENV } from "../../maestro/core/routing.ts";
+import { DELEGATION_DEPTH_ENV } from "../../maestro/core/delegation-depth.ts";
 
 function specialist(t: TestContext, busy = false) {
 	const dir = mkdtempSync(join(tmpdir(), "audit-persistent-"));
@@ -429,7 +431,37 @@ function deferred() {
 	return { promise, resolve, reject };
 }
 
+const INHERITED_CHILD_POLICY_ENV = [
+	"PI_SUBAGENT_ID",
+	"PI_DENY_TOOLS",
+	MODEL_SCOPE_ENV,
+	DELEGATION_DEPTH_ENV,
+];
+
+function isolateParentPolicyEnv(): () => void {
+	const inherited = INHERITED_CHILD_POLICY_ENV.map((name) => ({
+		name,
+		value: process.env[name],
+	}));
+	for (const name of INHERITED_CHILD_POLICY_ENV) delete process.env[name];
+	return () => {
+		for (const { name, value } of inherited) {
+			if (value === undefined) delete process.env[name];
+			else process.env[name] = value;
+		}
+	};
+}
+
 async function hostFixture(t: TestContext) {
+	const restoreEnv = isolateParentPolicyEnv();
+	let cleanup = async () => {};
+	t.after(async () => {
+		try {
+			await cleanup();
+		} finally {
+			restoreEnv();
+		}
+	});
 	const configDir = join(process.env.PI_CODING_AGENT_DIR!, "herdr-agents");
 	mkdirSync(configDir, { recursive: true });
 	writeFileSync(
@@ -527,12 +559,12 @@ async function hostFixture(t: TestContext) {
 	const first = load();
 	await first.start();
 	const runtime = readGlobalSlot<SubagentRuntime>(RUNTIME_KEY)!;
-	t.after(async () => {
+	cleanup = async () => {
 		gate.resolve();
 		await first.shutdown("quit");
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		rmSync(dir, { recursive: true, force: true });
-	});
+	};
 	return {
 		first,
 		load,

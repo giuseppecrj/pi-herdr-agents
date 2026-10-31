@@ -44,7 +44,11 @@ import {
 import { createSubagentActivityRecorder } from "../../maestro/adapters/pi/activity-file.ts";
 import { FileWakeRegistry } from "../../maestro/core/wake.ts";
 import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
-import { AcquisitionUncertainError } from "../../maestro/core/surface-provider.ts";
+import {
+	AcquisitionUncertainError,
+	isAcquisitionUncertainError,
+} from "../../maestro/core/surface-provider.ts";
+import { runScriptInPane } from "../../maestro/surfaces/herdr/terminal.ts";
 
 for (const resumed of [false, true])
 	test(`uncertain ${resumed ? "resume" : "dispatch"} with failed rollback transfers the real owner until cancel confirms exit`, () =>
@@ -114,9 +118,12 @@ test("confirmed rollback of uncertain dispatch still blocks model fallback", () 
 		const input = f.input("rollback-confirmed");
 		input.plans = [input.plans[0], { ...input.plans[0], model: "test/two" }];
 		let dispatches = 0;
-		f.operations.runScript = () => {
+		f.operations.runScript = (surface) => {
 			dispatches++;
-			throw new Error("dispatch receipt lost");
+			throw new AcquisitionUncertainError("dispatch receipt lost", {
+				kind: "command-dispatch",
+				surfaceId: surface,
+			});
 		};
 		const handle = await f.session.spawnPi(input);
 		assert.ok(handle.launchFailure);
@@ -125,6 +132,109 @@ test("confirmed rollback of uncertain dispatch still blocks model fallback", () 
 		assert.equal(dispatches, 1);
 		assert.equal(f.settled.length, 1);
 		assert.match(f.settled[0].errorMessage!, /dispatch receipt lost/);
+	}));
+
+async function withoutHerdr<T>(run: () => Promise<T>): Promise<T> {
+	const saved = process.env.HERDR_ENV;
+	delete process.env.HERDR_ENV;
+	try {
+		return await run();
+	} finally {
+		if (saved === undefined) delete process.env.HERDR_ENV;
+		else process.env.HERDR_ENV = saved;
+	}
+}
+
+test("a real script-write failure dispatches nothing, closes its pane, and falls back to the next model", () =>
+	fixture(async (f) => {
+		const input = f.input("script-write-fallback");
+		input.plans = [
+			input.plans[0],
+			{ ...input.plans[0], model: "test/two", modelId: "two" },
+		];
+		// A regular file where the script directory belongs: portable, even as root.
+		const scripts = join(
+			f.dir,
+			"sessions",
+			"artifacts",
+			"parent",
+			"subagent-scripts",
+		);
+		mkdirSync(dirname(scripts), { recursive: true });
+		writeFileSync(scripts, "obstruction\n");
+		const fake = f.operations.runScript;
+		const failures: unknown[] = [];
+		let attempts = 0;
+		f.operations.runScript = async (surface, command, options) => {
+			if (attempts++ > 0) return fake(surface, command, options);
+			assert.equal(dirname(options.scriptPath), scripts);
+			try {
+				return await runScriptInPane(surface, command, options);
+			} catch (error) {
+				failures.push(error);
+				throw error;
+			}
+		};
+		const handle = await withoutHerdr(() => f.session.spawnPi(input));
+		assert.equal(attempts, 2);
+		assert.equal(failures.length, 1);
+		assert.match(String(failures[0]), /EEXIST|ENOTDIR/);
+		assert.equal(f.commands.length, 1, "only the fallback was dispatched");
+		assert.equal(handle.launchFailure, undefined);
+		const started = f.session.getStarted(input.task.id);
+		assert.equal(started?.status, "started");
+		assert.equal(started?.model, "test/two");
+		assert.deepEqual(
+			f.provider.listSurfaces().map((surface) => surface.id),
+			[handle.surfaceId],
+			"the failed candidate's pane was closed",
+		);
+	}));
+
+test("a definite dispatch failure with unconfirmed rollback stays ownerless uncertainty and launches no fallback", () =>
+	fixture(async (f) => {
+		const input = f.input("rollback-unconfirmed");
+		input.plans = [input.plans[0], { ...input.plans[0], model: "test/two" }];
+		let dispatches = 0;
+		f.operations.runScript = () => {
+			dispatches++;
+			throw new Error("script write failed");
+		};
+		f.provider.closeSurface = () => {
+			throw new Error("rollback unavailable");
+		};
+		const error = await f.session.spawnPi(input).then(
+			() => assert.fail("an unconfirmed rollback must reject"),
+			(rejected: Error) => rejected,
+		);
+		assert.ok(isAcquisitionUncertainError(error));
+		assert.equal(error.uncertainty.kind, "surface-create");
+		assert.match(error.message, /script write failed; rollback unconfirmed/);
+		assert.equal(dispatches, 1, "no fallback after unproven rollback");
+		assert.equal(f.provider.listSurfaces().length, 1);
+		assert.equal(f.session.getRecord(input.task.id), undefined);
+	}));
+
+test("a definite resume dispatch failure closes its pane and leaves nothing to supervise", () =>
+	fixture(async (f) => {
+		const input = f.input("resume-definite");
+		const file = join(f.dir, "resume.jsonl");
+		writeFileSync(file, JSON.stringify({ type: "session", cwd: f.dir }) + "\n");
+		writeSubagentSessionPolicy(file, { owner: "public", deniedTools: [] });
+		f.operations.runScript = () => {
+			throw new Error("script write failed");
+		};
+		await assert.rejects(
+			f.session.resumePi({
+				taskId: input.task.id,
+				sessionPath: file,
+				name: "resume",
+			}),
+			/^Error: script write failed$/,
+		);
+		assert.equal(f.provider.listSurfaces().length, 0);
+		assert.equal(f.session.getRecord(input.task.id), undefined);
+		assert.equal(f.session.getStarted(input.task.id), undefined);
 	}));
 
 test("ownerless uncertainty on a running fallback preserves prior provider evidence and never launches the next candidate", () =>

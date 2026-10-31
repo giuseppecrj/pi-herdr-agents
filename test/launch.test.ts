@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
 import {
 	existsSync,
@@ -9,7 +9,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { buildSessionContext } from "@earendil-works/pi-coding-agent";
@@ -21,16 +21,23 @@ import {
 	type WorktreeSurfaceForLaunch,
 } from "../maestro/adapters/pi/launch-operations.ts";
 import {
+	AcquiredPiLaunchError,
 	launchPiSubagent,
 	launchPiWorktreeHandoff,
 	type FreshPiLaunchRequest,
 	type ResumePiLaunchRequest,
 } from "../maestro/adapters/pi/launch.ts";
+import { HerdrClientError } from "../maestro/surfaces/herdr/herdr-cli.ts";
+import { runScriptInPane } from "../maestro/surfaces/herdr/terminal.ts";
 import { createWorktreeOperations } from "../maestro/runtime/worktree-operations.ts";
 import { createSubagentPaneFactory } from "../maestro/core/config/pane-config.ts";
 import { FakeSurfaceProvider } from "../maestro/surfaces/fake/fake-surface-provider.ts";
 import type { SurfaceProvider } from "../maestro/core/surface-provider.ts";
-import { WorktreeProvisioningError } from "../maestro/core/surface-provider.ts";
+import {
+	AcquisitionUncertainError,
+	isAcquisitionUncertainError,
+	WorktreeProvisioningError,
+} from "../maestro/core/surface-provider.ts";
 import {
 	findStoredSessionModel,
 	readSubagentSessionPolicy,
@@ -147,6 +154,16 @@ function deferred<T = void>() {
 		resolve = innerResolve;
 	});
 	return { promise, resolve };
+}
+
+async function rejection<T>(launch: Promise<T>): Promise<Error> {
+	try {
+		await launch;
+	} catch (error) {
+		assert.ok(error instanceof Error);
+		return error;
+	}
+	return assert.fail("launch must reject");
 }
 
 function providerWithOverrides(
@@ -396,15 +413,20 @@ describe("Pi launch", () => {
 	) {
 		const provider = new FakeSurfaceProvider();
 		provider.createSurface({ name: "ready", cwd: "/repo" });
+		let answered = false;
 		const operations = launchOperationsFromSurface(
 			providerWithOverrides(provider, {
-				getProcessInfo: () => processInfo,
+				getProcessInfo: () => {
+					answered = true;
+					return processInfo;
+				},
 			}),
 			{ mode: "grouped", direction: "right", maxPerTab: 4 },
 		);
-		const originalNow = Date.now;
-		const times = [0, 0, 10_001];
-		Date.now = () => times.shift() ?? 10_001;
+		let readsAfterAnswer = 0;
+		const clock = mock.method(performance, "now", () =>
+			answered && ++readsAfterAnswer > 1 ? 10_001 : 0,
+		);
 		try {
 			assert.ok(operations.waitForPiReady);
 			await assert.rejects(
@@ -417,8 +439,9 @@ describe("Pi launch", () => {
 					`Timed out waiting for Pi session /tmp/child\\.jsonl in Herdr pane fake-surface-1: ${reason.source}`,
 				),
 			);
+			assert.equal(answered, true, "the rejection judged a Herdr answer");
 		} finally {
-			Date.now = originalNow;
+			clock.mock.restore();
 		}
 	}
 
@@ -872,6 +895,182 @@ describe("Pi launch", () => {
 			});
 		}
 	}
+
+	describe("dispatch certainty", () => {
+		type Target = "owned pane" | "caller surface" | "resumed pane";
+		const targets: Target[] = ["owned pane", "caller surface", "resumed pane"];
+		const failures = [
+			{
+				label: "a plain runScript rejection",
+				definite: true,
+				error: () => new Error("script write failed"),
+			},
+			{
+				label: "a not-spawned Herdr client",
+				definite: true,
+				error: () =>
+					new HerdrClientError("not-spawned", "herdr was not spawned", "", ""),
+			},
+			{
+				label: "an uncertain command dispatch",
+				definite: false,
+				error: (surface: string) =>
+					new AcquisitionUncertainError("dispatch receipt lost", {
+						kind: "command-dispatch",
+						surfaceId: surface,
+					}),
+			},
+		];
+
+		function requestFor(
+			target: Target,
+			{ request, root, sessionDir }: ReturnType<typeof fixture>,
+		): FreshPiLaunchRequest | ResumePiLaunchRequest {
+			if (target === "caller surface")
+				return { ...request, surface: "caller-pane" };
+			if (target === "owned pane") return request;
+			const sessionFile = join(root, "resumed.jsonl");
+			writeFileSync(
+				sessionFile,
+				JSON.stringify({ type: "session", id: "resumed", cwd: root }) + "\n",
+			);
+			writePublicResumePolicy(sessionFile);
+			return {
+				kind: "resume",
+				id: "resume-certainty",
+				name: "Resume worker",
+				sessionFile,
+				parent: { sessionId: "parent", sessionDir },
+			};
+		}
+
+		async function withoutHerdr<T>(run: () => Promise<T>): Promise<T> {
+			const saved = process.env.HERDR_ENV;
+			delete process.env.HERDR_ENV;
+			try {
+				return await run();
+			} finally {
+				if (saved === undefined) delete process.env.HERDR_ENV;
+				else process.env.HERDR_ENV = saved;
+			}
+		}
+
+		for (const target of targets)
+			for (const failure of failures)
+				it(`${failure.definite ? "fails plainly" : "transfers the initialized owner"} for ${failure.label} on a ${target}`, async () => {
+					await withFixture(async (value) => {
+						const closed: string[] = [];
+						let thrown: Error | undefined;
+						const operations: PiLaunchOperations = {
+							createPane: () => "owned-pane",
+							createWorktree: () => {
+								throw new Error("unexpected worktree creation");
+							},
+							waitForShellReady: async () => {},
+							runScript: (surface) => {
+								thrown = failure.error(surface);
+								throw thrown;
+							},
+							closePane(surface) {
+								closed.push(surface);
+							},
+						};
+						const error = await rejection(
+							launchPiSubagent(requestFor(target, value), operations),
+						);
+						assert.ok(thrown, "dispatch was attempted");
+						const surface =
+							target === "caller surface" ? "caller-pane" : "owned-pane";
+						if (failure.definite) {
+							assert.equal(
+								error,
+								thrown,
+								"nothing was dispatched, so no owner is transferred",
+							);
+						} else {
+							assert.ok(error instanceof AcquiredPiLaunchError);
+							assert.equal(error.cause, thrown);
+							assert.equal(error.child.surface, surface);
+							assert.match(error.child.launchFailure!, /dispatch receipt lost/);
+						}
+						assert.deepEqual(
+							closed,
+							target === "caller surface" ? [] : [surface],
+							"only a transaction-owned pane is closed, once",
+						);
+					});
+				});
+
+		for (const target of ["owned pane", "resumed pane"] as const)
+			it(`a definite failure whose ${target} rollback is unconfirmed stays ownerless uncertainty`, async () => {
+				await withFixture(async (value) => {
+					const error = await rejection(
+						launchPiSubagent(requestFor(target, value), {
+							createPane: () => "owned-pane",
+							createWorktree: () => {
+								throw new Error("unexpected worktree creation");
+							},
+							waitForShellReady: async () => {},
+							runScript: () => {
+								throw new Error("script write failed");
+							},
+							closePane: () => {
+								throw new Error("pane close timed out");
+							},
+						}),
+					);
+					assert.equal(error instanceof AcquiredPiLaunchError, false);
+					assert.ok(isAcquisitionUncertainError(error));
+					assert.deepEqual(error.uncertainty, {
+						kind: "surface-create",
+						placement: "tab",
+						observedSurfaceId: "owned-pane",
+					});
+					assert.match(
+						error.message,
+						/script write failed; rollback unconfirmed: (Error: )?pane close timed out; pane retained: owned-pane; no fallback/,
+					);
+				});
+			});
+
+		for (const target of ["owned pane", "resumed pane"] as const)
+			it(`a real script-write failure on a ${target} dispatches nothing and closes the pane`, async () => {
+				await withFixture(async (value) => {
+					// A regular file where the script directory belongs: portable, even as root.
+					const scripts = join(
+						value.sessionDir,
+						"artifacts",
+						"parent",
+						"subagent-scripts",
+					);
+					mkdirSync(dirname(scripts), { recursive: true });
+					writeFileSync(scripts, "obstruction\n");
+					const provider = new FakeSurfaceProvider();
+					const operations = launchOperationsFromSurface(provider, {
+						mode: "grouped",
+						direction: "right",
+						maxPerTab: 4,
+					});
+					operations.waitForShellReady = async () => {};
+					const scriptPaths: string[] = [];
+					operations.runScript = (surface, command, options) => {
+						scriptPaths.push(options.scriptPath);
+						return runScriptInPane(surface, command, options);
+					};
+					const error = await withoutHerdr(() =>
+						rejection(launchPiSubagent(requestFor(target, value), operations)),
+					);
+					assert.equal(scriptPaths.length, 1);
+					assert.equal(dirname(scriptPaths[0]), scripts);
+					assert.ok("code" in error);
+					assert.match(String(error.code), /^(EEXIST|ENOTDIR)$/);
+					assert.doesNotMatch(error.message, /herdr is not available/);
+					assert.equal(error instanceof AcquiredPiLaunchError, false);
+					assert.equal(existsSync(scriptPaths[0]), false);
+					assert.deepEqual(provider.listSurfaces(), []);
+				});
+			});
+	});
 
 	it("closes an owned split child rather than its stable parent on launch failure", async () => {
 		await withFixture(async ({ request }) => {
@@ -2301,7 +2500,7 @@ describe("Pi launch", () => {
 				"child-1.json",
 			);
 			let focused = false;
-			await assert.rejects(
+			const error = await rejection(
 				launchPiWorktreeHandoff(
 					{
 						...request,
@@ -2339,13 +2538,16 @@ describe("Pi launch", () => {
 						},
 					},
 				),
+			);
+			assert.match(
+				error.message,
 				/worktree retained.*pi exited before startup/i,
 			);
+			assert.ok(error instanceof AcquiredPiLaunchError);
 			assert.equal(focused, false);
-			assert.equal(
-				JSON.parse(readFileSync(manifestFile, "utf8")).state,
-				"failed",
-			);
+			const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
+			assert.equal(manifest.state, "failed");
+			assert.equal(manifest.acquisitionUncertain, true);
 		});
 	});
 
@@ -2445,10 +2647,15 @@ describe("Pi launch", () => {
 					},
 					operations,
 				),
-				/worktree retained.*pane rejected command/i,
+				/^Error: Failed to launch subagent; worktree retained.*pane rejected command/i,
 			);
 			const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
 			assert.equal(manifest.state, "failed");
+			assert.equal(
+				manifest.acquisitionUncertain,
+				undefined,
+				"a definite dispatch failure leaves no possible process",
+			);
 			assert.equal(manifest.path, worktreePath);
 			assert.equal(manifest.sourceSessionFile, request.parent.sessionFile);
 			assert.match(manifest.handoffMessage, /issue\/7-failed/);

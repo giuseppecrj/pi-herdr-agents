@@ -43,6 +43,7 @@ class UncertainAdapter extends FakeHarnessAdapter {
 	kills: number[] = [];
 	signal?: AbortSignal;
 	terminationConfirmed = false;
+	killGate?: Promise<void>;
 	evidence?: CompletionEvidence;
 	override async awaitCompletion(_handle: AgentHandle, signal: AbortSignal) {
 		this.signal = signal;
@@ -52,11 +53,18 @@ class UncertainAdapter extends FakeHarnessAdapter {
 	}
 	override async kill(_handle: AgentHandle) {
 		this.kills.push(Date.now());
+		await this.killGate;
 		if (!this.terminationConfirmed) throw new Error("exit unconfirmed");
 	}
 }
 
-async function fixture() {
+async function fixture({
+	launchFailure = true,
+	cancel = false,
+}: {
+	launchFailure?: boolean;
+	cancel?: boolean;
+} = {}) {
 	const adapter = new UncertainAdapter();
 	const delivered: RunResult[] = [];
 	const session = createRunSession({
@@ -70,10 +78,11 @@ async function fixture() {
 		},
 	});
 	const handle = await session.spawn(task);
-	handle.launchFailure = "dispatch receipt lost";
+	if (launchFailure) handle.launchFailure = "dispatch receipt lost";
 	const result = session.supervise(handle, task);
+	const cancellation = cancel ? await session.cancel(task.id) : undefined;
 	await turn();
-	return { adapter, delivered, session, handle, result };
+	return { adapter, delivered, session, handle, result, cancellation };
 }
 
 it("uncertain watcher failures back off to 30s without a retry limit, fallback, or lost owner", async (t) => {
@@ -161,6 +170,172 @@ it("unconfirmed cancellation retains the retry wait and owner until a confirmed 
 	assert.equal(f.adapter.waits.length, 1);
 	assert.equal(f.adapter.spawned().length, 1);
 });
+
+for (const launchFailure of [false, true]) {
+	it(`unconfirmed cancel rearms failed observation with capped backoff, not more kills (launchFailure=${launchFailure})`, async (t) => {
+		t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+		const f = await fixture({ launchFailure, cancel: true });
+		assert.equal(f.cancellation?.status, "unconfirmed");
+		const joined = f.session.supervise(f.handle, task);
+		const caller = new AbortController();
+		const abandoned = assert.rejects(
+			f.session.supervise(f.handle, task, caller.signal),
+			/Aborted while waiting/,
+		);
+		caller.abort();
+		await abandoned;
+		assert.equal(getEventListeners(caller.signal, "abort").length, 0);
+		const expected = [0];
+		for (const delay of [1000, 2000, 4000, 8000, 16000, 30000, 30000]) {
+			t.mock.timers.tick(delay - 1);
+			await turn();
+			assert.deepEqual(f.adapter.waits, expected, "no early watcher probe");
+			t.mock.timers.tick(1);
+			await turn();
+			expected.push(Date.now());
+			assert.deepEqual(
+				f.adapter.waits,
+				expected,
+				"same producer rearms observation",
+			);
+			assert.deepEqual(
+				f.adapter.kills,
+				[0],
+				"watcher failure is not exit evidence",
+			);
+			assert.equal(f.session.getHandle(task.id), f.handle);
+			assert.equal(f.session.getTask(task.id), task);
+			assert.deepEqual(f.delivered, []);
+			assert.equal(f.adapter.spawned().length, 1);
+		}
+		assert.ok(f.adapter.signal);
+		assert.equal(f.adapter.signal.aborted, false);
+		assert.equal(getEventListeners(f.adapter.signal, "abort").length, 1);
+		f.adapter.evidence = {
+			reason: "error",
+			exitCode: 1,
+			errorMessage: "late exit",
+		};
+		f.adapter.terminationConfirmed = true;
+		t.mock.timers.tick(30000);
+		const result = await f.result;
+		assert.equal(await joined, result);
+		assert.equal(result.handle, f.handle);
+		assert.equal(result.outcome, "killed");
+		assert.equal(result.evidence, undefined);
+		assert.deepEqual(result.cancellation, {
+			requestedAt: f.cancellation?.requestedAt,
+			termination: "confirmed",
+			confirmedAt: Date.now(),
+		});
+		assert.deepEqual(f.adapter.kills, [0, Date.now()]);
+		assert.deepEqual(f.delivered, [result]);
+		assert.equal(f.session.getHandle(task.id), undefined);
+		assert.equal(getEventListeners(f.adapter.signal, "abort").length, 0);
+		t.mock.timers.tick(300000);
+		await turn();
+		assert.equal(f.adapter.waits.length, expected.length + 1);
+		assert.equal(f.adapter.kills.length, 2);
+		assert.equal(f.adapter.spawned().length, 1);
+		assert.equal(f.delivered.length, 1);
+	});
+
+	it(`resolved evidence makes one producer confirmation attempt then parks for operator retry (launchFailure=${launchFailure})`, async (t) => {
+		t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+		const scheduled = t.mock.method(globalThis, "setTimeout");
+		const f = await fixture({ launchFailure, cancel: true });
+		t.mock.timers.tick(1000);
+		await turn();
+		assert.deepEqual(f.adapter.waits, [0, 1000]);
+		assert.deepEqual(f.adapter.kills, [0]);
+		f.adapter.evidence = { reason: "done", exitCode: 0 };
+		t.mock.timers.tick(2000);
+		await turn();
+		assert.deepEqual(f.adapter.waits, [0, 1000, 3000]);
+		assert.deepEqual(f.adapter.kills, [0, 3000]);
+		assert.ok(f.adapter.signal);
+		assert.equal(getEventListeners(f.adapter.signal, "abort").length, 0);
+		assert.equal(scheduled.mock.callCount(), 2);
+		t.mock.timers.tick(300000);
+		await turn();
+		assert.deepEqual(
+			f.adapter.kills,
+			[0, 3000],
+			"no timer-driven termination retry",
+		);
+		assert.equal(scheduled.mock.callCount(), 2);
+		assert.equal(f.session.getHandle(task.id), f.handle);
+		assert.deepEqual(f.delivered, []);
+
+		let confirm!: () => void;
+		f.adapter.killGate = new Promise<void>((resolve) => {
+			confirm = resolve;
+		});
+		f.adapter.terminationConfirmed = true;
+		const retry = f.session.cancel(task.id);
+		t.mock.timers.tick(10);
+		const joined = f.session.cancel(task.id);
+		await turn();
+		assert.equal(
+			f.adapter.kills.length,
+			3,
+			"explicit retries join the in-flight kill",
+		);
+		assert.deepEqual(f.delivered, []);
+		confirm();
+		for (const report of await Promise.all([retry, joined])) {
+			assert.equal(report.status, "confirmed");
+			assert.equal(report.repeated, true);
+			assert.equal(report.requestedAt, f.cancellation?.requestedAt);
+		}
+		const result = await f.result;
+		assert.equal(result.cancellation?.termination, "confirmed");
+		assert.equal(result.cancellation.requestedAt, f.cancellation?.requestedAt);
+		assert.deepEqual(f.delivered, [result]);
+		assert.equal(f.session.getHandle(task.id), undefined);
+		assert.equal(f.adapter.spawned().length, 1);
+		assert.equal(f.adapter.waits.length, 3);
+		assert.equal(f.adapter.kills.length, 3);
+	});
+
+	for (const action of ["cancel", "suppress"] as const) {
+		it(`${action} promptly clears cancelled observation backoff (launchFailure=${launchFailure})`, async (t) => {
+			t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+			const scheduled = t.mock.method(globalThis, "setTimeout");
+			const cleared = t.mock.method(globalThis, "clearTimeout");
+			const f = await fixture({ launchFailure, cancel: true });
+			for (const delay of [1000, 2000, 4000, 8000, 16000]) {
+				t.mock.timers.tick(delay);
+				await turn();
+			}
+			assert.equal(scheduled.mock.callCount(), 6);
+			assert.deepEqual(f.adapter.kills, [0]);
+			const timer = scheduled.mock.calls.at(-1)!.result;
+			assert.ok(f.adapter.signal);
+			assert.equal(getEventListeners(f.adapter.signal, "abort").length, 1);
+			const probes = f.adapter.waits.length;
+			if (action === "cancel") {
+				f.adapter.terminationConfirmed = true;
+				assert.equal((await f.session.cancel(task.id)).status, "confirmed");
+			} else f.session.suppress(task.id);
+			await turn();
+			assert.ok(cleared.mock.calls.some((call) => call.arguments[0] === timer));
+			assert.equal(getEventListeners(f.adapter.signal, "abort").length, 0);
+			const result = await f.result;
+			assert.equal(
+				result.cancellation?.termination,
+				action === "cancel" ? "confirmed" : "unconfirmed",
+			);
+			assert.equal(f.session.getHandle(task.id), undefined);
+			assert.equal(f.delivered.length, action === "cancel" ? 1 : 0);
+			t.mock.timers.tick(300000);
+			await turn();
+			assert.equal(f.adapter.waits.length, probes);
+			assert.equal(f.adapter.kills.length, action === "cancel" ? 2 : 1);
+			assert.equal(f.adapter.spawned().length, 1);
+		});
+	}
+}
 
 it("suppression while the termination probe is pending starts no retry timer", async (t) => {
 	t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
