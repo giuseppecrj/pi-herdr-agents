@@ -232,6 +232,13 @@ Later ones are only counted in `ignoredTaskEvents`. A notice is used rather
 than a widget-only warning because the parent model owns the specialist and
 should see the protocol violation.
 
+For issued persistent tasks, parent memory also records notification progress
+(`sending`, `sent`, `acknowledged`). Once a notification send succeeds, a failed
+ledger acknowledgment retries only the acknowledgment, not the notification.
+The record survives extension reload and is not erased by deleting the ledger.
+A failed send remains retryable. This is an in-process guarantee, not durable
+exactly-once delivery across a full parent crash.
+
 The help request's head and `from` use the parent-owned run name. The name in
 the `.exit` sidecar goes to `details.reportedName` when it differs
 (`delivery.ts` `settle`).

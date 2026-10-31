@@ -12495,7 +12495,7 @@ describe("Task13 demand-driven persistent I/O", () => {
 				allow = true;
 				drain(record, api, io);
 				assert.equal(reads, 2);
-				assert.equal(sends, 3);
+				assert.equal(sends, fail === "send" ? 3 : 2);
 				assert.equal(record.observedTaskEvents, 2);
 				assert.equal(record.taskId, undefined);
 				assert.equal(record.tasksCompleted, 2);
@@ -12678,11 +12678,11 @@ describe("persistent delivery batch ledger", () => {
 					readPersistentDeliveryLedger(running.sessionFile),
 				);
 				testApi.deliverPersistentTaskEvent(running, event, api, ledger);
-				assert.equal(sends, 2);
+				assert.equal(sends, 1);
 			});
 		});
 
-		it(`direct ${type} delivery reads current disk state`, () => {
+		it(`direct ${type} delivery retains parent acknowledgement when the ledger disappears`, () => {
 			withTempDir((dir) => {
 				const running = makeRunning(join(dir, "direct.jsonl"));
 				const event = appendPersistentTaskEvent(running.sessionFile, {
@@ -12701,7 +12701,7 @@ describe("persistent delivery batch ledger", () => {
 				assert.equal(sends, 1);
 				rmSync(getPersistentDeliveryLedgerFile(running.sessionFile));
 				testApi.deliverPersistentTaskEvent(running, event, api);
-				assert.equal(sends, 2);
+				assert.equal(sends, 1);
 			});
 		});
 	}
@@ -13161,6 +13161,14 @@ describe("type guard aliases", () => {
 
 describe("persistent subagent stop", () => {
 	const testApi = subagentsModule.__test__;
+	// SAFETY: bind the test's notification API in the extension-owned runtime slot.
+	const runtime = (globalThis as Record<symbol, { liveApi?: unknown }>)[
+		Symbol.for("pi-subagents/runtime")
+	];
+	const previousLiveApi = runtime.liveApi;
+	after(() => {
+		runtime.liveApi = previousLiveApi;
+	});
 
 	function persistentFixture(
 		sessionFile: string,
@@ -13252,6 +13260,7 @@ describe("persistent subagent stop", () => {
 					messages.push(message);
 				},
 			};
+			runtime.liveApi = api;
 			testApi.handleSubagentStop({ id: running.id }, api, 0);
 			await new Promise((resolve) => setTimeout(resolve, 5));
 			assert.equal(running.stopState, "pending");
@@ -13299,6 +13308,7 @@ describe("persistent subagent stop", () => {
 				},
 			};
 
+			runtime.liveApi = api;
 			testApi.handleSubagentStop({ id: running.id }, api, 0);
 			await new Promise((resolve) => setTimeout(resolve, 5));
 			assert.equal(running.stopState, "failed");
@@ -13402,15 +13412,13 @@ describe("persistent subagent stop", () => {
 				const running = persistentFixture(sessionFile, policy.policyHash);
 				running.taskId = undefined;
 				testApi.runningSubagents.set("logical-stop", running);
-				testApi.handleSubagentStop(
-					{ id: "logical-stop" },
-					{
-						sendMessage(message: any) {
-							messages.push(message);
-						},
+				const api = {
+					sendMessage(message: any) {
+						messages.push(message);
 					},
-					0,
-				);
+				};
+				runtime.liveApi = api;
+				testApi.handleSubagentStop({ id: "logical-stop" }, api, 0);
 				setTimeout(() => {
 					try {
 						assert.equal(

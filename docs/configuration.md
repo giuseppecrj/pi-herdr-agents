@@ -222,7 +222,7 @@ after writing preferences.
 
 ## Persistent specialist limit
 
-Set `persistent.maxAgents` to the maximum concurrently retained persistent specialists. It defaults to `3`; a persistent spawn at the cap is rejected before Herdr creates a pane or workspace, and no specialist is evicted.
+Set `persistent.maxAgents` to the maximum concurrently retained persistent specialists. It defaults to `3`; a persistent spawn at the cap is rejected before Herdr creates a pane or workspace, and no specialist is evicted. Admission reserves capacity before resource acquisition, so overlapping launches count toward the cap even before their running rows appear. Reservations survive reload and transfer to the running specialist or are released when acquisition fails; quitting clears pending reservations.
 
 ## Delegation depth limit
 
