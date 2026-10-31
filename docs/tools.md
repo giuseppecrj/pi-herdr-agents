@@ -265,6 +265,13 @@ The initial task and each `subagent_send({ id|name, message })` task are dispatc
 
 Use `subagent_stop({ id|name })` to request graceful shutdown. If a task is active, stop becomes `stop-pending` and the task reaches its terminal outcome first. The parent reports `stopped` only after process-exit evidence is confirmed, then closes an ordinary pane it created and releases the name. If confirmation times out, the specialist is `stalled` in an unconfirmed-stop state: `subagent_send` rejects follow-up work while retaining evidence. If publishing the stop directive fails, it likewise enters a retryable failed-stop state rather than remaining permanently stop-pending. Request `subagent_stop` again to publish another directive and make another bounded exit check, or spawn a new specialist. Timeout notices wait for a live parent API across reload and session-replacement gaps; notification failures are contained and retried, and quitting suppresses pending notices. A pane or process disappearance without a stop directive produces one facts-only crash notice; persistent sessions cannot be resumed in v1, so spawn a new specialist. There is no automatic restart, replay, or revival.
 
+A persistent completion sidecar records the child's intended outcome before
+shutdown. It does not prove process exit. The host retains lifetime ownership
+until a verified process identity has exited, the shell has emitted its post-exit
+marker, or pane absence confirms termination when no identity is known alive.
+A known-live identity prevents a stale marker or missing pane from establishing
+exit. Task events can still arrive while shutdown is pending.
+
 A persistent specialist with a worktree holds that lease for its entire lifetime. It cannot be re-bound to another checkout. Otherwise it runs in an ordinary pane.
 
 ## Interrupting a running subagent
