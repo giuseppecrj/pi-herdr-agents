@@ -1109,6 +1109,9 @@ export async function sendHerdrCommand(
 		Deadline.after(10_000),
 		{ kind: "command-dispatch", surfaceId: surface },
 		(output) => {
+			// `pane run` can succeed with no stdout. mutate invokes this parser
+			// only after a timely successful exit, never for partial/error output.
+			if (output.trim() === "") return;
 			const response = parseHerdrJson(output);
 			if (
 				(!isNonEmptyString(response?.result?.type) &&
