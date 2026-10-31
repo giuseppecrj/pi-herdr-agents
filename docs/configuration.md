@@ -412,8 +412,18 @@ or shared pane inspection becomes unavailable, supervision quietly returns to
 the legacy one-second polling cadence. No caller action is required.
 
 Set `supervision.forcePolling` to `true` in the durable user `config.json` to
-disable wake-ups and use that legacy cadence deliberately. The setting is read
-when the coordinator is created, so run `/reload` after changing it.
+disable wake-ups and use that legacy cadence deliberately. Run `/reload` after
+changing it. The live coordinator switches transport without replacing its
+registrations or shared reconciliation timer. A parked wait releases its old
+watch reference or polling timer before the next wait uses the new transport.
+
+A coordinator retained from a version without live reconfiguration cannot apply
+a changed mode safely. Reload reports an explicit restart requirement instead of
+replacing that owner or ignoring the setting. Restore the previous setting and
+reload to keep using that session, then let its children finish before restarting
+Pi with the new setting. An unchanged mode still permits adoption across the
+upgrade.
+
 `subagents_list` reports the active transport mode (`wake+batch`,
 `polling(forced)`, or `polling(fallback)`) and watcher count.
 
