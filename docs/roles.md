@@ -170,6 +170,11 @@ subagent({
 });
 ```
 
+Role files accept LF or CRLF line endings and an optional leading UTF-8 BOM.
+An invalid or unreadable global or project definition blocks that role name
+at its precedence layer rather than exposing a lower-priority definition.
+Discovery reports the file error and continues loading unrelated roles.
+
 Agent files are read when definitions are listed or launched, so creating or
 editing one normally does not require `/reload`. Installing, removing, updating,
 or changing the extension code of a role pack uses Pi's normal `/reload` flow.

@@ -5,7 +5,9 @@ This page is the reference for the durable `config.json` settings, task-model pr
 ## Configuration file
 
 The durable user configuration is `$PI_CODING_AGENT_DIR/herdr-agents/config.json`,
-defaulting to `~/.pi/agent/herdr-agents/config.json`. It is not read from the
+defaulting to `~/.pi/agent/herdr-agents/config.json`. The host uses Pi's public
+agent-directory resolver: an empty `PI_CODING_AGENT_DIR` uses the default,
+and a leading `~` expands as it does in Pi. It is not read from the
 installed package root, so npm and git package upgrades do not overwrite it.
 Create it by copying the installed package's `config.json.example`, or run
 `/subagents-init` to seed and draft model task preferences.
