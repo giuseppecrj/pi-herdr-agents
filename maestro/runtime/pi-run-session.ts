@@ -218,6 +218,19 @@ export function createDefaultRunSession(
 	let resumePi: (input: PiResumeInput) => Promise<AgentHandle>;
 	if (adopted) {
 		state = adopted;
+		const supervision = state.infrastructure.supervision;
+		if (supervision.setForcePolling) {
+			supervision.setForcePolling(options.forcePolling);
+		} else if (
+			(supervision.diagnostics().mode === "polling(forced)") !==
+			options.forcePolling
+		) {
+			// An owner created before live reconfiguration cannot transfer its
+			// registrations safely. Never silently replace it or ignore config.
+			throw new Error(
+				"Cannot change supervision.forcePolling on a pre-upgrade coordinator. Let active children finish, then restart Pi to apply it.",
+			);
+		}
 		state.options = options;
 		state.roles.splice(0, state.roles.length, ...options.roles);
 	} else {
