@@ -51,6 +51,8 @@ export interface SubagentActivityRecorder {
 	toolExecutionEnd(toolCallId?: string, toolName?: string): void;
 	callerPing(): void;
 	subagentDone(): void;
+	/** A persistent specialist received its next task: leave the done snapshot. */
+	taskStart(): void;
 	sessionShutdown(reason: SubagentShutdownReason): void;
 }
 
@@ -78,6 +80,11 @@ const KNOWN_EVENTS = new Set<SubagentActivityEvent>([
 	"tool_execution_update",
 	"tool_result",
 	"tool_execution_end",
+	"caller_ping",
+	"subagent_done",
+	"session_shutdown",
+]);
+const TERMINAL_EVENTS = new Set<SubagentActivityEvent>([
 	"caller_ping",
 	"subagent_done",
 	"session_shutdown",
@@ -257,6 +264,7 @@ function createNoopRecorder(): SubagentActivityRecorder {
 		toolExecutionEnd() {},
 		callerPing() {},
 		subagentDone() {},
+		taskStart() {},
 		sessionShutdown() {},
 	};
 }
@@ -311,6 +319,11 @@ function markActive(
 export function createSubagentActivityRecorder(params: {
 	runningChildId?: string;
 	activityFile?: string;
+	/**
+	 * A persistent specialist outlives each task: `done` ends the current task's
+	 * recording instead of the file's, and `taskStart` resumes it.
+	 */
+	persistent?: boolean;
 	now?: () => number;
 }): SubagentActivityRecorder {
 	const runningChildId = params.runningChildId?.trim();
@@ -320,6 +333,7 @@ export function createSubagentActivityRecorder(params: {
 		runningChildId,
 		activityFile,
 		params.now ?? (() => Date.now()),
+		params.persistent === true,
 	);
 }
 
@@ -327,6 +341,7 @@ function createFileActivityRecorder(
 	runningChildId: string,
 	activityFile: string,
 	now: () => number,
+	persistent: boolean,
 ): SubagentActivityRecorder {
 	const createdAt = now();
 	const activity: SubagentActivityState = {
@@ -344,6 +359,9 @@ function createFileActivityRecorder(
 	};
 
 	let disabled = false;
+	// A persistent specialist's finished task: only a terminal event or the next
+	// task changes the file until then.
+	let taskDone = false;
 	let failureCount = 0;
 	let lastFlushAt = 0;
 	let pendingFlush: ReturnType<typeof setTimeout> | null = null;
@@ -395,6 +413,7 @@ function createFileActivityRecorder(
 		flush: "immediate" | "throttled",
 	): void {
 		if (disabled) return;
+		if (taskDone && !TERMINAL_EVENTS.has(latestEvent)) return;
 		if (flush === "immediate") clearPendingFlush();
 
 		const observedAt = now();
@@ -417,7 +436,8 @@ function createFileActivityRecorder(
 			},
 			"immediate",
 		);
-		disable();
+		if (persistent && latestEvent !== "session_shutdown") taskDone = true;
+		else disable();
 	}
 
 	return {
@@ -598,6 +618,18 @@ function createFileActivityRecorder(
 		},
 		subagentDone() {
 			markDone("subagent_done");
+		},
+		taskStart() {
+			if (!persistent || !taskDone) return;
+			taskDone = false;
+			record(
+				"input",
+				(current, observedAt) => {
+					current.agentActive = true;
+					markActive(current, "agent", observedAt, true);
+				},
+				"immediate",
+			);
 		},
 		sessionShutdown(reason) {
 			if (reason === "quit") markDone("session_shutdown");

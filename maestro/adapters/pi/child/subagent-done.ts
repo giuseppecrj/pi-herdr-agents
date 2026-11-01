@@ -199,6 +199,7 @@ export default function (pi: ExtensionAPI) {
 	const recorder = createSubagentActivityRecorder({
 		runningChildId: process.env.PI_SUBAGENT_ID,
 		activityFile: process.env.PI_SUBAGENT_ACTIVITY_FILE,
+		persistent,
 	});
 	recordProcessIdentity(process.env.PI_SUBAGENT_ID, sessionFile);
 	// The role's declared skills, as this child's own Pi loaded them.
@@ -508,6 +509,7 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				currentTask = inbox.task;
+				recorder.taskStart();
 				pi.sendUserMessage(inbox.message);
 			} catch {
 				// A malformed or transiently unavailable inbox must not kill the poller.
