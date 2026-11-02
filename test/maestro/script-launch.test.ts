@@ -286,8 +286,8 @@ describe("Pi shellPath settings and project trust", () => {
 		}),
 	};
 
-	it("uses the project's shellPath only when the project is trusted", () => {
-		withSettingsFixture(({ project, globalBash, projectBash }) => {
+	it("uses the project's shellPath only when the project is trusted", async () => {
+		await withSettingsFixture(({ project, globalBash, projectBash }) => {
 			assert.equal(
 				createPiScriptShellResolver(
 					{ cwd: project, projectTrusted: true },
@@ -305,8 +305,8 @@ describe("Pi shellPath settings and project trust", () => {
 		});
 	});
 
-	it("reads the launching session's cwd, not the process cwd", () => {
-		withSettingsFixture(({ project, globalBash, projectBash }) => {
+	it("reads the launching session's cwd, not the process cwd", async () => {
+		await withSettingsFixture(({ project, globalBash, projectBash }) => {
 			const elsewhere = mkdtempSync(join(tmpdir(), "script-shell-else-"));
 			try {
 				assert.equal(
