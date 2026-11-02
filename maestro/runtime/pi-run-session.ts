@@ -32,6 +32,7 @@ import {
 	inspectNoProgressSessionTail,
 	type AttributedSummary,
 } from "../adapters/pi/session.ts";
+import { createPiScriptShellResolver } from "../adapters/pi/script-shell.ts";
 import { HerdrSurfaceProvider } from "../surfaces/herdr/herdr-surface-provider.ts";
 import { readSubagentActivityFile } from "../adapters/pi/activity-file.ts";
 import { projectActivity } from "../core/activity.ts";
@@ -243,6 +244,7 @@ export function createDefaultRunSession(
 					join(options.configDir, "herdr-agents"),
 					options.configExamplePath,
 				),
+				resolveScriptShell: createPiScriptShellResolver(),
 			});
 		const wake = options.infrastructure ? undefined : new FileWakeRegistry();
 		const supervision =
@@ -505,7 +507,10 @@ export function createDefaultRunSession(
 		return {
 			...(state.options.infrastructure?.launchOperations ??
 				launchOperationsFromSurface(
-					new HerdrSurfaceProvider({ paneConfig: snapshot.paneConfig }),
+					new HerdrSurfaceProvider({
+						paneConfig: snapshot.paneConfig,
+						resolveScriptShell: createPiScriptShellResolver(),
+					}),
 					snapshot.paneConfig,
 				)),
 			worktree: state.worktreeOperations,

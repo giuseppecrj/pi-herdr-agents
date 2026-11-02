@@ -59,6 +59,15 @@ A catalog-listed model and configured authentication do not prove that your prov
 
 Removal reports each blocker, such as dirty files, a live process, or an unknown inspection. Commit the work or pass `--preserve`, stop any process in the checkout, and start the parent Pi session at the source repository or an ancestor of it. See [Explicit worktree cleanup](tools.md#explicit-worktree-cleanup) and [cleanup and recovery](worktree-subagents.md#cleanup).
 
+## A Windows child fails to start, or runs inside WSL
+
+The host runs each child's launch script through an absolute bash path, the
+one Pi's own bash tool uses: `shellPath` in Pi's `settings.json`, then Git
+Bash, then `bash.exe` on `PATH`. If none resolves, or the one found is the WSL
+launcher (`C:\Windows\System32\bash.exe`), launch fails with a message and
+nothing is typed into the pane. Install Git for Windows or set `shellPath` to
+its `bash.exe`.
+
 ## Sidebar Focus hides nothing
 
 Focus applies at the first agent Herdr detects after install, so launch or start an agent first. If you ran All, Focus stays off until you run Focus. Check that the parent loads a `pi-herdr-agents` release newer than `3.3.1` (older releases also need `"sidebar": { "enabled": true }` in `config.json`), that you ran `/reload` in the parent after installing or upgrading it, and that you launched the child after the reload. Run `herdr pane get <child-pane-id>`: the pane must report the child's session file as `agent_session`. If it reports none, install Herdr's Pi integration with `herdr integration install pi` in the agent directory children use, then launch new children. Read the plugin log with `herdr plugin log list --plugin pi-herdr-agents.sidebar`. See the plugin's [troubleshooting](../plugins/sidebar/README.md#troubleshooting).
