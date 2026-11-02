@@ -72,7 +72,13 @@ provider; fakes are for conformance tests only.
   client for pane metadata. The CLI driver is `herdr-cli.ts` (exec, JSON,
   availability, test exec hook), `herdr-pane.ts` (pane inspection, process
   info, readiness and absence waits), and `herdr.ts` (placement, worktrees,
-  the opened-primary report, pane commands).
+  the opened-primary report, pane commands). On Windows a launch script runs
+  through an absolute bash path spelled for the pane's shell
+  (`maestro/core/script-launch.ts` builds the PowerShell, cmd or Git Bash
+  line; `terminal.ts` reads the shell from `pane process-info`;
+  `maestro/adapters/pi/script-shell.ts` resolves the path with Pi's
+  `shellPath` setting for the launching session's cwd and project trust, then
+  bash-tool discovery) so a bare `bash` never resolves to the WSL launcher.
 - `maestro/runtime/` — run ownership, controls/retries, observation,
   delivery-gated cleanup, Pi composition, worktree operations/handoff,
   task-model init composition, and sidebar markers (`delegated-marker.ts`).

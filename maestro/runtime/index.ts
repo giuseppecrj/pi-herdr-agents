@@ -45,3 +45,4 @@ export type {
 	PiRunSession,
 } from "./pi-run-session-types.ts";
 export type { SummarySource } from "../adapters/pi/session.ts";
+export { resolveProjectTrusted } from "../adapters/pi/script-shell.ts";

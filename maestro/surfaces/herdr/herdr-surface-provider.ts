@@ -11,6 +11,7 @@ import type {
 import type { OpenedPrimaryWorkspaceReport } from "../../core/opened-primary-workspace.ts";
 import type { PaneInspection, SurfaceHandle } from "../../core/types.ts";
 import type { PaneConfig } from "../../core/config/pane-config.ts";
+import type { ScriptShellResolver } from "../../core/script-launch.ts";
 import {
 	closeHerdrSurface,
 	createHerdrGroupedSurface,
@@ -41,8 +42,19 @@ export class HerdrSurfaceProvider implements SurfaceProvider {
 	readonly name = "herdr";
 	readonly #paneConfig: PaneConfig;
 
-	constructor(options: { paneConfig: PaneConfig }) {
+	readonly #resolveScriptShell: ScriptShellResolver | undefined;
+	readonly #platform: NodeJS.Platform | undefined;
+
+	constructor(options: {
+		paneConfig: PaneConfig;
+		/** Absolute bash path for launch scripts on Windows. */
+		resolveScriptShell?: ScriptShellResolver;
+		/** Defaults to the host platform; injected by tests. */
+		platform?: NodeJS.Platform;
+	}) {
 		this.#paneConfig = options.paneConfig;
+		this.#resolveScriptShell = options.resolveScriptShell;
+		this.#platform = options.platform;
 	}
 
 	isAvailable(): boolean {
@@ -80,7 +92,11 @@ export class HerdrSurfaceProvider implements SurfaceProvider {
 		command: string,
 		options: { scriptPath: string; scriptPreamble: string },
 	): Promise<string> {
-		return runScriptInPane(surfaceId, command, options);
+		return runScriptInPane(surfaceId, command, {
+			...options,
+			resolveShell: this.#resolveScriptShell,
+			platform: this.#platform,
+		});
 	}
 
 	readScreen(surfaceId: string, lines?: number): Promise<string> {

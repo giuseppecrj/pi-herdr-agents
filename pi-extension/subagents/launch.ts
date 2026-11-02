@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import type {
-	PiLaunchSnapshot,
-	PiAttemptSnapshot,
+import {
+	resolveProjectTrusted,
+	type PiLaunchSnapshot,
+	type PiAttemptSnapshot,
 } from "../../maestro/runtime/index.ts";
 import {
 	resolveRuntimePlans,
@@ -52,6 +53,7 @@ export function createLaunchPlanner({
 				getSessionDir(): string;
 			};
 			cwd: string;
+			isProjectTrusted?: () => boolean;
 			model?: { provider: string; id: string };
 			modelRegistry: {
 				find(provider: string, modelId: string): any;
@@ -205,6 +207,12 @@ export function createLaunchPlanner({
 					: undefined,
 			modelRegistry: sessionModelRegistry(ctx),
 			paneConfig,
+			// Pi 0.79.0 gates project settings but cannot report the decision, so
+			// an unreported decision is untrusted wherever Pi has the gate.
+			scriptShell: {
+				cwd: ctx.cwd,
+				projectTrusted: resolveProjectTrusted(ctx.isProjectTrusted?.()),
+			},
 		};
 	}
 

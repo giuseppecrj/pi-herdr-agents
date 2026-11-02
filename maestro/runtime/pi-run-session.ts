@@ -32,6 +32,7 @@ import {
 	inspectNoProgressSessionTail,
 	type AttributedSummary,
 } from "../adapters/pi/session.ts";
+import { createPiScriptShellResolver } from "../adapters/pi/script-shell.ts";
 import { HerdrSurfaceProvider } from "../surfaces/herdr/herdr-surface-provider.ts";
 import { readSubagentActivityFile } from "../adapters/pi/activity-file.ts";
 import { projectActivity } from "../core/activity.ts";
@@ -201,6 +202,25 @@ function resumeResultReader(
 	});
 }
 
+/**
+ * The Herdr provider one launch types its script through. On Windows it
+ * resolves bash from the launching session's own settings and trust decision;
+ * a snapshot without them is untrusted.
+ */
+export function createLaunchSurfaceProvider(
+	snapshot: PiLaunchSnapshot,
+): HerdrSurfaceProvider {
+	return new HerdrSurfaceProvider({
+		paneConfig: snapshot.paneConfig,
+		resolveScriptShell: createPiScriptShellResolver(
+			snapshot.scriptShell ?? {
+				cwd: snapshot.parent.cwd,
+				projectTrusted: false,
+			},
+		),
+	});
+}
+
 // pi-herdr-agents extension
 export function createDefaultRunSession(
 	options: DefaultRunSessionOptions,
@@ -243,6 +263,11 @@ export function createDefaultRunSession(
 					join(options.configDir, "herdr-agents"),
 					options.configExamplePath,
 				),
+				// No launch context here, so project settings are untrusted.
+				resolveScriptShell: createPiScriptShellResolver({
+					cwd: process.cwd(),
+					projectTrusted: false,
+				}),
 			});
 		const wake = options.infrastructure ? undefined : new FileWakeRegistry();
 		const supervision =
@@ -505,7 +530,7 @@ export function createDefaultRunSession(
 		return {
 			...(state.options.infrastructure?.launchOperations ??
 				launchOperationsFromSurface(
-					new HerdrSurfaceProvider({ paneConfig: snapshot.paneConfig }),
+					createLaunchSurfaceProvider(snapshot),
 					snapshot.paneConfig,
 				)),
 			worktree: state.worktreeOperations,
