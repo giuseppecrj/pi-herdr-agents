@@ -61,7 +61,7 @@ Removal reports each blocker, such as dirty files, a live process, or an unknown
 
 ## A Windows child fails to start, or runs inside WSL
 
-A bare `bash` typed into a Windows pane resolves through `PATH`, where the WSL launcher (`C:\Windows\System32\bash.exe`) can outrank Git Bash. So the host runs each child's launch script through an absolute bash path, the one Pi's own bash tool uses: `shellPath` in Pi's `settings.json` (the launching session's, including its project settings only when the project is trusted), then Git Bash in `%ProgramFiles%` / `%ProgramFiles(x86)%`, then the first `bash.exe` on `PATH`.
+A bare `bash` typed into a Windows pane resolves through `PATH`, where the WSL launcher (`C:\Windows\System32\bash.exe`) can outrank Git Bash. So the host runs each child's launch script through an absolute bash path, the one Pi's own bash tool uses: `shellPath` in Pi's `settings.json` (the launching session's, including its project settings only when the project is trusted; a relative path is made absolute against Pi's working directory, as Pi validates it), then Git Bash in `%ProgramFiles%` / `%ProgramFiles(x86)%`, then the first `bash.exe` on `PATH`.
 
 The pane's shell is whatever Herdr's `terminal.default_shell` starts, so the host reads it from `herdr pane process-info` (the `foreground_processes` entry whose `pid` is `shell_pid`, by `name`) and spells the line for it:
 
@@ -72,10 +72,14 @@ The pane's shell is whatever Herdr's `terminal.default_shell` starts, so the hos
 | `bash.exe`, `sh.exe` (Git Bash) | `'<bash>' '<script>'` |
 | anything else, or no process info | `bash '<script>'`, as before |
 
-Launch fails before anything is typed when:
+Launch fails before anything is typed in a PowerShell or cmd pane when:
 
 - **No bash resolves, or Pi's discovery returns the WSL launcher.** This happens with a per-user Git for Windows, Scoop or MSYS2 install, because Pi checks only the `Program Files` locations before taking the first `bash.exe` on `PATH`. Set `shellPath` in Pi's `settings.json` to your Git `bash.exe`, for example `%LOCALAPPDATA%\Programs\Git\bin\bash.exe`.
 - **A `cmd.exe` pane and a path containing `"`, `%` or `!`.** `cmd.exe` expands `%VAR%` inside quotes, and `!VAR!` under delayed expansion, so the line cannot be made safe. Use a PowerShell or Git Bash pane, or a bash and temp directory without those characters.
+
+A Git Bash pane (`bash.exe`, `sh.exe`) never fails for the first reason: when no usable bash resolves it keeps the bare `bash '<script>'` line, whose `bash` is the pane's own.
+
+Project trust: a session that reports no trust decision (Pi 0.79.0 gates project settings but has no `ctx.isProjectTrusted`) is treated as untrusted, so a project's `shellPath` is ignored there. Pi 0.74 to 0.78 have no trust concept and always load it; Pi 0.79.1 and later report the decision.
 
 Unknown shells such as nushell keep the bare `bash '<script>'` line and are not protected from the WSL launcher.
 

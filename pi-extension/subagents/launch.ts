@@ -13,6 +13,7 @@ import {
 	resolveModelDefault,
 	type ModelConfig,
 } from "../../maestro/core/config/model-config.ts";
+import { resolveProjectTrusted } from "../../maestro/adapters/pi/script-shell.ts";
 import { getAgentConfigDir } from "./config-path.ts";
 import { normalizeAcceptSpec } from "../../maestro/core/accept.ts";
 import type { PaneConfig } from "../../maestro/core/config/pane-config.ts";
@@ -206,10 +207,11 @@ export function createLaunchPlanner({
 					: undefined,
 			modelRegistry: sessionModelRegistry(ctx),
 			paneConfig,
-			// Pi releases without trust gating load project settings unconditionally.
+			// Pi 0.79.0 gates project settings but cannot report the decision, so
+			// an unreported decision is untrusted wherever Pi has the gate.
 			scriptShell: {
 				cwd: ctx.cwd,
-				projectTrusted: ctx.isProjectTrusted?.() ?? true,
+				projectTrusted: resolveProjectTrusted(ctx.isProjectTrusted?.()),
 			},
 		};
 	}

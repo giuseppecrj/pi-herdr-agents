@@ -13,7 +13,9 @@ import { delimiter, join } from "node:path";
 import { describe, it } from "node:test";
 import {
 	createPiScriptShellResolver,
+	piHasProjectTrustGating,
 	piScriptShellDeps,
+	resolveProjectTrusted,
 } from "../../maestro/adapters/pi/script-shell.ts";
 import {
 	buildScriptLaunchCommand,
@@ -22,7 +24,11 @@ import {
 	powerShellQuote,
 	type PaneShell,
 } from "../../maestro/core/script-launch.ts";
-import { createLaunchSurfaceProvider } from "../../maestro/runtime/pi-run-session.ts";
+import {
+	createDefaultRunSession,
+	createLaunchSurfaceProvider,
+} from "../../maestro/runtime/pi-run-session.ts";
+import { writeSubagentSessionPolicy } from "../../maestro/adapters/pi/session.ts";
 import type { PiLaunchSnapshot } from "../../maestro/runtime/index.ts";
 import { createLaunchPlanner } from "../../pi-extension/subagents/launch.ts";
 import { __herdrTest__ } from "../../maestro/surfaces/herdr/herdr.ts";
@@ -113,7 +119,7 @@ describe("buildScriptLaunchCommand per pane shell", () => {
 	});
 
 	it("fails clearly once an absolute path would be typed and no bash resolves", () => {
-		for (const paneShell of ["powershell", "cmd", "posix"] as const) {
+		for (const paneShell of ["powershell", "cmd"] as const) {
 			assert.throws(
 				() => win(paneShell, undefined),
 				/No bash found.*shellPath/s,
@@ -132,12 +138,52 @@ describe("buildScriptLaunchCommand per pane shell", () => {
 
 	it("refuses the WSL launcher and says how to point shellPath at Git", () => {
 		for (const wsl of [WSL_BASH, "c:/windows/sysnative/BASH.EXE"]) {
-			for (const paneShell of ["powershell", "cmd", "posix"] as const) {
+			for (const paneShell of ["powershell", "cmd"] as const) {
 				assert.throws(
 					() => win(paneShell, wsl),
 					/WSL launcher.*shellPath.*Scoop or MSYS2.*LOCALAPPDATA/s,
 				);
 			}
+		}
+	});
+
+	it("keeps the bare line in a Git Bash pane when no usable bash resolves", () => {
+		const bare = `bash '${WIN_SCRIPT}'`;
+		assert.equal(win("posix", undefined), bare);
+		assert.equal(win("posix", WSL_BASH), bare);
+		assert.equal(
+			buildScriptLaunchCommand({
+				scriptPath: WIN_SCRIPT,
+				platform: "win32",
+				paneShell: "posix",
+			}),
+			bare,
+		);
+		assert.equal(
+			buildScriptLaunchCommand({
+				scriptPath: WIN_SCRIPT,
+				platform: "win32",
+				paneShell: "posix",
+				resolveShell: () => {
+					throw new Error("No bash shell found.");
+				},
+			}),
+			bare,
+		);
+		// PowerShell and cmd panes would hit WSL or nothing, so they still refuse.
+		for (const paneShell of ["powershell", "cmd"] as const) {
+			assert.throws(
+				() =>
+					buildScriptLaunchCommand({
+						scriptPath: WIN_SCRIPT,
+						platform: "win32",
+						paneShell,
+						resolveShell: () => {
+							throw new Error("No bash shell found.");
+						},
+					}),
+				/No bash shell found/,
+			);
 		}
 	});
 
@@ -215,9 +261,37 @@ describe("createPiScriptShellResolver", () => {
 				return CJK_BASH;
 			},
 			resolveShell: (shellPath) => ({ shell: shellPath ?? "" }),
+			baseDir: () => "/unused",
 		});
 		assert.equal(resolve(), CJK_BASH);
 		assert.deepEqual(seen, [context]);
+	});
+
+	it("makes a relative shellPath absolute against the directory Pi resolves it from", () => {
+		const base = mkdtempSync(join(tmpdir(), "script-shell-base-"));
+		try {
+			const resolve = createPiScriptShellResolver(context, {
+				readShellPath: () => join("tools", "bash"),
+				resolveShell: (shellPath) => ({ shell: shellPath ?? "" }),
+				baseDir: () => base,
+			});
+			assert.equal(resolve(), join(base, "tools", "bash"));
+			// Pi's own default base is the process cwd.
+			assert.equal(piScriptShellDeps.baseDir(), process.cwd());
+		} finally {
+			rmSync(base, { recursive: true, force: true });
+		}
+	});
+
+	it("leaves absolute Windows and POSIX paths untouched", () => {
+		for (const shell of [GIT_BASH, CJK_BASH, "/usr/bin/bash"]) {
+			const resolve = createPiScriptShellResolver(context, {
+				readShellPath: () => shell,
+				resolveShell: (shellPath) => ({ shell: shellPath ?? "" }),
+				baseDir: () => "/elsewhere",
+			});
+			assert.equal(resolve(), shell);
+		}
 	});
 
 	it("falls back to Pi's own discovery when shellPath is unset", () => {
@@ -227,6 +301,7 @@ describe("createPiScriptShellResolver", () => {
 				assert.equal(shellPath, undefined);
 				return { shell: GIT_BASH };
 			},
+			baseDir: () => "/unused",
 		});
 		assert.equal(resolve(), GIT_BASH);
 	});
@@ -237,6 +312,7 @@ describe("createPiScriptShellResolver", () => {
 			resolveShell: () => {
 				throw new Error("No bash shell found.");
 			},
+			baseDir: () => "/unused",
 		});
 		assert.throws(resolve, /No bash shell found/);
 	});
@@ -632,6 +708,86 @@ describe("launch composition on Windows", () => {
 		});
 	});
 
+	it("types the resolved bash when the default run session resumes a child", async () => {
+		await withSettingsFixture(async ({ project, projectBash }) => {
+			const dir = mkdtempSync(join(tmpdir(), "script-launch-session-"));
+			const proto = HerdrSurfaceProvider.prototype;
+			const original = {
+				createSurface: proto.createSurface,
+				waitForShellReady: proto.waitForShellReady,
+				closeSurface: proto.closeSurface,
+				waitForSurfaceAbsence: proto.waitForSurfaceAbsence,
+				runScript: proto.runScript,
+			};
+			let outcome: unknown;
+			// Only the pane plumbing is stubbed; runScript stays real and the
+			// typed line is read from the fake Herdr.
+			proto.createSurface = async () => "p1";
+			proto.waitForShellReady = async () => {};
+			proto.closeSurface = async () => {};
+			proto.waitForSurfaceAbsence = async () => {};
+			proto.runScript = async function (...args) {
+				await original.runScript.apply(this, args);
+				throw new Error("stop after the script was typed");
+			};
+			const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+			Object.defineProperty(process, "platform", { value: "win32" });
+			try {
+				const sessionFile = join(dir, "resume.jsonl");
+				writeFileSync(
+					sessionFile,
+					JSON.stringify({ type: "session", cwd: dir }) + "\n",
+				);
+				writeSubagentSessionPolicy(sessionFile, {
+					owner: "public",
+					deniedTools: [],
+				});
+				const session = createDefaultRunSession({
+					configDir: dir,
+					configExamplePath: new URL(
+						"../../config.json.example",
+						import.meta.url,
+					).pathname,
+					forcePolling: false,
+					roles: [],
+					getLaunchSnapshot: () =>
+						snapshot({
+							parent: {
+								cwd: project,
+								sessionFile,
+								sessionId: "s",
+								sessionDir: join(dir, "sessions"),
+							},
+							scriptShell: { cwd: project, projectTrusted: true },
+						}),
+					hooks: { onSettled() {} },
+					persistent: {
+						send: () => ({ error: "unused" }),
+						stop: () => ({ error: "unused" }),
+						drain() {},
+					},
+				});
+				await withFakeHerdr(
+					() => windowsProcessInfo("powershell.exe"),
+					async ({ runCommands }) => {
+						outcome = await session
+							.resumePi({ taskId: "t1", sessionPath: sessionFile, name: "r" })
+							.then(
+								() => "resolved",
+								(error: Error) => error.message,
+							);
+						assert.equal(runCommands.length, 1, String(outcome));
+						assert.match(runCommands[0]!, new RegExp(`^& '${projectBash}' `));
+					},
+				);
+			} finally {
+				Object.assign(proto, original);
+				Object.defineProperty(process, "platform", platform);
+				rmSync(dir, { recursive: true, force: true });
+			}
+		});
+	});
+
 	it("builds the snapshot's trust data from the launching context", () => {
 		// SAFETY: building a snapshot touches only the context below, never the
 		// planner's runtime or model config.
@@ -664,7 +820,26 @@ describe("launch composition on Windows", () => {
 			cwd: "/session/cwd",
 			projectTrusted: true,
 		});
-		// Pi releases without trust gating load project settings unconditionally.
-		assert.equal(launchSnapshot(ctx()).scriptShell?.projectTrusted, true);
+		// A context that cannot report the decision follows this Pi's gating.
+		assert.equal(
+			launchSnapshot(ctx()).scriptShell?.projectTrusted,
+			!piHasProjectTrustGating(),
+		);
+	});
+
+	it("treats an unreported trust decision as untrusted wherever Pi gates project settings", () => {
+		// pi 0.79.0: the gate exists, `ctx.isProjectTrusted` does not.
+		assert.equal(resolveProjectTrusted(undefined, true), false);
+		// pi 0.74 to 0.78: no trust concept, project settings always load.
+		assert.equal(resolveProjectTrusted(undefined, false), true);
+		// A reported decision always wins.
+		for (const gating of [true, false]) {
+			assert.equal(resolveProjectTrusted(true, gating), true);
+			assert.equal(resolveProjectTrusted(false, gating), false);
+		}
+	});
+
+	it("detects trust gating from the installed Pi SDK", () => {
+		assert.equal(piHasProjectTrustGating(), true);
 	});
 });
