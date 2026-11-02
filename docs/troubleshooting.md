@@ -61,12 +61,23 @@ Removal reports each blocker, such as dirty files, a live process, or an unknown
 
 ## A Windows child fails to start, or runs inside WSL
 
-The host runs each child's launch script through an absolute bash path, the
-one Pi's own bash tool uses: `shellPath` in Pi's `settings.json`, then Git
-Bash, then `bash.exe` on `PATH`. If none resolves, or the one found is the WSL
-launcher (`C:\Windows\System32\bash.exe`), launch fails with a message and
-nothing is typed into the pane. Install Git for Windows or set `shellPath` to
-its `bash.exe`.
+A bare `bash` typed into a Windows pane resolves through `PATH`, where the WSL launcher (`C:\Windows\System32\bash.exe`) can outrank Git Bash. So the host runs each child's launch script through an absolute bash path, the one Pi's own bash tool uses: `shellPath` in Pi's `settings.json` (the launching session's, including its project settings only when the project is trusted), then Git Bash in `%ProgramFiles%` / `%ProgramFiles(x86)%`, then the first `bash.exe` on `PATH`.
+
+The pane's shell is whatever Herdr's `terminal.default_shell` starts, so the host reads it from `herdr pane process-info` (the `foreground_processes` entry whose `pid` is `shell_pid`, by `name`) and spells the line for it:
+
+| Pane shell | Line typed |
+| --- | --- |
+| `powershell.exe`, `pwsh.exe` | `& '<bash>' '<script>'` |
+| `cmd.exe` | `"<bash>" "<script>"` |
+| `bash.exe`, `sh.exe` (Git Bash) | `'<bash>' '<script>'` |
+| anything else, or no process info | `bash '<script>'`, as before |
+
+Launch fails before anything is typed when:
+
+- **No bash resolves, or Pi's discovery returns the WSL launcher.** This happens with a per-user Git for Windows, Scoop or MSYS2 install, because Pi checks only the `Program Files` locations before taking the first `bash.exe` on `PATH`. Set `shellPath` in Pi's `settings.json` to your Git `bash.exe`, for example `%LOCALAPPDATA%\Programs\Git\bin\bash.exe`.
+- **A `cmd.exe` pane and a path containing `"`, `%` or `!`.** `cmd.exe` expands `%VAR%` inside quotes, and `!VAR!` under delayed expansion, so the line cannot be made safe. Use a PowerShell or Git Bash pane, or a bash and temp directory without those characters.
+
+Unknown shells such as nushell keep the bare `bash '<script>'` line and are not protected from the WSL launcher.
 
 ## Sidebar Focus hides nothing
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
 	chmodSync,
 	existsSync,
+	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
@@ -10,12 +11,20 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { describe, it } from "node:test";
-import { createPiScriptShellResolver } from "../../maestro/adapters/pi/script-shell.ts";
+import {
+	createPiScriptShellResolver,
+	piScriptShellDeps,
+} from "../../maestro/adapters/pi/script-shell.ts";
 import {
 	buildScriptLaunchCommand,
+	classifyPaneShell,
 	isWslBashLauncher,
 	powerShellQuote,
+	type PaneShell,
 } from "../../maestro/core/script-launch.ts";
+import { createLaunchSurfaceProvider } from "../../maestro/runtime/pi-run-session.ts";
+import type { PiLaunchSnapshot } from "../../maestro/runtime/index.ts";
+import { createLaunchPlanner } from "../../pi-extension/subagents/launch.ts";
 import { __herdrTest__ } from "../../maestro/surfaces/herdr/herdr.ts";
 import { HerdrSurfaceProvider } from "../../maestro/surfaces/herdr/herdr-surface-provider.ts";
 import { runScriptInPane } from "../../maestro/surfaces/herdr/terminal.ts";
@@ -25,72 +34,133 @@ const CJK_BASH = "D:\\工具 箱\\王小明's Git\\bin\\bash.exe";
 const WIN_SCRIPT = "C:\\Users\\王 小明\\AppData\\Local\\Temp\\cmd-1.sh";
 const WSL_BASH = "C:\\Windows\\System32\\bash.exe";
 
-describe("buildScriptLaunchCommand", () => {
-	it("calls an absolute bash through PowerShell's & operator on win32", () => {
+const SCRIPT_UNIX = "/tmp/it's here/cmd-1.sh";
+const BARE_UNIX = `bash '/tmp/it'\\''s here/cmd-1.sh'`;
+
+function win(
+	paneShell: PaneShell | undefined,
+	bash: string | undefined,
+	scriptPath = WIN_SCRIPT,
+) {
+	return buildScriptLaunchCommand({
+		scriptPath,
+		platform: "win32",
+		paneShell,
+		resolveShell: () => bash,
+	});
+}
+
+describe("buildScriptLaunchCommand per pane shell", () => {
+	it("calls an absolute bash through PowerShell's & operator", () => {
 		assert.equal(
-			buildScriptLaunchCommand({
-				scriptPath: WIN_SCRIPT,
-				platform: "win32",
-				resolveShell: () => GIT_BASH,
-			}),
+			win("powershell", GIT_BASH),
 			`& 'C:\\Program Files\\Git\\bin\\bash.exe' 'C:\\Users\\王 小明\\AppData\\Local\\Temp\\cmd-1.sh'`,
 		);
 	});
 
-	it("keeps spaces, CJK characters and apostrophes intact on win32", () => {
+	it("keeps spaces, CJK characters and quotes intact for PowerShell", () => {
 		assert.equal(
-			buildScriptLaunchCommand({
-				scriptPath: WIN_SCRIPT,
-				platform: "win32",
-				resolveShell: () => CJK_BASH,
-			}),
+			win("powershell", CJK_BASH),
 			`& 'D:\\工具 箱\\王小明''s Git\\bin\\bash.exe' 'C:\\Users\\王 小明\\AppData\\Local\\Temp\\cmd-1.sh'`,
 		);
+		// PowerShell also ends a literal at typographic single quotes.
+		assert.equal(powerShellQuote("a‘b’c‚d‛e"), "'a‘‘b’’c‚‚d‛‛e'");
 	});
 
-	it("fails clearly on win32 when no bash resolves", () => {
-		assert.throws(
-			() =>
+	it("double-quotes both paths for cmd.exe", () => {
+		assert.equal(
+			win("cmd", CJK_BASH),
+			`"D:\\工具 箱\\王小明's Git\\bin\\bash.exe" "C:\\Users\\王 小明\\AppData\\Local\\Temp\\cmd-1.sh"`,
+		);
+	});
+
+	it("refuses a cmd.exe line whose path cmd would expand", () => {
+		for (const bad of [
+			"C:\\a%PATH%\\bash.exe",
+			"C:\\a!x!\\bash.exe",
+			'C:\\a"b\\bash.exe',
+		]) {
+			assert.throws(() => win("cmd", bad), /cmd\.exe pane.*", % or !/s);
+			assert.throws(() => win("cmd", GIT_BASH, bad), /cmd\.exe pane/);
+		}
+		// The same paths are fine for the shells that do not expand them.
+		assert.match(win("powershell", "C:\\a%PATH%\\bash.exe"), /^& /);
+		assert.match(win("posix", "C:\\a!x!\\bash.exe"), /^'C:/);
+	});
+
+	it("POSIX-quotes the Windows paths for Git Bash and sh", () => {
+		assert.equal(
+			win("posix", CJK_BASH),
+			`'D:\\工具 箱\\王小明'\\''s Git\\bin\\bash.exe' 'C:\\Users\\王 小明\\AppData\\Local\\Temp\\cmd-1.sh'`,
+		);
+	});
+
+	it("keeps the old bare line for an unknown shell and never resolves bash", () => {
+		const resolveShell = () => {
+			throw new Error("must not resolve without a known pane shell");
+		};
+		for (const paneShell of [undefined]) {
+			assert.equal(
 				buildScriptLaunchCommand({
-					scriptPath: WIN_SCRIPT,
+					scriptPath: SCRIPT_UNIX,
 					platform: "win32",
-					resolveShell: () => undefined,
+					paneShell,
+					resolveShell,
 				}),
-			/No bash found.*shellPath/s,
-		);
-		assert.throws(
-			() =>
-				buildScriptLaunchCommand({ scriptPath: WIN_SCRIPT, platform: "win32" }),
-			/No bash found/,
-		);
+				BARE_UNIX,
+			);
+		}
 	});
 
-	it("refuses the WSL launcher instead of running the script in WSL", () => {
-		for (const wsl of [WSL_BASH, "c:/windows/sysnative/BASH.EXE"]) {
+	it("fails clearly once an absolute path would be typed and no bash resolves", () => {
+		for (const paneShell of ["powershell", "cmd", "posix"] as const) {
+			assert.throws(
+				() => win(paneShell, undefined),
+				/No bash found.*shellPath/s,
+			);
 			assert.throws(
 				() =>
 					buildScriptLaunchCommand({
 						scriptPath: WIN_SCRIPT,
 						platform: "win32",
-						resolveShell: () => wsl,
+						paneShell,
 					}),
-				/WSL/,
+				/No bash found/,
 			);
+		}
+	});
+
+	it("refuses the WSL launcher and says how to point shellPath at Git", () => {
+		for (const wsl of [WSL_BASH, "c:/windows/sysnative/BASH.EXE"]) {
+			for (const paneShell of ["powershell", "cmd", "posix"] as const) {
+				assert.throws(
+					() => win(paneShell, wsl),
+					/WSL launcher.*shellPath.*Scoop or MSYS2.*LOCALAPPDATA/s,
+				);
+			}
 		}
 	});
 
 	it("leaves darwin and linux as a bare bash and never resolves a shell", () => {
 		for (const platform of ["darwin", "linux"] as const) {
-			assert.equal(
-				buildScriptLaunchCommand({
-					scriptPath: "/tmp/it's here/cmd-1.sh",
-					platform,
-					resolveShell: () => {
-						throw new Error("must not resolve off Windows");
-					},
-				}),
-				`bash '/tmp/it'\\''s here/cmd-1.sh'`,
-			);
+			for (const paneShell of [
+				undefined,
+				"powershell",
+				"cmd",
+				"posix",
+			] as const) {
+				assert.equal(
+					buildScriptLaunchCommand({
+						scriptPath: SCRIPT_UNIX,
+						platform,
+						paneShell,
+						resolveShell: () => {
+							throw new Error("must not resolve off Windows");
+						},
+					}),
+					BARE_UNIX,
+				);
+			}
 		}
 	});
 
@@ -106,22 +176,52 @@ describe("buildScriptLaunchCommand", () => {
 	});
 });
 
+describe("classifyPaneShell", () => {
+	it("maps the process names Windows Herdr reports", () => {
+		assert.equal(classifyPaneShell("powershell.exe"), "powershell");
+		assert.equal(classifyPaneShell("pwsh.exe"), "powershell");
+		assert.equal(classifyPaneShell("PWSH"), "powershell");
+		assert.equal(classifyPaneShell("cmd.exe"), "cmd");
+		assert.equal(classifyPaneShell("bash.exe"), "posix");
+		assert.equal(classifyPaneShell("sh.exe"), "posix");
+		assert.equal(
+			classifyPaneShell("C:\\Program Files\\Git\\bin\\bash.exe"),
+			"posix",
+		);
+	});
+
+	it("leaves everything else unknown", () => {
+		for (const name of [
+			"nu.exe",
+			"zsh.exe",
+			"fish",
+			"",
+			undefined,
+			"cmd.exe.bak",
+		]) {
+			assert.equal(classifyPaneShell(name), undefined);
+		}
+	});
+});
+
 describe("createPiScriptShellResolver", () => {
-	it("resolves through Pi's shellPath setting", () => {
-		const seen: Array<string | undefined> = [];
-		const resolve = createPiScriptShellResolver({
-			readShellPath: () => CJK_BASH,
-			resolveShell: (shellPath) => {
-				seen.push(shellPath);
-				return { shell: shellPath ?? "" };
+	const context = { cwd: "C:\\proj", projectTrusted: true };
+
+	it("resolves through Pi's shellPath setting for the launch context", () => {
+		const seen: unknown[] = [];
+		const resolve = createPiScriptShellResolver(context, {
+			readShellPath: (c) => {
+				seen.push(c);
+				return CJK_BASH;
 			},
+			resolveShell: (shellPath) => ({ shell: shellPath ?? "" }),
 		});
 		assert.equal(resolve(), CJK_BASH);
-		assert.deepEqual(seen, [CJK_BASH]);
+		assert.deepEqual(seen, [context]);
 	});
 
 	it("falls back to Pi's own discovery when shellPath is unset", () => {
-		const resolve = createPiScriptShellResolver({
+		const resolve = createPiScriptShellResolver(context, {
 			readShellPath: () => undefined,
 			resolveShell: (shellPath) => {
 				assert.equal(shellPath, undefined);
@@ -132,7 +232,7 @@ describe("createPiScriptShellResolver", () => {
 	});
 
 	it("lets Pi's error through when no bash exists", () => {
-		const resolve = createPiScriptShellResolver({
+		const resolve = createPiScriptShellResolver(context, {
 			readShellPath: () => undefined,
 			resolveShell: () => {
 				throw new Error("No bash shell found.");
@@ -142,8 +242,127 @@ describe("createPiScriptShellResolver", () => {
 	});
 });
 
+/** A temp agent dir plus a project whose `.pi/settings.json` sets shellPath. */
+async function withSettingsFixture<T>(
+	run: (fixture: {
+		project: string;
+		globalBash: string;
+		projectBash: string;
+	}) => T,
+): Promise<T> {
+	const root = mkdtempSync(join(tmpdir(), "script-shell-"));
+	const saved = process.env.PI_CODING_AGENT_DIR;
+	try {
+		const agentDir = join(root, "agent");
+		const project = join(root, "project");
+		mkdirSync(agentDir, { recursive: true });
+		mkdirSync(join(project, ".pi"), { recursive: true });
+		const globalBash = join(root, "global-bash");
+		const projectBash = join(root, "project-bash");
+		writeFileSync(globalBash, "");
+		writeFileSync(projectBash, "");
+		writeFileSync(
+			join(agentDir, "settings.json"),
+			JSON.stringify({ shellPath: globalBash }),
+		);
+		writeFileSync(
+			join(project, ".pi", "settings.json"),
+			JSON.stringify({ shellPath: projectBash }),
+		);
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		return await run({ project, globalBash, projectBash });
+	} finally {
+		if (saved === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = saved;
+		rmSync(root, { recursive: true, force: true });
+	}
+}
+
+describe("Pi shellPath settings and project trust", () => {
+	const deps = {
+		...piScriptShellDeps,
+		resolveShell: (shellPath?: string) => ({
+			shell: shellPath ?? "pi-discovery",
+		}),
+	};
+
+	it("uses the project's shellPath only when the project is trusted", () => {
+		withSettingsFixture(({ project, globalBash, projectBash }) => {
+			assert.equal(
+				createPiScriptShellResolver(
+					{ cwd: project, projectTrusted: true },
+					deps,
+				)(),
+				projectBash,
+			);
+			assert.equal(
+				createPiScriptShellResolver(
+					{ cwd: project, projectTrusted: false },
+					deps,
+				)(),
+				globalBash,
+			);
+		});
+	});
+
+	it("reads the launching session's cwd, not the process cwd", () => {
+		withSettingsFixture(({ project, globalBash, projectBash }) => {
+			const elsewhere = mkdtempSync(join(tmpdir(), "script-shell-else-"));
+			try {
+				assert.equal(
+					createPiScriptShellResolver(
+						{ cwd: elsewhere, projectTrusted: true },
+						deps,
+					)(),
+					globalBash,
+				);
+				assert.equal(
+					createPiScriptShellResolver(
+						{ cwd: project, projectTrusted: true },
+						deps,
+					)(),
+					projectBash,
+				);
+			} finally {
+				rmSync(elsewhere, { recursive: true, force: true });
+			}
+		});
+	});
+});
+
+interface FakeHerdr {
+	runCommands: string[];
+	processInfoCalls: number;
+}
+
+/** Pane `process-info` for a Windows pane whose shell is `shellName`. */
+function windowsProcessInfo(shellName: string | undefined): string {
+	return JSON.stringify({
+		result: {
+			process_info: {
+				pane_id: "p1",
+				shell_pid: 4242,
+				foreground_process_group_id: 4242,
+				foreground_processes:
+					shellName === undefined
+						? []
+						: [
+								{
+									pid: 99,
+									name: "conhost.exe",
+									argv0: "conhost.exe",
+									cmdline: "bash.exe -lc x",
+								},
+								{ pid: 4242, name: shellName, argv0: shellName },
+							],
+			},
+		},
+	});
+}
+
 async function withFakeHerdr<T>(
-	run: (runCommands: string[]) => Promise<T>,
+	processInfo: () => string,
+	run: (herdr: FakeHerdr) => Promise<T>,
 ): Promise<T> {
 	const dir = mkdtempSync(join(tmpdir(), "script-launch-"));
 	const bin = join(dir, "herdr");
@@ -152,14 +371,19 @@ async function withFakeHerdr<T>(
 	const saved = { env: process.env.HERDR_ENV, path: process.env.PATH };
 	process.env.HERDR_ENV = "1";
 	process.env.PATH = `${dir}${delimiter}${saved.path ?? ""}`;
-	const runCommands: string[] = [];
+	const herdr: FakeHerdr = { runCommands: [], processInfoCalls: 0 };
 	try {
 		return await __herdrTest__.withMockHerdrExec(
 			(args) => {
-				if (args[0] === "pane" && args[1] === "run") runCommands.push(args[3]!);
+				if (args[0] === "pane" && args[1] === "run")
+					herdr.runCommands.push(args[3]!);
+				if (args[0] === "pane" && args[1] === "process-info") {
+					herdr.processInfoCalls++;
+					return processInfo();
+				}
 				return "";
 			},
-			() => run(runCommands),
+			() => run(herdr),
 		);
 	} finally {
 		if (saved.env === undefined) delete process.env.HERDR_ENV;
@@ -169,80 +393,278 @@ async function withFakeHerdr<T>(
 	}
 }
 
-describe("runScriptInPane launch command", () => {
-	it("types the absolute-bash PowerShell call on win32", async () => {
-		await withFakeHerdr(async (runCommands) => {
-			const scriptPath = join(tmpdir(), `script-launch-${process.pid}-win.sh`);
-			try {
-				await runScriptInPane("p1", "echo hi", {
-					scriptPath,
-					platform: "win32",
-					resolveShell: () => CJK_BASH,
-				});
-				assert.deepEqual(runCommands, [
-					`& 'D:\\工具 箱\\王小明''s Git\\bin\\bash.exe' '${scriptPath}'`,
-				]);
-				assert.match(
-					readFileSync(scriptPath, "utf8"),
-					/^#!\/bin\/bash\necho hi\n$/,
-				);
-			} finally {
-				rmSync(scriptPath, { force: true });
-			}
-		});
-	});
+function tempScript(label: string): string {
+	return join(tmpdir(), `script-launch-${process.pid}-${label}.sh`);
+}
 
-	it("dispatches nothing and writes no script when win32 has no bash", async () => {
-		await withFakeHerdr(async (runCommands) => {
-			const scriptPath = join(tmpdir(), `script-launch-${process.pid}-none.sh`);
-			await assert.rejects(
-				() =>
-					runScriptInPane("p1", "echo hi", {
+describe("runScriptInPane launch command", () => {
+	const winShells: Array<[string, (bash: string, script: string) => string]> = [
+		["powershell.exe", (b, s) => `& '${b}' '${s}'`],
+		["pwsh.exe", (b, s) => `& '${b}' '${s}'`],
+		["cmd.exe", (b, s) => `"${b}" "${s}"`],
+		["bash.exe", (b, s) => `'${b}' '${s}'`],
+		["sh.exe", (b, s) => `'${b}' '${s}'`],
+	];
+
+	for (const [shell, expected] of winShells) {
+		it(`types the ${shell} form on win32`, async () => {
+			await withFakeHerdr(
+				() => windowsProcessInfo(shell),
+				async ({ runCommands }) => {
+					const scriptPath = tempScript(shell);
+					try {
+						await runScriptInPane("p1", "echo hi", {
+							scriptPath,
+							platform: "win32",
+							resolveShell: () => GIT_BASH,
+						});
+						assert.deepEqual(runCommands, [expected(GIT_BASH, scriptPath)]);
+						assert.match(
+							readFileSync(scriptPath, "utf8"),
+							/^#!\/bin\/bash\necho hi\n$/,
+						);
+					} finally {
+						rmSync(scriptPath, { force: true });
+					}
+				},
+			);
+		});
+	}
+
+	it("picks the pane shell by shell_pid, never by cmdline", async () => {
+		await withFakeHerdr(
+			// A foreground process named like a shell must not be taken for the shell.
+			() =>
+				JSON.stringify({
+					result: {
+						process_info: {
+							pane_id: "p1",
+							shell_pid: 4242,
+							foreground_processes: [
+								{ pid: 7, name: "cmd.exe", argv0: "cmd.exe" },
+								{
+									pid: 4242,
+									name: "powershell.exe",
+									cmdline: "cmd.exe /c bash.exe",
+								},
+							],
+						},
+					},
+				}),
+			async ({ runCommands }) => {
+				const scriptPath = tempScript("pid");
+				try {
+					await runScriptInPane("p1", "echo hi", {
 						scriptPath,
 						platform: "win32",
-						resolveShell: () => undefined,
-					}),
-				/No bash found/,
-			);
-			assert.deepEqual(runCommands, []);
-			assert.equal(existsSync(scriptPath), false);
-		});
+						resolveShell: () => GIT_BASH,
+					});
+					assert.deepEqual(runCommands, [`& '${GIT_BASH}' '${scriptPath}'`]);
+				} finally {
+					rmSync(scriptPath, { force: true });
+				}
+			},
+		);
 	});
 
-	it("keeps `bash <script>` on darwin and linux", async () => {
-		for (const platform of ["darwin", "linux"] as const) {
-			await withFakeHerdr(async (runCommands) => {
-				const scriptPath = join(
-					tmpdir(),
-					`script-launch-${process.pid}-${platform}.sh`,
-				);
+	for (const [label, info] of [
+		["an unknown shell", () => windowsProcessInfo("nu.exe")],
+		["no foreground processes", () => windowsProcessInfo(undefined)],
+		["unusable process info", () => "not json"],
+	] as const) {
+		it(`keeps the bare bash line on win32 for ${label}, without resolving bash`, async () => {
+			await withFakeHerdr(info, async ({ runCommands }) => {
+				const scriptPath = tempScript("unknown");
 				try {
-					await runScriptInPane("p1", "echo hi", { scriptPath, platform });
+					await runScriptInPane("p1", "echo hi", {
+						scriptPath,
+						platform: "win32",
+						resolveShell: () => {
+							throw new Error("must not resolve for an unknown shell");
+						},
+					});
 					assert.deepEqual(runCommands, [`bash '${scriptPath}'`]);
 				} finally {
 					rmSync(scriptPath, { force: true });
 				}
 			});
+		});
+	}
+
+	it("dispatches nothing and writes no script when a known shell has no bash", async () => {
+		await withFakeHerdr(
+			() => windowsProcessInfo("powershell.exe"),
+			async ({ runCommands }) => {
+				const scriptPath = tempScript("none");
+				await assert.rejects(
+					() =>
+						runScriptInPane("p1", "echo hi", {
+							scriptPath,
+							platform: "win32",
+							resolveShell: () => undefined,
+						}),
+					/No bash found/,
+				);
+				assert.deepEqual(runCommands, []);
+				assert.equal(existsSync(scriptPath), false);
+			},
+		);
+	});
+
+	it("keeps `bash <script>` on darwin and linux without asking Herdr for the shell", async () => {
+		for (const platform of ["darwin", "linux"] as const) {
+			await withFakeHerdr(
+				() => windowsProcessInfo("cmd.exe"),
+				async (herdr) => {
+					const scriptPath = tempScript(platform);
+					try {
+						await runScriptInPane("p1", "echo hi", { scriptPath, platform });
+						assert.deepEqual(herdr.runCommands, [`bash '${scriptPath}'`]);
+						assert.equal(herdr.processInfoCalls, 0);
+					} finally {
+						rmSync(scriptPath, { force: true });
+					}
+				},
+			);
 		}
 	});
 
 	it("routes HerdrSurfaceProvider.runScript through its injected resolver", async () => {
-		await withFakeHerdr(async (runCommands) => {
-			const scriptPath = join(tmpdir(), `script-launch-${process.pid}-prov.sh`);
-			try {
-				const provider = new HerdrSurfaceProvider({
-					paneConfig: { mode: "grouped", direction: "down", maxPerTab: 2 },
-					platform: "win32",
-					resolveScriptShell: () => GIT_BASH,
-				});
-				await provider.runScript("p1", "echo hi", {
-					scriptPath,
-					scriptPreamble: "",
-				});
-				assert.deepEqual(runCommands, [`& '${GIT_BASH}' '${scriptPath}'`]);
-			} finally {
-				rmSync(scriptPath, { force: true });
+		await withFakeHerdr(
+			() => windowsProcessInfo("powershell.exe"),
+			async ({ runCommands }) => {
+				const scriptPath = tempScript("prov");
+				try {
+					const provider = new HerdrSurfaceProvider({
+						paneConfig: { mode: "grouped", direction: "down", maxPerTab: 2 },
+						platform: "win32",
+						resolveScriptShell: () => GIT_BASH,
+					});
+					await provider.runScript("p1", "echo hi", {
+						scriptPath,
+						scriptPreamble: "",
+					});
+					assert.deepEqual(runCommands, [`& '${GIT_BASH}' '${scriptPath}'`]);
+				} finally {
+					rmSync(scriptPath, { force: true });
+				}
+			},
+		);
+	});
+});
+
+describe("launch composition on Windows", () => {
+	const paneConfig = {
+		mode: "grouped",
+		direction: "down",
+		maxPerTab: 2,
+	} as const;
+
+	function snapshot(overrides: Partial<PiLaunchSnapshot>): PiLaunchSnapshot {
+		return {
+			parent: {
+				cwd: "/unused",
+				sessionFile: "",
+				sessionId: "s",
+				sessionDir: "",
+			},
+			// SAFETY: the Windows script path never reads the model registry.
+			modelRegistry: {} as PiLaunchSnapshot["modelRegistry"],
+			paneConfig,
+			...overrides,
+		};
+	}
+
+	async function typedLine(launch: PiLaunchSnapshot, shell = "powershell.exe") {
+		const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+		Object.defineProperty(process, "platform", { value: "win32" });
+		try {
+			return await withFakeHerdr(
+				() => windowsProcessInfo(shell),
+				async ({ runCommands }) => {
+					const scriptPath = tempScript("compose");
+					try {
+						await createLaunchSurfaceProvider(launch).runScript(
+							"p1",
+							"echo hi",
+							{
+								scriptPath,
+								scriptPreamble: "",
+							},
+						);
+						return runCommands[0]!;
+					} finally {
+						rmSync(scriptPath, { force: true });
+					}
+				},
+			);
+		} finally {
+			Object.defineProperty(process, "platform", platform);
+		}
+	}
+
+	it("types the bash Pi resolves for the launching session's trusted project", async () => {
+		await withSettingsFixture(async ({ project, projectBash }) => {
+			const line = await typedLine(
+				snapshot({ scriptShell: { cwd: project, projectTrusted: true } }),
+			);
+			assert.match(line, new RegExp(`^& '${projectBash}' `));
+		});
+	});
+
+	it("ignores an untrusted project's shellPath, and a snapshot without trust data", async () => {
+		await withSettingsFixture(async ({ project, globalBash }) => {
+			for (const launch of [
+				snapshot({ scriptShell: { cwd: project, projectTrusted: false } }),
+				snapshot({
+					parent: {
+						cwd: project,
+						sessionFile: "",
+						sessionId: "s",
+						sessionDir: "",
+					},
+				}),
+			]) {
+				const line = await typedLine(launch);
+				assert.match(line, new RegExp(`^& '${globalBash}' `));
+				assert.doesNotMatch(line, /project-bash/);
 			}
 		});
+	});
+
+	it("builds the snapshot's trust data from the launching context", () => {
+		// SAFETY: building a snapshot touches only the context below, never the
+		// planner's runtime or model config.
+		const { launchSnapshot } = createLaunchPlanner({
+			runtime: {} as never,
+			modelConfig: {} as never,
+			paneConfig,
+		});
+		const ctx = (isProjectTrusted?: () => boolean) =>
+			// SAFETY: the stub carries every ExtensionContext member launchSnapshot reads.
+			({
+				cwd: "/session/cwd",
+				sessionManager: {
+					getSessionFile: () => "f",
+					getSessionId: () => "s",
+					getSessionDir: () => "d",
+				},
+				modelRegistry: {
+					find: () => undefined,
+					getAvailable: () => [],
+					getAll: () => [],
+				},
+				isProjectTrusted,
+			}) as never;
+		assert.deepEqual(launchSnapshot(ctx(() => false)).scriptShell, {
+			cwd: "/session/cwd",
+			projectTrusted: false,
+		});
+		assert.deepEqual(launchSnapshot(ctx(() => true)).scriptShell, {
+			cwd: "/session/cwd",
+			projectTrusted: true,
+		});
+		// Pi releases without trust gating load project settings unconditionally.
+		assert.equal(launchSnapshot(ctx()).scriptShell?.projectTrusted, true);
 	});
 });

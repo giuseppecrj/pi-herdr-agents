@@ -52,6 +52,7 @@ export function createLaunchPlanner({
 				getSessionDir(): string;
 			};
 			cwd: string;
+			isProjectTrusted?: () => boolean;
 			model?: { provider: string; id: string };
 			modelRegistry: {
 				find(provider: string, modelId: string): any;
@@ -205,6 +206,11 @@ export function createLaunchPlanner({
 					: undefined,
 			modelRegistry: sessionModelRegistry(ctx),
 			paneConfig,
+			// Pi releases without trust gating load project settings unconditionally.
+			scriptShell: {
+				cwd: ctx.cwd,
+				projectTrusted: ctx.isProjectTrusted?.() ?? true,
+			},
 		};
 	}
 

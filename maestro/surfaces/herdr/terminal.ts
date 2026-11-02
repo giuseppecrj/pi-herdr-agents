@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
 	buildScriptLaunchCommand,
+	classifyPaneShell,
+	type PaneShell,
 	type ScriptShellResolver,
 } from "../../core/script-launch.ts";
 import { shellQuote } from "../../core/shell.ts";
@@ -119,6 +121,24 @@ export function interruptPane(paneId: PaneId): Promise<void> {
 	return sendHerdrEscape(paneId);
 }
 
+/**
+ * The shell a Windows pane runs: the `foreground_processes` entry whose pid is
+ * `shell_pid` in `herdr pane process-info`, by `name` (or `argv0`) only.
+ * Unknown shells and failed lookups are `undefined`.
+ */
+async function detectPaneShell(paneId: PaneId): Promise<PaneShell | undefined> {
+	let info: HerdrPaneProcessInfo;
+	try {
+		info = await getHerdrPaneProcessInfoAsync(paneId);
+	} catch {
+		return undefined;
+	}
+	const shell = info.foregroundProcesses.find(
+		(process) => process.pid === info.shellPid,
+	);
+	return classifyPaneShell(shell?.name ?? shell?.argv0);
+}
+
 export async function runScriptInPane(
 	paneId: PaneId,
 	command: string,
@@ -138,10 +158,12 @@ export async function runScriptInPane(
 			"pi-herdr-subagent-scripts",
 			`cmd-${Date.now()}-${Math.random().toString(16).slice(2, 8)}.sh`,
 		);
+	const platform = options?.platform ?? process.platform;
 	// Build before touching the filesystem so a missing bash dispatches nothing.
 	const launch = buildScriptLaunchCommand({
 		scriptPath,
-		platform: options?.platform ?? process.platform,
+		platform,
+		paneShell: platform === "win32" ? await detectPaneShell(paneId) : undefined,
 		resolveShell: options?.resolveShell,
 	});
 	mkdirSync(dirname(scriptPath), { recursive: true });
