@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import type {
-	PiLaunchSnapshot,
-	PiAttemptSnapshot,
+import {
+	resolveProjectTrusted,
+	type PiLaunchSnapshot,
+	type PiAttemptSnapshot,
 } from "../../maestro/runtime/index.ts";
 import {
 	resolveRuntimePlans,
@@ -13,7 +14,6 @@ import {
 	resolveModelDefault,
 	type ModelConfig,
 } from "../../maestro/core/config/model-config.ts";
-import { resolveProjectTrusted } from "../../maestro/adapters/pi/script-shell.ts";
 import { getAgentConfigDir } from "./config-path.ts";
 import { normalizeAcceptSpec } from "../../maestro/core/accept.ts";
 import type { PaneConfig } from "../../maestro/core/config/pane-config.ts";
