@@ -350,6 +350,13 @@ closed set (`maestro/runtime/run-session.ts:119-120`,
 | `unconfirmed` | Termination failed. The run stays live, and nothing is delivered. |
 | `already-terminal` | The run already took a natural result. Nothing was cancelled. |
 
+For local Core execution, semantic result evidence still comes from Pi. Native
+terminal state independently proves lifetime exit; `status: done` and a retained
+terminal record do not. A confirmed cancellation reports process exit, not early
+record removal. Core's automatic child notes are disabled, so they do not add a
+second result delivery. These backend rules do not change the envelope or verdict
+set ([ADR-0018](adr/0018-herdr-core-execution.md)).
+
 ## Launch acknowledgement uncertainty
 
 The request parameters are unchanged. A fresh or resumed launch normally returns
@@ -360,6 +367,14 @@ model-facing text encodes that failure and says that no fallback will launch.
 The owner remains controlled and supervised until termination is confirmed.
 An ownerless uncertain creation fails the launch and reports only observed
 identities and any retained manifest. Neither case proves server cancellation.
+
+Core's `execution-start` uncertainty distinguishes `observedSurfaceId` (diagnostic
+only) from `acquiredSurfaceId` (the provider reserved this ID for this acquisition).
+Only the latter can transfer an initialized owner. An ID already owned by another
+launch, a pending acquisition, or the parent cannot confer that ownership. Control
+also verifies the launch's unique script, cwd and parent against the same Core.
+Even a structured error such as `spawn_failed` can follow remote execution, so
+errors after native start submission block automatic retry and model fallback.
 
 Worktree manifests can record `acquisitionUncertain: true` with recovery
 evidence. That evidence never authorizes automatic cleanup or late dispatch.

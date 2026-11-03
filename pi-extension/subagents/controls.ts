@@ -23,7 +23,8 @@ export const SUBAGENT_CANCEL_DESCRIPTION =
 	"Cancel a running ordinary (non-persistent) Pi-backed subagent, including an interrupted one: " +
 	"records terminal intent first, terminates its owned process, and delivers exactly one cancelled result. " +
 	"No model fallback, retry, or recovery starts after a cancel. " +
-	"An ordinary pane is closed; a managed-worktree child stops only its Pi process and keeps the workspace, checkout, commits, and manifest. " +
+	"An ordinary legacy pane is closed; Core confirms native process exit and removes its terminal record after delivery. " +
+	"A managed-worktree child stops only its Pi process and keeps the workspace, checkout, commits, and manifest. " +
 	"Returns confirmed, requested (launch still in flight), unconfirmed (the run stays live; call again to retry), or already-terminal. " +
 	"Persistent specialists are rejected; use subagent_stop. Do not poll: the cancelled result arrives automatically.";
 
@@ -47,7 +48,7 @@ function cancelStatusText(
 		case "confirmed":
 			return worktree
 				? `Cancelled subagent "${name}": its Pi process exit is confirmed; the worktree workspace, checkout, commits, and manifest are retained. ${noRetry} One cancelled result will be delivered automatically.`
-				: `Cancelled subagent "${name}": its pane was closed and Herdr confirmed it is gone. ${noRetry} One cancelled result will be delivered automatically.`;
+				: `Cancelled subagent "${name}": its owned process exit is confirmed. ${noRetry} One cancelled result will be delivered automatically.`;
 		case "requested":
 			return `Cancel recorded for subagent "${name}"; its in-flight launch is terminated as soon as it is acquired. ${noRetry} One cancelled result will be delivered after termination is confirmed.`;
 		case "unconfirmed":

@@ -135,6 +135,10 @@ export class PiHarnessAdapter implements HarnessAdapter {
 				options.paneConfig,
 				options.worktreeOperations,
 			);
+		if (this.operations.nativeExecution !== options.surface.nativeExecution)
+			throw new Error(
+				"Pi owning provider and launch operations must use the same native execution binding",
+			);
 	}
 	isAvailable(): boolean {
 		return (process.env.PATH ?? "").split(delimiter).some((directory) => {
@@ -344,6 +348,8 @@ export class PiHarnessAdapter implements HarnessAdapter {
 	/** Resolves only with termination evidence; otherwise rejects (unconfirmed). */
 	async kill(handle: AgentHandle): Promise<void> {
 		const child = this.getRunningChild(handle);
+		if (this.options.surface.nativeExecution)
+			return this.options.surface.nativeExecution.terminate(child.surface);
 		// A worktree root pane is the retained review workspace (Herdr refuses to
 		// close it): stop only the owned Pi process and keep pane and checkout.
 		if (child.worktree || !child.ownsSurface) return this.stopRetainedPi(child);
@@ -520,7 +526,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 				controller,
 				waiters: 0,
 				promise: (async () => {
-					if (child.launchFailure) {
+					if (child.launchFailure && !this.options.surface.nativeExecution) {
 						try {
 							await this.kill(handle);
 							return {
@@ -535,6 +541,10 @@ export class PiHarnessAdapter implements HarnessAdapter {
 					}
 					return waitForCompletion(controller.signal, {
 						intervalMs: 1000,
+						inspectExecution: this.options.surface.nativeExecution
+							? () =>
+									this.options.surface.nativeExecution!.inspect(child.surface)
+							: undefined,
 						sessionFile: child.sessionFile,
 						requireProcessExit: child.persistent || !!child.launchFailure,
 						inspectProcess: () =>

@@ -49,7 +49,13 @@ export type UncertainAcquisition =
 			branch: string;
 			recovered?: RecoveredWorktreeProvisioning;
 	  }
-	| { kind: "command-dispatch"; surfaceId: string };
+	| { kind: "command-dispatch"; surfaceId: string }
+	| {
+			kind: "execution-start";
+			observedSurfaceId?: string;
+			/** Set only when the provider reserved this ID for this launch. */
+			acquiredSurfaceId?: string;
+	  };
 
 /** A started mutating request has no proven outcome. Never retry it. */
 export class AcquisitionUncertainError extends Error {
@@ -117,6 +123,15 @@ export function isAcquisitionUncertainError(
 		}
 		case "command-dispatch":
 			return typeof value.surfaceId === "string";
+		case "execution-start":
+			return (
+				(value.observedSurfaceId === undefined ||
+					(typeof value.observedSurfaceId === "string" &&
+						/^t[0-9a-z]+$/.test(value.observedSurfaceId))) &&
+				(value.acquiredSurfaceId === undefined ||
+					(typeof value.acquiredSurfaceId === "string" &&
+						value.acquiredSurfaceId === value.observedSurfaceId))
+			);
 		default:
 			return false;
 	}
@@ -199,7 +214,28 @@ export interface SurfaceProcessInfo {
 	foregroundProcesses: SurfaceForegroundProcess[];
 }
 
+export type NativeExecutionInspection =
+	| { kind: "live" }
+	| { kind: "finished"; exitCode?: number }
+	| { kind: "missing" }
+	| { kind: "unavailable"; error?: string };
+
+/** Atomic program execution; no intermediate shell or surface acquisition. */
+export interface NativeExecution {
+	start(input: {
+		cwd: string;
+		command: string;
+		scriptPath: string;
+		scriptPreamble: string;
+		signal?: AbortSignal;
+	}): Promise<string>;
+	inspect(id: string): Promise<NativeExecutionInspection>;
+	/** Confirmation of exit, never merely an acknowledgement of a signal. */
+	terminate(id: string): Promise<void>;
+}
+
 export interface SurfaceProvider {
+	readonly nativeExecution?: NativeExecution;
 	/** Stable provider name, e.g. "herdr". */
 	readonly name: string;
 

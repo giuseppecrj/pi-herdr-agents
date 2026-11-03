@@ -5,8 +5,9 @@ This page is for contributors. Read [`AGENTS.md`](../AGENTS.md) for repository r
 ## Code map
 
 The maestro seams remain inside one npm package with the same Pi extension
-entry point. Pi is the sole real harness and Herdr the sole real surface
-provider; fakes are for conformance tests only.
+entry point. Pi is the sole real harness. Legacy Herdr and local Herdr Core
+provide execution; Desktop presentation is separate and not yet implemented.
+Fakes are for conformance tests only.
 
 - `pi-extension/subagents/index.ts` — Pi composition root: loads config,
   adopts the reload-surviving runtime, builds the per-load controllers, and
@@ -35,8 +36,13 @@ provider; fakes are for conformance tests only.
   auto-exit.
 - `maestro/core/roles/discovery.ts`, `maestro/core/config/` — role discovery,
   config loaders with injected directories, and task-model init prompt logic.
+- `maestro/core/config/herdr-config.ts` — strict backend configuration and
+  pure native-context selection; `maestro/runtime/herdr-backend.ts` composes
+  the selected provider, with the binding retained by `pi-run-session.ts`.
 - `maestro/core/worktree.ts`, `maestro/core/worktree-cleanup.ts` — manifest
   schema/state, handoff types, and cleanup eligibility/formatting.
+  `worktree-ownership.ts` is the staged, effect-free legacy-v1/Core-v2 receipt
+  contract; Core worktree launch and cleanup are not yet wired.
 - `maestro/core/git-environment.ts` removes inherited repository-selection and
   command-local Git configuration overrides from host-managed Git subprocesses.
   It retains user configuration, identity, and hooks.
@@ -72,7 +78,10 @@ provider; fakes are for conformance tests only.
   client for pane metadata. The CLI driver is `herdr-cli.ts` (exec, JSON,
   availability, test exec hook), `herdr-pane.ts` (pane inspection, process
   info, readiness and absence waits), and `herdr.ts` (placement, worktrees,
-  the opened-primary report, pane commands).
+  the opened-primary report, pane commands). `herdr-core-protocol.ts` owns
+  bounded generation-1 RPC and mutation uncertainty;
+  `herdr-core-surface-provider.ts` owns local native execution, exact launch
+  identity, termination confirmation and record removal.
 - `maestro/runtime/` — run ownership, controls/retries, observation,
   delivery-gated cleanup, Pi composition, worktree operations/handoff,
   task-model init composition, and sidebar markers (`delegated-marker.ts`).
@@ -85,7 +94,8 @@ provider; fakes are for conformance tests only.
 - `maestro/adapters/fake/`, `maestro/surfaces/fake/`, `test/maestro/` —
   conformance fakes, seam tests, and the import dependency-rule test.
 
-See [ADR-0012](adr/0012-adopt-maestro-seams-in-repo.md), the
+See [ADR-0012](adr/0012-adopt-maestro-seams-in-repo.md),
+[ADR-0018](adr/0018-herdr-core-execution.md), the
 [glossary](../CONTEXT.md), and the [documentation map](README.md).
 
 The **CI** workflow runs formatting, lint, type-check, unit tests, and the package preview
@@ -119,6 +129,56 @@ npm run test:integration
 ```
 
 Start the Herdr server with Node.js 22.19+ on its `PATH`, because test panes inherit the server's environment, not the test runner's: Pi 1.0.0 needs Node.js 22.19+ and crashes at startup on versions older than 22.15.
+
+For Core, run the independent isolated suite (Linux or macOS; requires
+`herdr-core`, Pi and Node on PATH, or absolute `HERDR_CORE_BIN` / `PI_BIN`):
+
+```bash
+npm run test:integration:core
+```
+
+`test/integration/herdr-core-lab.ts` owns private HOME/XDG directories, a unique
+Core session and socket, and identity-checked shutdown without PID signalling.
+`core-parent.ts` loads this checkout in real parent/child Pi processes against
+the local deterministic provider. npm puts `node_modules/.bin` first on PATH,
+so set `PI_BIN` explicitly to verify an installed Pi rather than the repository's
+pinned version. Core 0.1.16 has been exercised with Pi 1.1.0 and 1.4.0;
+Core 0.1.17 has also passed with Pi 1.4.0. The tests exercise public tools, not `__test__`,
+and save sessions, provider requests and native inventory/screens under the
+reported `/tmp/piha-core-evidence-*` directories before removing lab resources.
+Unknown startup/shutdown ownership retains the lab and fails the test. No daily
+Core/Desktop layout, configuration or authentication is used.
+
+### Optional macOS Desktop fixture
+
+`test/integration/herdr-desktop-lab.ts` copies the app bundle and Core executable
+into a private Core lab. It sets private HOME/XDG/app/install paths, disables
+telemetry and clipboard writes, and serves pinned update metadata on loopback.
+It never modifies the daily bundle, selects a daily layout, or sends a command to
+the daily app socket. Shutdown uses the owned app process handle and exact
+private control socket, then the identity-checked private Core shutdown; an
+unconfirmed shutdown retains the lab.
+
+**The physical display is not isolated.** Starting the copied app can activate a
+window and take keyboard focus. Obtain explicit operator consent before running:
+
+```bash
+PI_TEST_DESKTOP_WINDOW=1 npm run test:integration:desktop
+```
+
+Use `HERDR_DESKTOP_BUNDLE` for another installed bundle and absolute
+`HERDR_CORE_BIN` / `PI_BIN` as needed. Without the opt-in, the test skips without
+opening a window. `test/maestro/desktop-lab.test.ts` instead uses fake
+version-only executables and private fake sockets; it opens no app or Core.
+The optional smoke test captures `ls`, `status` and the app's own PNG under
+`/tmp/piha-desktop-evidence-*`. This is fixture verification, **not** Agents/sidebar
+implementation or visual parity acceptance. No Desktop GUI run is implied by a
+passing unit test.
+
+The older `scripts/lab.ts` verification driver and some legacy fixtures require
+Linux `/proc`; a Core pass on macOS does not substitute for those legacy gates.
+Report skips and unavailable gates explicitly. See the
+[verification skill](../.pi/skills/verify-pi-herdr-agents/SKILL.md).
 
 The deterministic suite launches real Pi sessions, Herdr panes, and worktrees without provider credentials. The optional live-provider smoke test is not a merge gate:
 

@@ -8,6 +8,7 @@ import {
 	rmSync,
 	existsSync,
 	readFileSync,
+	realpathSync,
 	readdirSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -397,7 +398,7 @@ async function fixture(
 	}
 }
 async function makeFixture() {
-	const dir = mkdtempSync(join(tmpdir(), "pi-composition-"));
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), "pi-composition-")));
 	const parent = join(dir, "parent.jsonl");
 	writeFileSync(
 		parent,
