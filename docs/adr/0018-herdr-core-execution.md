@@ -59,52 +59,6 @@ from native navigation. These are design alternatives, not implemented parity.
 Pixel parity requires real, isolated rendering and reference-image comparison;
 API documentation or a successful Core launch is not visual acceptance.
 
-## Planned Core worktree adaptation
-
-The first foundation is the effect-free ownership contract in
-`maestro/core/worktree-ownership.ts`, not a supported launch or cleanup path.
-Public Core worktree entry points remain rejected before acquisition. Subsequent
-stages must supply Git provisioning, native acquisition, retained-shell policy,
-handoff, inventory and explicit cleanup with real integration evidence; this
-slice supplies none of those effects. The planned adaptation uses a separate
-non-restoring Pi execution terminal and retained interactive shell. Cancelling Pi
-must not kill that shell. This is not a Desktop workspace or same-terminal shell
-return. Initially, a live retained shell must block cleanup until the operator
-exits it; terminal identity alone cannot authorize automatic shell termination.
-
-Keep legacy v1 receipts readable: `version: 1`, `kind: "worktree-run"`, and
-`owner: "pi-herdr-subagents"`. Only an absent backend means legacy; an explicit
-backend must be `"legacy"`. Unknown, malformed or mismatched backend/version
-values fail closed. Recognition alone does not prove repository identity or
-cleanup eligibility, and this foundation neither migrates nor rewrites v1 data.
-
-Use a distinct Core v2 receipt, never a synthetic workspace or pane ID. Record
-the socket and Core server ID, original parent terminal, run ID/token, source
-checkout, principal checkout, common Git directory, intended checkout path,
-branch, requested base ref and resolved base SHA. These identities are immutable.
-Path strings require later canonical filesystem/Git proofs; the receipt alone
-cannot authorize removal through shared Git identity or replace cwd containment.
-The run token identifies the receipt, not ownership by terminal name.
-
-Acquired resources have explicit `execution` or `retained-shell` roles, a native
-terminal address and creation timestamp. Each role and address is unique, and
-neither may claim the parent terminal. Resources are append-only: state and Git
-handoff updates cannot replace, retime or forget an acquisition. Matching fresh
-native evidence checks the recorded server, address, creation time and original
-parent, not the current parent after restart. Reading a receipt does not reattach
-a watcher or prove that its server or terminal still exists. The identity match
-is not current-program control authorization: later controllers must additionally
-verify execution argv/cwd and non-restoring policy, because recovery into a shell
-can retain the same terminal identity.
-
-Observed terminal IDs are separate append-only diagnostic evidence, never
-control handles. Acquisition uncertainty is sticky, including across failure or
-removal state updates. This slice intentionally has no uncertainty-clearing or
-resource-adoption operation; later reconciliation needs an explicit evidence
-contract rather than treating an empty list, observed ID or state change as
-proof. Append validation is not proof of acquisition: the eventual effect owner
-must establish that evidence before recording an acquired resource.
-
 ## Consequences
 
 Legacy behavior remains governed by its existing placement, worktree and
