@@ -120,6 +120,7 @@ async function makeFixture() {
 		runMode: "valid" as
 			| "valid"
 			| "partial"
+			| "unverified"
 			| "disconnect"
 			| "timeout"
 			| "malformed"
@@ -204,6 +205,8 @@ async function makeFixture() {
 							/* bounded no-answer fixture */
 						} else if (state.runMode === "partial")
 							reply({ address: child.address, state: "live" });
+						else if (state.runMode === "unverified")
+							reply({ ...child, cwd: join(dir, "unverified") });
 						else if (state.runMode === "malformed") reply({ state: "live" });
 						else if (state.runMode === "oversized")
 							reply({ text: "x".repeat(2 * 1024 * 1024 + 1) });
@@ -903,26 +906,27 @@ for (const mode of ["duplicate-partial", "duplicate-full"] as const)
 				);
 			}));
 
-for (const owner of ["parent", "pending"] as const)
-	test(`Core partial reply cannot transfer the ${owner} terminal to another launch`, () =>
-		fixture(async (f) => {
-			if (owner === "pending") {
-				f.state.runMode = "partial";
-				await assert.rejects(f.nativeStart(), (error: Error) =>
-					isAcquisitionUncertainError(error),
+for (const mode of ["duplicate-partial", "duplicate-full"] as const)
+	for (const owner of ["parent", "pending"] as const)
+		test(`Core ${mode} reply cannot transfer the ${owner} terminal to another launch`, () =>
+			fixture(async (f) => {
+				if (owner === "pending") {
+					f.state.runMode = "partial";
+					await assert.rejects(f.nativeStart(), (error: Error) =>
+						isAcquisitionUncertainError(error),
+					);
+				}
+				f.state.replyAddress = owner === "parent" ? "t1" : "t2";
+				f.state.runMode = mode;
+				await assert.rejects(
+					launchPiSubagent(f.request(), f.operations),
+					(error: Error) => {
+						assert.ok(!(error instanceof AcquiredPiLaunchError));
+						assert.ok(isAcquisitionUncertainError(error));
+						return true;
+					},
 				);
-			}
-			f.state.replyAddress = owner === "parent" ? "t1" : "t2";
-			f.state.runMode = "duplicate-partial";
-			await assert.rejects(
-				launchPiSubagent(f.request(), f.operations),
-				(error: Error) => {
-					assert.ok(!(error instanceof AcquiredPiLaunchError));
-					assert.ok(isAcquisitionUncertainError(error));
-					return true;
-				},
-			);
-		}));
+			}));
 
 for (const kind of ["spawn_failed", "config", "unavailable"])
 	test(`Core structured ${kind} after submission cannot trigger model fallback`, () =>
@@ -951,29 +955,108 @@ for (const kind of ["spawn_failed", "config", "unavailable"])
 			assert.equal(f.terminals.get("t2")!.state, "live");
 		}));
 
-test("Core malformed reply with observed ID retains a real owner, verifies before control", () =>
-	fixture(async (f) => {
-		f.state.runMode = "partial";
-		await assert.rejects(
-			launchPiSubagent(f.request(), f.operations),
-			(error: Error) => {
-				assert.ok(error instanceof AcquiredPiLaunchError);
-				assert.equal(error.child.surface, "t2");
-				assert.ok(
-					existsSync(getSubagentSessionPolicyFile(error.child.sessionFile)),
+for (const mode of ["partial", "unverified"] as const)
+	for (const resumed of [false, true])
+		test(`Core ${resumed ? "resume" : "fresh"} ${mode} reply retains a pending owner, verifies before control`, () =>
+			fixture(async (f) => {
+				f.state.runMode = mode;
+				let request: PiLaunchRequest = f.request();
+				if (resumed) {
+					const file = join(f.dir, "resume-uncertain.jsonl");
+					writeFileSync(
+						file,
+						JSON.stringify({ type: "session", cwd: f.dir }) + "\n",
+					);
+					writeSubagentSessionPolicy(file, {
+						owner: "public",
+						deniedTools: [],
+					});
+					request = {
+						kind: "resume",
+						name: "uncertain resume",
+						sessionFile: file,
+						parent: request.parent,
+					};
+				}
+				await assert.rejects(
+					launchPiSubagent(request, f.operations),
+					(error: Error) => {
+						assert.ok(error instanceof AcquiredPiLaunchError);
+						assert.equal(error.child.surface, "t2");
+						assert.ok(
+							existsSync(getSubagentSessionPolicyFile(error.child.sessionFile)),
+						);
+						return true;
+					},
 				);
+				assert.deepEqual(await f.provider.nativeExecution.inspect("t2"), {
+					kind: "live",
+				});
+				await f.provider.sendKeys("t2", "Escape");
+				await f.provider.nativeExecution.terminate("t2");
+				assert.equal(f.terminals.get("t2")!.state, "finished");
+				assert.equal(
+					f.calls.filter((c) => c.method === "terminal.run").length,
+					1,
+				);
+				assert.equal(
+					f.calls.filter((c) => c.method === "terminal.rm").length,
+					0,
+				);
+			}));
+
+for (const field of ["parent", "cwd", "argv", "keep", "rm", "server"] as const)
+	test(`Core unverified reply retains ownership but refuses control when ${field} differs`, () =>
+		fixture(async (f) => {
+			f.state.runMode = "unverified";
+			await assert.rejects(f.nativeStart(), (error: Error) => {
+				assert.ok(isAcquisitionUncertainError(error));
+				assert.deepEqual(error.uncertainty, {
+					kind: "execution-start",
+					observedSurfaceId: "t2",
+					acquiredSurfaceId: "t2",
+				});
 				return true;
-			},
-		);
-		assert.deepEqual(await f.provider.nativeExecution.inspect("t2"), {
-			kind: "live",
-		});
-		await f.provider.sendKeys("t2", "Escape");
-		await f.provider.nativeExecution.terminate("t2");
-		assert.equal(f.terminals.get("t2")!.state, "finished");
-		assert.equal(f.calls.filter((c) => c.method === "terminal.run").length, 1);
-		assert.equal(f.calls.filter((c) => c.method === "terminal.rm").length, 0);
-	}));
+			});
+			const terminal = f.terminals.get("t2")!;
+			const original = { ...terminal };
+			if (field === "parent") terminal.parent = "t9";
+			if (field === "cwd") terminal.cwd = join(f.dir, "other");
+			if (field === "argv") terminal.argv = ["/bin/bash", "foreign.sh"];
+			if (field === "keep") terminal.keep = true;
+			if (field === "rm") terminal.rm = true;
+			if (field === "server") f.state.coreId = "replacement";
+			assert.equal(
+				(await f.provider.nativeExecution.inspect("t2")).kind,
+				"unavailable",
+			);
+			await assert.rejects(
+				f.provider.nativeExecution.terminate("t2"),
+				/ownership changed|identity changed/,
+			);
+			await assert.rejects(
+				f.provider.sendKeys("t2", "Escape"),
+				/ownership changed|identity changed/,
+			);
+			await assert.rejects(
+				f.provider.closeSurface("t2"),
+				/ownership changed|identity changed/,
+			);
+			assert.equal(
+				f.calls.filter((c) =>
+					["terminal.kill", "terminal.keys", "terminal.rm"].includes(c.method),
+				).length,
+				0,
+			);
+			Object.assign(terminal, original);
+			f.state.coreId = "core-unit";
+			await f.provider.nativeExecution.terminate("t2");
+			assert.equal(terminal.state, "finished");
+			assert.equal(
+				f.calls.filter((c) => c.method === "terminal.run").length,
+				1,
+			);
+		}));
 
 test("Core exact-ID interrupt/cancel verifies ownership; native kill reply alone does not confirm or remove", () =>
 	fixture(async (f) => {
@@ -1149,6 +1232,35 @@ test("Core finished native exit admits interactive sentinel only after exit and 
 	assert.equal(stale.reason, "error");
 	assert.equal(stale.exitCode, 9);
 });
+
+for (const nativeKind of ["finished", "missing"] as const)
+	for (const exitCode of [0, 7, undefined])
+		for (const unreadable of [false, true])
+			test(`Core ${nativeKind} exit ${exitCode} without completion evidence preserves native code (unreadable=${unreadable})`, async () => {
+				const result = await waitForCompletion(new AbortController().signal, {
+					intervalMs: 1,
+					paneDisappearanceGraceMs: 0,
+					inspectExecution: async () => ({ kind: nativeKind, exitCode }),
+					readTerminalTail: async () => {
+						if (unreadable) throw new Error("read unavailable");
+						return "";
+					},
+				});
+				assert.equal(
+					result.reason,
+					"error",
+					"process exit alone is not task success",
+				);
+				assert.equal(
+					result.exitCode,
+					nativeKind === "finished" ? (exitCode ?? 1) : 1,
+				);
+				assert.equal(result.errorSource, "host");
+				assert.match(
+					result.errorMessage!,
+					/native execution ended before completion evidence/,
+				);
+			});
 
 test("Core unavailable exit evidence preserves sidecar and owner until aborted", () =>
 	fixture(async (f) => {
@@ -1426,30 +1538,37 @@ for (const resumed of [false, true])
 			);
 		}));
 
-test("Core observed-ID uncertain session retains control, never retries or falls back", () =>
-	fixture(async (f) => {
-		f.state.runMode = "partial";
-		const session = createDefaultRunSession(sessionOptions(f));
-		f.sessions.push(session);
-		const input = launchInput(f);
-		input.plans = [
-			input.plans[0],
-			{ ...input.plans[0], model: "test/two", modelId: "two" },
-		];
-		const handle = await session.spawnPi(input);
-		assert.ok(handle.launchFailure);
-		assert.equal(session.getStarted(input.task.id)!.status, "uncertain");
-		const wait = session.supervise(handle, session.getTask(input.task.id)!);
-		f.state.killExits = false;
-		assert.equal((await session.cancel(input.task.id)).status, "unconfirmed");
-		assert.ok(session.getRecord(input.task.id));
-		assert.equal(f.calls.filter((c) => c.method === "terminal.run").length, 1);
-		f.state.killExits = true;
-		assert.equal((await session.cancel(input.task.id)).status, "confirmed");
-		await wait;
-		await f.removed(handle.surfaceId!);
-		assert.equal(f.calls.filter((c) => c.method === "terminal.run").length, 1);
-	}));
+for (const mode of ["partial", "unverified"] as const)
+	test(`Core ${mode} observed-ID uncertain session retains control, never retries or falls back`, () =>
+		fixture(async (f) => {
+			f.state.runMode = mode;
+			const session = createDefaultRunSession(sessionOptions(f));
+			f.sessions.push(session);
+			const input = launchInput(f);
+			input.plans = [
+				input.plans[0],
+				{ ...input.plans[0], model: "test/two", modelId: "two" },
+			];
+			const handle = await session.spawnPi(input);
+			assert.ok(handle.launchFailure);
+			assert.equal(session.getStarted(input.task.id)!.status, "uncertain");
+			const wait = session.supervise(handle, session.getTask(input.task.id)!);
+			f.state.killExits = false;
+			assert.equal((await session.cancel(input.task.id)).status, "unconfirmed");
+			assert.ok(session.getRecord(input.task.id));
+			assert.equal(
+				f.calls.filter((c) => c.method === "terminal.run").length,
+				1,
+			);
+			f.state.killExits = true;
+			assert.equal((await session.cancel(input.task.id)).status, "confirmed");
+			await wait;
+			await f.removed(handle.surfaceId!);
+			assert.equal(
+				f.calls.filter((c) => c.method === "terminal.run").length,
+				1,
+			);
+		}));
 
 test("Core suppression gates confirmed termination then cleanup without parent delivery", () =>
 	fixture(async (f) => {

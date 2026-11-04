@@ -352,8 +352,9 @@ closed set (`maestro/runtime/run-session.ts:119-120`,
 
 For local Core execution, semantic result evidence still comes from Pi. Native
 terminal state independently proves lifetime exit; `status: done` and a retained
-terminal record do not. A confirmed cancellation reports process exit, not early
-record removal. Core's automatic child notes are disabled, so they do not add a
+terminal record do not. Native exit without Pi completion evidence remains a host
+error; a known native exit code, including `0`, is preserved rather than replaced.
+A confirmed cancellation reports process exit, not early record removal. Core's automatic child notes are disabled, so they do not add a
 second result delivery. These backend rules do not change the envelope or verdict
 set ([ADR-0018](adr/0018-herdr-core-execution.md)).
 
@@ -370,7 +371,10 @@ identities and any retained manifest. Neither case proves server cancellation.
 
 Core's `execution-start` uncertainty distinguishes `observedSurfaceId` (diagnostic
 only) from `acquiredSurfaceId` (the provider reserved this ID for this acquisition).
-Only the latter can transfer an initialized owner. An ID already owned by another
+Only the latter can transfer an initialized owner. Both an incomplete reply and a
+parsed record that fails launch verification can reserve a fresh ID as pending;
+neither authorizes control until fresh native evidence verifies the launch.
+An ID already owned by another
 launch, a pending acquisition, or the parent cannot confer that ownership. Control
 also verifies the launch's unique script, cwd and parent against the same Core.
 Even a structured error such as `spawn_failed` can follow remote execution, so

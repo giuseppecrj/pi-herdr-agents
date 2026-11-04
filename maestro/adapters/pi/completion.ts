@@ -240,7 +240,8 @@ async function detectCompletion(
 				}
 				return {
 					reason: "error",
-					exitCode: execution.kind === "finished" ? execution.exitCode || 1 : 1,
+					exitCode:
+						execution.kind === "finished" ? (execution.exitCode ?? 1) : 1,
 					errorMessage:
 						"Subagent native execution ended before completion evidence was recorded.",
 					errorSource: "host",

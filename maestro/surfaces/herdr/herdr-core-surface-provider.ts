@@ -120,14 +120,31 @@ export class HerdrCoreSurfaceProvider implements SurfaceProvider {
 				true,
 				input.signal,
 			);
+			// Parsed records can still fail launch verification. Keep those on the
+			// same pending-ownership path as incomplete replies, not ownerless.
+			if (
+				terminal.parent !== this.binding.parentTerminal ||
+				terminal.cwd !== input.cwd ||
+				terminal.keep ||
+				terminal.rm ||
+				JSON.stringify(terminal.argv) !==
+					JSON.stringify(["/bin/bash", input.scriptPath]) ||
+				terminal.address === parent.address ||
+				this.owned.has(terminal.address) ||
+				this.pending.has(terminal.address)
+			)
+				throw new AcquisitionUncertainError(
+					"Herdr Core returned an unverified execution; no retry or fallback",
+					{ kind: "execution-start", observedSurfaceId: terminal.address },
+				);
 		} catch (error) {
 			if (
 				isAcquisitionUncertainError(error) &&
 				error.uncertainty.kind === "execution-start"
 			) {
 				const id = error.uncertainty.observedSurfaceId;
-				// A partial reply binds only an exact ID, never a guessed name. Any
-				// future control must first verify the unique script and parent.
+				// An uncertain reply binds only a fresh exact ID, never a guessed
+				// name. Future control must first verify the unique script and parent.
 				if (
 					id &&
 					id !== parent.address &&
@@ -151,22 +168,7 @@ export class HerdrCoreSurfaceProvider implements SurfaceProvider {
 			}
 			throw error;
 		}
-		// The full native record is the acquisition result, not a pre-created shell.
-		if (
-			terminal.parent !== this.binding.parentTerminal ||
-			terminal.cwd !== input.cwd ||
-			terminal.keep ||
-			terminal.rm ||
-			JSON.stringify(terminal.argv) !==
-				JSON.stringify(["/bin/bash", input.scriptPath]) ||
-			terminal.address === parent.address ||
-			this.owned.has(terminal.address) ||
-			this.pending.has(terminal.address)
-		)
-			throw new AcquisitionUncertainError(
-				"Herdr Core returned an unverified execution; no retry or fallback",
-				{ kind: "execution-start", observedSurfaceId: terminal.address },
-			);
+		// The verified native record is the acquisition result, not a shell.
 		this.owned.set(terminal.address, terminal);
 		return terminal.address;
 	}
