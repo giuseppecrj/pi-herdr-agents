@@ -527,8 +527,6 @@ function processHolders(
 				if (idleShellPids.has(Number(pid)) && shellNames.has(command)) continue;
 				let cwd: string;
 				try {
-					// Linux /proc/<pid>/cwd is readable without opening on Node;
-					// never fall back to a blocking open or deadline child.
 					cwd = realpathWithoutOpening(`${procRoot}/${pid}/cwd`);
 				} catch (cwdError) {
 					// SAFETY: filesystem probes throw Node errors with an optional errno code.
