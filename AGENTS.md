@@ -35,7 +35,7 @@ Former bundled roles, `/plan`, its plan skill, and `/skill:orchestrate` now belo
 - `plugins/sidebar/` — optional standalone Node companion Herdr plugin; it imports nothing from the extension
 - `maestro/core/roles/discovery.ts`, `maestro/core/config/` — role parsing/discovery, injected-directory config loaders, and task-model init prompt construction
 - `maestro/core/config/herdr-config.ts`, `maestro/runtime/herdr-backend.ts` — strict backend selection and explicit legacy/Core composition; the run owner pins its Core endpoint and parent terminal across reload
-- `maestro/core/worktree.ts`, `worktree-cleanup.ts` — manifest schema/state, handoff types, and cleanup eligibility/formatting
+- `maestro/core/worktree.ts`, `worktree-cleanup.ts` — manifest schema/state, handoff types, and cleanup eligibility/formatting; `worktree-ownership.ts` is a staged effect-free legacy-v1/Core-v2 receipt contract, not supported Core worktree provisioning
 - `maestro/core/git-environment.ts` owns repository-local environment isolation for host-managed Git commands while preserving user configuration, identity, and hooks.
 - `maestro/core/deadline.ts` owns finite monotonic budgets for asynchronous launch, readiness, and handoff effects. Herdr subprocesses stay in `surfaces/herdr/herdr-cli.ts`; Git handoff subprocesses stay in `runtime/worktree-operations.ts`.
 - `maestro/core/host-text.ts` — the one encoding for variable values in parent-facing host lines, lossless command-argument serializers, and display normalization for child text

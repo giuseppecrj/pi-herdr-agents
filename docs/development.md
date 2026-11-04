@@ -41,6 +41,8 @@ Fakes are for conformance tests only.
   the selected provider, with the binding retained by `pi-run-session.ts`.
 - `maestro/core/worktree.ts`, `maestro/core/worktree-cleanup.ts` — manifest
   schema/state, handoff types, and cleanup eligibility/formatting.
+  `worktree-ownership.ts` is the staged, effect-free legacy-v1/Core-v2 receipt
+  contract; Core worktree launch and cleanup are not yet wired.
 - `maestro/core/git-environment.ts` removes inherited repository-selection and
   command-local Git configuration overrides from host-managed Git subprocesses.
   It retains user configuration, identity, and hooks.
