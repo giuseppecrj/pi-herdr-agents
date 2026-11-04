@@ -1,7 +1,6 @@
 /** A private local Core for integration tests; never inherits the caller's server. */
 import { execFile, execFileSync } from "node:child_process";
 import {
-	copyFileSync,
 	existsSync,
 	lstatSync,
 	mkdirSync,
@@ -114,27 +113,12 @@ export class CoreLab {
 	#stopped = false;
 	#removed = false;
 
-	constructor(
-		binary: string,
-		piBinary: string,
-		options: { copyBinary?: boolean } = {},
-	) {
+	constructor(binary: string, piBinary: string) {
 		// macOS's default TMPDIR makes Unix socket addresses too long. mkdtemp
 		// supplies a fresh 0700 directory; canonicalize /tmp before recording it.
 		this.root = realpathSync(mkdtempSync(join("/tmp", PREFIX)));
 		this.socket = join(this.root, "core.sock");
-		this.binary = options.copyBinary
-			? join(this.root, "bin", "herdr-core")
-			: binary;
-		if (options.copyBinary) {
-			try {
-				mkdirSync(dirname(this.binary), { mode: 0o700 });
-				copyFileSync(binary, this.binary);
-			} catch (error) {
-				rmSync(this.root, { recursive: true });
-				throw error;
-			}
-		}
+		this.binary = binary;
 		this.env = {
 			PATH: [
 				dirname(piBinary),

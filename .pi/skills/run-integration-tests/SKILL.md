@@ -18,7 +18,7 @@ Herdr 0.9.5 and Core 0.1.17, uses the lockfile's Pi, and runs
 parent delegation in the existing private verification lab before running the
 complete deterministic suite sequentially. Always-run cleanup stops only the
 owned lab; `linux-integration-evidence` keeps TAP, parent evidence and Core
-sessions for seven days. The Desktop GUI fixture remains skipped, not passed.
+sessions for seven days. Desktop GUI coverage is deferred.
 
 ## Isolated Core suite
 
@@ -40,23 +40,6 @@ after same-server shutdown confirmation. An uncertain start or shutdown keeps
 its private root and fails. Do not clean it by process name or by talking to the
 user's daily Core. Missing binaries are skips, not passing evidence. No Desktop
 visual acceptance is established by this suite.
-
-## Optional macOS Desktop fixture
-
-Do not open a GUI without explicit operator consent: private app state does not
-isolate the shared display, and startup can take keyboard focus. With consent:
-
-```bash
-PI_TEST_DESKTOP_WINDOW=1 npm run test:integration:desktop
-```
-
-The fixture copies the app bundle and Core executable, uses private HOME/XDG/app
-paths and pinned loopback update metadata, and stops only its exact owned app and
-Core. Override `HERDR_DESKTOP_BUNDLE`, `HERDR_CORE_BIN` or `PI_BIN` if needed.
-Without the flag it skips without opening a window. Unit tests use fake
-version-only executables and no GUI. The smoke captures inventory, status and a
-PNG under `/tmp/piha-desktop-evidence-*`; it does not establish Agents/sidebar
-pixel parity. Report the GUI smoke separately from headless Core and unit tests.
 
 ## Legacy preflight
 
