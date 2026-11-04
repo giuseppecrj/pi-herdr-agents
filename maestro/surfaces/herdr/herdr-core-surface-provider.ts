@@ -118,6 +118,7 @@ export class HerdrCoreSurfaceProvider implements SurfaceProvider {
 				},
 				parseTerminal,
 				true,
+				input.signal,
 			);
 		} catch (error) {
 			if (

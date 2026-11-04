@@ -30,9 +30,18 @@ import {
 	launchPiSubagent,
 	AcquiredPiLaunchError,
 	type FreshPiLaunchRequest,
+	type PiLaunchRequest,
 } from "../../maestro/adapters/pi/launch.ts";
 import { launchOperationsFromSurface } from "../../maestro/adapters/pi/launch-operations.ts";
 import { waitForCompletion } from "../../maestro/adapters/pi/completion.ts";
+import {
+	createLifecycle,
+	lifecycleTransition,
+	observePaneInspection,
+	projectLifecycle,
+	type LifecycleProjection,
+	type LifecycleTransition,
+} from "../../maestro/core/lifecycle.ts";
 import {
 	getNewEntries,
 	readPersistentDeliveryLedger,
@@ -139,6 +148,7 @@ async function makeFixture() {
 				const request: Request = JSON.parse(buffer.slice(0, end));
 				buffer = buffer.slice(end + 1);
 				calls.push(request);
+				server.emit("request", request);
 				const reply = (result: any) =>
 					socket.write(
 						JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) + "\n",
@@ -716,6 +726,77 @@ test("Core local artifact or script failure and pre-abort never start a program"
 		assert.equal(f.calls.filter((c) => c.method === "terminal.run").length, 0);
 	}));
 
+for (const resumed of [false, true])
+	test(`Core ${resumed ? "resumed" : "fresh"} cancellation during launch hello prevents submission`, () =>
+		fixture(async (f) => {
+			const abort = new AbortController();
+			let hellos = 0;
+			f.server.on("request", (request: Request) => {
+				if (request.method === "hello" && ++hellos === 2) abort.abort();
+			});
+			let request: PiLaunchRequest = f.request();
+			if (resumed) {
+				const file = join(f.dir, "resumed.jsonl");
+				writeFileSync(
+					file,
+					JSON.stringify({ type: "session", cwd: f.dir }) + "\n",
+				);
+				writeSubagentSessionPolicy(file, { owner: "public", deniedTools: [] });
+				request = {
+					kind: "resume",
+					name: "cancelled resume",
+					sessionFile: file,
+					parent: f.request().parent,
+				};
+			}
+			request.acquisitionSignal = abort.signal;
+			await assert.rejects(launchPiSubagent(request, f.operations), (error) => {
+				assert.equal(error, abort.signal.reason);
+				assert.equal(isAcquisitionUncertainError(error), false);
+				return true;
+			});
+			assert.equal(hellos, 2);
+			assert.equal(
+				f.calls.filter((c) => c.method === "terminal.run").length,
+				0,
+			);
+			assert.deepEqual([...f.terminals.keys()], ["t1"]);
+		}));
+
+for (const mode of ["valid", "disconnect"] as const)
+	test(`Core cancellation after submission preserves ${mode === "valid" ? "the acquired owner" : "execution uncertainty"}`, () =>
+		fixture(async (f) => {
+			const abort = new AbortController();
+			f.state.runMode = mode;
+			f.server.on("request", (request: Request) => {
+				if (request.method === "terminal.run") abort.abort();
+			});
+			const request = f.request();
+			request.acquisitionSignal = abort.signal;
+			const launch = launchPiSubagent(request, f.operations);
+			if (mode === "valid") {
+				const child = await launch;
+				assert.equal(child.surface, "t2");
+				await f.provider.nativeExecution.terminate(child.surface);
+				assert.equal(
+					(await f.provider.nativeExecution.inspect(child.surface)).kind,
+					"finished",
+				);
+			} else {
+				await assert.rejects(launch, (error) => {
+					assert.ok(isAcquisitionUncertainError(error));
+					assert.equal(error.uncertainty.kind, "execution-start");
+					return true;
+				});
+			}
+			assert.equal(abort.signal.aborted, true);
+			assert.equal(
+				f.calls.filter((c) => c.method === "terminal.run").length,
+				1,
+			);
+			assert.equal(f.calls.filter((c) => c.method === "terminal.rm").length, 0);
+		}));
+
 for (const mode of ["disconnect", "timeout", "malformed", "oversized"] as const)
 	test(`Core ${mode} after native submission is ownerless uncertainty, not retryable`, () =>
 		fixture(async (f) => {
@@ -1090,6 +1171,50 @@ test("Core unavailable exit evidence preserves sidecar and owner until aborted",
 		);
 		assert.equal(existsSync(`${file}.exit`), true);
 	}));
+
+for (const throws of [false, true])
+	test(`Core ${throws ? "throwing" : "unavailable"} native inspection stalls and live inspection recovers`, async (t) => {
+		t.mock.timers.enable({ apis: ["Date"], now: 1000 });
+		const abort = new AbortController();
+		let lifecycle = createLifecycle(Date.now());
+		let inspections = 0;
+		let terminalReads = 0;
+		const projections: LifecycleProjection["kind"][] = [];
+		const transitions: LifecycleTransition[] = [];
+		await assert.rejects(
+			waitForCompletion(abort.signal, {
+				intervalMs: 1,
+				inspectExecution: async () => {
+					if (++inspections === 3) return { kind: "live" };
+					if (throws) throw new Error("Core disconnected");
+					return { kind: "unavailable", error: "Core disconnected" };
+				},
+				onPaneInspection: (inspection, at) => {
+					assert.equal(at, Date.now());
+					lifecycle = observePaneInspection(lifecycle, inspection, at);
+					const projection = projectLifecycle(lifecycle, at);
+					transitions.push(
+						lifecycleTransition(projections.at(-1), projection.kind),
+					);
+					projections.push(projection.kind);
+				},
+				waitForNextCheck: async () => {
+					t.mock.timers.tick(60_001);
+					if (inspections === 3) abort.abort();
+					return "reconcile";
+				},
+				readTerminalTail: async () => {
+					terminalReads++;
+					return "__SUBAGENT_DONE_0__";
+				},
+			}),
+			/Aborted/,
+		);
+		assert.equal(inspections, 3);
+		assert.equal(terminalReads, 0);
+		assert.deepEqual(projections, ["starting", "stalled", "running"]);
+		assert.deepEqual(transitions, [null, "stalled", "recovered"]);
+	});
 
 for (const nativeKind of ["finished", "missing"] as const)
 	test(`Core ${nativeKind} supports delayed sidecar grace and crash without one`, () =>

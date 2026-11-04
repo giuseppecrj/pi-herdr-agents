@@ -122,7 +122,7 @@ The widget header counts **active** vs **open**:
 
 When `activeCount === 0` (every tracked row is open), the border uses an amber accent. Process elapsed time (`MM:SS` on the left) freezes when the process reaches finalizing/completed/failed. Interrupt does **not** freeze that process clock; the interrupted state shows its own duration on the right while the process remains open.
 
-A fixed internal watchdog marks a run as `stalled` when pane inspection fails or the pane disappears without a completion sidecar; valid long-running `active` or `waiting` states do not become `stalled` just because time passes. When a run enters `stalled` or recovers from it, the parent agent receives a steer message so it can react. All other status transitions stay in the widget only.
+A fixed internal watchdog marks a run as `stalled` when pane inspection fails or the pane disappears without a completion sidecar; valid long-running `active` or `waiting` states do not become `stalled` just because time passes. On Core, unavailable native-execution inspection feeds the same watchdog; a verified live execution clears the inspection failure. When a run enters `stalled` or recovers from it, the parent agent receives a steer message so it can react. All other status transitions stay in the widget only.
 
 **Interactive subagents stay silent.** Long-running user-driven subagents (for example, an interactive planning role or a bare `interactive: true` fork) do not wake the parent session on `stalled`/`recovered` transitions — the user is working directly in the subagent's pane, and a steer message there would just burn an orchestrator turn on a no-op "still waiting" ping. The widget still updates normally, and activity snapshots are still recorded/classified regardless of the `interactive` setting. By default, agents with `auto-exit: true` are treated as autonomous and get stall pings; agents without it are treated as interactive and stay quiet. Override per-agent with `interactive: true|false` in frontmatter, or per-spawn with `interactive: true|false` on the tool call.
 
@@ -374,7 +374,7 @@ subagent_cancel({ name: "Scout" });
 
 Target resolution matches `subagent_interrupt`: an exact running ID or an exact, unambiguous display name. Persistent specialists are rejected; use `subagent_stop`, whose graceful v1 semantics are unchanged.
 
-The cancel intent is recorded before anything is aborted or killed. From then on the run never advances its model shortlist or starts another execution attempt, even when terminating the pane makes the watcher observe a lost pane, and even when a fallback launch was already in flight. The result reports one status:
+The cancel intent is recorded before anything is aborted or killed. From then on the run never advances its model shortlist or starts another execution attempt, even when terminating the pane makes the watcher observe a lost pane, and even when a fallback launch was already in flight. On Core, cancellation before `terminal.run` submission prevents submission, including during its connection handshake. After submission, the host still receives the acquisition result so it can terminate an acquired owner; a lost reply remains uncertain, not a safe retry. The result reports one status:
 
 | Status | Meaning |
 | --- | --- |

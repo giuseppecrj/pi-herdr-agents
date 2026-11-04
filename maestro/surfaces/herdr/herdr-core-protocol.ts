@@ -140,7 +140,9 @@ export class HerdrCoreClient {
 		params: Record<string, unknown>,
 		parse: (value: unknown) => T,
 		mutation = false,
+		signal?: AbortSignal,
 	): Promise<T> {
+		signal?.throwIfAborted();
 		const deadline = Deadline.after(this.timeoutMs);
 		return new Promise((resolve, reject) => {
 			const socket = createConnection(this.socketPath);
@@ -250,6 +252,8 @@ export class HerdrCoreClient {
 							if (this.coreId && hello.core.id !== this.coreId)
 								throw new Error("Herdr Core identity changed; restart Pi");
 							this.coreId = hello.core.id;
+							// Cancellation vetoes submission, never discards an in-flight owner.
+							signal?.throwIfAborted();
 							stage = "request";
 							submitted = true;
 							socket.write(

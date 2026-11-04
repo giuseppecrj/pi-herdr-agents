@@ -246,6 +246,13 @@ async function detectCompletion(
 					errorSource: "host",
 				};
 			}
+			const observedAt = Date.now();
+			options.onPaneInspection?.(
+				execution.kind === "unavailable"
+					? execution
+					: { kind: "present", agentStatus: "unknown", observedAt },
+				observedAt,
+			);
 			// Neither live nor unavailable can be overridden by stale terminal
 			// sentinels, agent status=done, sidecars, or shared-list absence.
 			options.onTick?.(Math.floor((Date.now() - startedAt) / 1000));

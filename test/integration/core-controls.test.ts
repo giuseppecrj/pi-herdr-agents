@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	renameSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
@@ -125,6 +131,72 @@ test(
 			// Release provider-side gates even after a failed assertion, before lab teardown.
 			writeFileSync(interruptGate, "release\n");
 			writeFileSync(cancelGate, "release\n");
+		}
+	},
+);
+
+test(
+	"Core inspection outage notifies stalled and recovered without losing the child",
+	options,
+	async (t) => {
+		const f = await fixture(t);
+		const start = join(f.lab.root, "outage-start");
+		const gate = join(f.lab.root, "outage-gate");
+		const hiddenSocket = join(f.lab.root, "offline.sock");
+		try {
+			const task = `Run this bash command: echo 'START_CORE_OUTAGE' > '${start}'; while [ ! -f '${gate}' ]; do sleep 0.1; done; echo 'CORE_OUTAGE_DONE'\nThen report completion.`;
+			const parent = await f.parent(
+				`Call subagent once with name: "Outage-child".\nagent: "test-echo".\ntask: ${JSON.stringify(task)}.`,
+			);
+			await markerExists(start);
+			const child = await childOf(f.lab, parent.terminal);
+			const hasNotice = (rows: ReturnType<typeof coreSession>, text: string) =>
+				rows.some(
+					(row) =>
+						row.type === "custom_message" &&
+						row.customType === "subagent_status" &&
+						String(row.content).includes(text),
+				);
+			// Disconnect only this private endpoint; the same server and child stay alive.
+			renameSync(f.lab.socket, hiddenSocket);
+			const stalled = await waitForCoreSession(
+				parent,
+				(rows) => hasNotice(rows, "stalled"),
+				80_000,
+			);
+			assert.equal(coreResults(stalled).length, 0);
+			renameSync(hiddenSocket, f.lab.socket);
+			const recovered = await waitForCoreSession(
+				parent,
+				(rows) => hasNotice(rows, "recovered"),
+				15_000,
+			);
+			assert.equal(coreResults(recovered).length, 0);
+			assert.equal(
+				(await f.lab.call("terminal.get", { terminal: child })).state,
+				"live",
+			);
+			writeFileSync(gate, "finish after recovery\n");
+			const done = await waitForCoreSession(
+				parent,
+				(rows) => coreResults(rows).length === 1,
+			);
+			const result = coreResults(done)[0];
+			assert.ok(isRecord(result.details));
+			assert.equal(result.details.exitCode, 0);
+			assert.equal(result.details.errorMessage, undefined);
+			assert.ok(isString(result.details.sessionFile));
+			const [bash] = coreToolResults(
+				coreSession(result.details.sessionFile),
+				"bash",
+			);
+			assert.equal(bash.isError, false);
+			assert.match(JSON.stringify(bash.content), /CORE_OUTAGE_DONE/);
+			await removed(f.lab, parent.terminal);
+			assert.equal(coreResults(coreSession(parent.session)).length, 1);
+		} finally {
+			if (existsSync(hiddenSocket)) renameSync(hiddenSocket, f.lab.socket);
+			writeFileSync(gate, "release\n");
 		}
 	},
 );
