@@ -8041,6 +8041,140 @@ describe("subagent-done.ts", () => {
 		}
 	});
 
+	it("resumes activity recording when a persistent specialist receives its next task", async () => {
+		const dir = createTestDir();
+		const envKeys = [
+			"PI_SUBAGENT_PERSISTENT",
+			"PI_SUBAGENT_SESSION",
+			"PI_SUBAGENT_TASK_ID",
+			"PI_SUBAGENT_GENERATION_ID",
+			"PI_SUBAGENT_AUTO_EXIT",
+			"PI_SUBAGENT_ID",
+			"PI_SUBAGENT_ACTIVITY_FILE",
+		];
+		const previous = Object.fromEntries(
+			envKeys.map((key) => [key, process.env[key]]),
+		);
+		const sessionFile = join(dir, "persistent-activity.jsonl");
+		const activityFile = getSubagentActivityFile(dir, "persistent-child");
+		process.env.PI_SUBAGENT_PERSISTENT = "1";
+		process.env.PI_SUBAGENT_SESSION = sessionFile;
+		process.env.PI_SUBAGENT_TASK_ID = "task-1";
+		process.env.PI_SUBAGENT_GENERATION_ID = "generation";
+		process.env.PI_SUBAGENT_ID = "persistent-child";
+		process.env.PI_SUBAGENT_ACTIVITY_FILE = activityFile;
+		delete process.env.PI_SUBAGENT_AUTO_EXIT;
+		let shutdown: Function | undefined;
+		const read = () => {
+			const result = readSubagentActivityFile(activityFile, "persistent-child");
+			assert.ok(result.ok);
+			return result.activity;
+		};
+		try {
+			const { api, eventHandlers, registeredTools, sentUserMessages } =
+				createMockExtensionApi();
+			subagentDoneExtension(api);
+			shutdown = eventHandlers.get("session_shutdown")?.[0];
+			const fire = (name: string, event: any = {}) =>
+				eventHandlers.get(name)?.[0](event, {
+					ui: { setWidget() {} },
+					shutdown() {},
+				});
+			const done = registeredTools.find(
+				(tool) => tool.name === "subagent_done",
+			);
+			assert.ok(done);
+
+			fire("session_start");
+			fire("agent_start");
+			fire("tool_execution_start", { toolCallId: "t1", toolName: "bash" });
+			assert.equal(read().phase, "active");
+
+			// First task ends with subagent_done; the tool's own trailing events
+			// and the closing agent_end must not undo the final snapshot.
+			await done.execute("call", {}, undefined, undefined, {});
+			fire("tool_execution_end", {
+				toolCallId: "done-1",
+				toolName: "subagent_done",
+			});
+			fire("agent_end", { messages: [] });
+			assert.equal(read().phase, "done");
+
+			writePersistentTaskInbox(sessionFile, 1, {
+				task: "task-2",
+				message: "next",
+			});
+			await new Promise((resolve) => setTimeout(resolve, 1_100));
+			assert.deepEqual(sentUserMessages, ["next"]);
+			assert.notEqual(read().phase, "done");
+			assert.equal(read().phase, "active");
+
+			fire("input");
+			fire("before_agent_start");
+			fire("agent_start");
+			fire("tool_execution_start", { toolCallId: "t2", toolName: "read" });
+			const working = read();
+			assert.equal(working.phase, "active");
+			assert.equal(working.activeScope, "tool");
+			assert.equal(working.toolName, "read");
+
+			await done.execute("call", {}, undefined, undefined, {});
+			fire("agent_end", { messages: [] });
+			assert.equal(read().phase, "done");
+		} finally {
+			shutdown?.({ reason: "reload" });
+			for (const key of envKeys) restoreEnvVar(key, previous[key]);
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps a non-persistent child's done snapshot final", async () => {
+		const dir = createTestDir();
+		const envKeys = [
+			"PI_SUBAGENT_PERSISTENT",
+			"PI_SUBAGENT_SESSION",
+			"PI_SUBAGENT_AUTO_EXIT",
+			"PI_SUBAGENT_ID",
+			"PI_SUBAGENT_ACTIVITY_FILE",
+		];
+		const previous = Object.fromEntries(
+			envKeys.map((key) => [key, process.env[key]]),
+		);
+		const activityFile = getSubagentActivityFile(dir, "plain-child");
+		delete process.env.PI_SUBAGENT_PERSISTENT;
+		delete process.env.PI_SUBAGENT_AUTO_EXIT;
+		process.env.PI_SUBAGENT_SESSION = join(dir, "plain.jsonl");
+		process.env.PI_SUBAGENT_ID = "plain-child";
+		process.env.PI_SUBAGENT_ACTIVITY_FILE = activityFile;
+		try {
+			const { api, eventHandlers, registeredTools } = createMockExtensionApi();
+			subagentDoneExtension(api);
+			const fire = (name: string, event: any = {}) =>
+				eventHandlers.get(name)?.[0](event, {
+					ui: { setWidget() {} },
+					shutdown() {},
+				});
+			const done = registeredTools.find(
+				(tool) => tool.name === "subagent_done",
+			);
+			assert.ok(done);
+			fire("session_start");
+			fire("agent_start");
+			await done.execute("call", {}, undefined, undefined, {
+				shutdown() {},
+			});
+			fire("agent_start");
+			fire("tool_execution_start", { toolCallId: "t1", toolName: "bash" });
+			const result = readSubagentActivityFile(activityFile, "plain-child");
+			assert.ok(result.ok);
+			assert.equal(result.activity.phase, "done");
+			assert.equal(result.activity.latestEvent, "subagent_done");
+		} finally {
+			for (const key of envKeys) restoreEnvVar(key, previous[key]);
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("keeps polling paused after reload while a dispatched follow-up remains unsettled", async () => {
 		const dir = createTestDir();
 		const previousPersistent = process.env.PI_SUBAGENT_PERSISTENT;
@@ -12279,6 +12413,66 @@ describe("subagent activity snapshots", () => {
 			assert.ok(read.ok);
 			assert.equal(read.activity.toolActive, false);
 			assert.equal(read.activity.activeScope, "turn");
+		});
+	});
+
+	it("lets a persistent recorder leave done only through taskStart", () => {
+		withTempDir((dir) => {
+			let currentNow = 1_000;
+			const activityFile = getSubagentActivityFile(dir, "child-p");
+			const recorder = createSubagentActivityRecorder({
+				runningChildId: "child-p",
+				activityFile,
+				persistent: true,
+				now: () => currentNow,
+			});
+			const phase = () => {
+				const read = readSubagentActivityFile(activityFile, "child-p");
+				assert.ok(read.ok);
+				return read.activity;
+			};
+
+			recorder.sessionStart();
+			recorder.agentStart();
+			recorder.subagentDone();
+			recorder.agentEndWaiting();
+			recorder.toolExecutionStart("t", "bash");
+			assert.equal(phase().phase, "done");
+			assert.equal(phase().latestEvent, "subagent_done");
+
+			currentNow = 2_000;
+			recorder.taskStart();
+			assert.equal(phase().phase, "active");
+			assert.equal(phase().activeScope, "agent");
+			assert.equal(phase().agentActive, true);
+
+			recorder.toolExecutionStart("t", "bash");
+			assert.equal(phase().activeScope, "tool");
+			recorder.callerPing();
+			assert.equal(phase().phase, "done");
+			assert.equal(phase().latestEvent, "caller_ping");
+
+			recorder.sessionShutdown("quit");
+			assert.equal(phase().latestEvent, "session_shutdown");
+			assert.equal(phase().phase, "done");
+		});
+	});
+
+	it("ignores taskStart on a non-persistent recorder after done", () => {
+		withTempDir((dir) => {
+			const activityFile = getSubagentActivityFile(dir, "child-n");
+			const recorder = createSubagentActivityRecorder({
+				runningChildId: "child-n",
+				activityFile,
+				now: () => 1_000,
+			});
+			recorder.sessionStart();
+			recorder.subagentDone();
+			recorder.taskStart();
+			recorder.agentStart();
+			const read = readSubagentActivityFile(activityFile, "child-n");
+			assert.ok(read.ok);
+			assert.equal(read.activity.phase, "done");
 		});
 	});
 
