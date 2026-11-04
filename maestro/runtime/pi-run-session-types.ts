@@ -52,6 +52,11 @@ export interface PiLaunchSnapshot {
 	parentRuntime?: ParentRuntime;
 	modelRegistry: ModelRegistryAdapter;
 	paneConfig: PaneConfig;
+	/**
+	 * Where a Windows launch reads Pi's `shellPath` from: the launching
+	 * session's cwd and project-trust decision. Absent means untrusted.
+	 */
+	scriptShell?: { cwd: string; projectTrusted: boolean };
 }
 
 // pi-herdr-agents extension
