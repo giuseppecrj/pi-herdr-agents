@@ -4,6 +4,9 @@
 
 > **Compatibility.** Releases of `pi-herdr-agents` newer than `3.3.1` mark children with no setting. Releases `3.2.0` through `3.3.1` mark them only with `"sidebar": { "enabled": true }` in their `config.json`. On macOS, sidebar support requires a release newer than `3.2.1`.
 
+**Legacy Herdr only.** This Node plugin uses the legacy agent-view and pane-token
+APIs. It is not a Core/Desktop GPUI mod; Desktop visual parity is not implemented.
+
 An optional [Herdr](https://herdr.dev) plugin for [Pi Herdr Agents](../../README.md). It keeps your main agents easy to find in Herdr's Agents view while [Pi](https://github.com/earendil-works/pi) runs delegated children.
 
 The plugin adds two actions and two hooks. The extension in the main package marks each delegated child's pane, and Focus hides the marked rows. Focus is on by default.

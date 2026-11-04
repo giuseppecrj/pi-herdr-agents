@@ -8,7 +8,7 @@
 
 Asynchronous subagents for [Pi](https://github.com/earendil-works/pi), running exclusively in [Herdr](https://herdr.dev).
 
-Delegate investigation, implementation, and review without blocking the parent session. Each child runs as a real Pi process in its own Herdr pane. Its result comes back to the parent automatically when it finishes.
+Delegate investigation, implementation, and review without blocking the parent session. Each child runs as a real Pi process in a legacy Herdr pane or a local Herdr Core terminal. Its result comes back to the parent automatically when it finishes.
 
 > **Agents:** load the operating guide with `/skill:pi-herdr-agents`. It covers launching, supervising, interrupting, cancelling, and resuming children, worktrees, persistent specialists, model routing, and configuration. The source is [`skills/pi-herdr-agents/SKILL.md`](skills/pi-herdr-agents/SKILL.md). Contributors: read [`AGENTS.md`](AGENTS.md).
 
@@ -25,17 +25,24 @@ Delegate investigation, implementation, and review without blocking the parent s
 - **Non-blocking delegation.** `subagent` acknowledges resource acquisition without waiting for the child's task. Launch subprocesses run asynchronously so parent supervision can continue.
 - **Parallel execution.** Run independent scouts, workers, and reviewers at the same time.
 - **Live supervision.** Pi's subagent widget tracks process and turn state. You can interrupt one child turn without ending its session.
-- **Managed worktrees.** Writing agents can run in retained Herdr workspaces with explicit Git ownership and recovery details.
-- **Conversation handoff.** `/worktree` continues the active Pi conversation in a new worktree and keeps the parent session.
+- **Managed worktrees (legacy Herdr).** Writing agents can run in retained Herdr workspaces with explicit Git ownership and recovery details.
+- **Conversation handoff (legacy Herdr).** `/worktree` continues the active Pi conversation in a new worktree and keeps the parent session.
 - **Pack-neutral roles.** Use project or global definitions and installable role packs. This package ships no default roles or workflows.
 - **Persistent specialists.** Keep one policy-bound Pi session for sequential, turn-based tasks.
-- **Optional sidebar focus.** The companion [Pi Herdr Agents Sidebar](plugins/sidebar/README.md) Herdr plugin hides marked delegated children from Herdr's Agents view while Focus is on. Markers are display only and follow the pane. See [Sidebar plugin](#sidebar-plugin).
+- **Optional sidebar focus (legacy Herdr).** The companion [Pi Herdr Agents Sidebar](plugins/sidebar/README.md) Herdr plugin hides marked delegated children from Herdr's Agents view while Focus is on. Markers are display only and follow the pane. See [Sidebar plugin](#sidebar-plugin).
 
 ## Requirements
 
 - [Pi](https://github.com/earendil-works/pi) with package support
-- [Herdr](https://herdr.dev) and its CLI
-- `HERDR_ENV=1`, which means you start Pi from inside Herdr
+- Either legacy [Herdr](https://herdr.dev) and its CLI (`HERDR_ENV=1`), or a
+  local Herdr Core terminal with its native `HC_TERMINAL_ID` and socket context.
+
+The default `herdr.backend: "auto"` selects Core only from native Core context;
+otherwise legacy behavior is unchanged. Core 0.1.16 has been exercised with
+Pi 1.1.0 and 1.4.0 against a local deterministic provider. **Core support currently covers ordinary child
+execution, not managed worktrees or Desktop Agents tabs/sidebar parity.**
+Desktop is a Core client, not a third backend. See [backend selection and
+limits](docs/configuration.md#herdr-backend).
 
 Other terminal multiplexers are not supported. Session startup skips worktree inventory to avoid blocking Pi initialization. Use `/worktree list` or `worktree_list` to inspect managed worktrees. Outside Herdr, explicit inventory tools report unavailable inspection as unknown. Worktrees isolate Git checkouts, not processes or permissions. Child agents and installed Pi packages run with your user account's access.
 
@@ -61,7 +68,10 @@ herdr
 pi
 ```
 
-Restart or `/reload` Pi after installation. Review package source before you install any Pi package.
+For Core/Desktop, run `pi` in an existing local Core terminal instead. Restart
+Pi when switching backends or upgrading from a runtime without backend binding;
+ordinary reloads retain the selected backend and live ownership. Review package
+source before you install any Pi package.
 
 ### Optional methodology pack
 
@@ -106,7 +116,7 @@ The parent is the coordinator. Give each child one bounded outcome with its goal
 
 ![Pi Herdr Agents lifecycle: spawn a child, run it in Herdr, supervise live state, and deliver one bounded result to the parent.](https://raw.githubusercontent.com/giuseppecrj/pi-herdr-agents/main/docs/assets/async-subagent-lifecycle.png)
 
-A `subagent` call selects the target checkout, reuses its Herdr workspace, and gives the child a pane in an extension-owned `Agents` tab. Four panes fit in each tab by default, and overflow opens another tab in the same workspace. The call provisions its resources, launches a child Pi session, and returns `started`. If dispatch is uncertain but an owner was acquired, it returns `uncertain` and keeps that owner supervised instead of trying another model. Do not blindly relaunch an uncertain request. The parent watches Herdr process state and child activity and shows the result in a live widget:
+In legacy Herdr, a `subagent` call selects the target checkout, reuses its Herdr workspace, and gives the child a pane in an extension-owned `Agents` tab. Four panes fit in each tab by default, and overflow opens another tab in the same workspace. The call provisions its resources, launches a child Pi session, and returns `started`. If dispatch is uncertain but an owner was acquired, it returns `uncertain` and keeps that owner supervised instead of trying another model. Do not blindly relaunch an uncertain request. The parent watches Herdr process state and child activity and shows the result in a live widget:
 
 ```text
 ╭─ Subagents ──────────────────── 1 active · 1 open ─╮
@@ -117,7 +127,14 @@ A `subagent` call selects the target checkout, reuses its Herdr workspace, and g
 
 **Results arrive automatically.** When a child finishes, the parent receives one bounded `subagent_result` message and starts a new turn with that result in context. Do not poll, tail session files, or wait in a shell loop. Results longer than 16,000 characters are shortened in the parent context, and the full result stays in the child session. Active watchers survive parent `/reload`, `/new`, `/resume`, and `/fork`. Quitting Pi stops parent-side delivery.
 
-Disposable ordinary panes close after their result is delivered, and Herdr removes a tab when its last pane closes. Persistent specialists keep their pane between tasks. Managed worktree roots return to retained interactive shells. Subagent launches do not steal keyboard focus.
+Disposable ordinary legacy panes close after their result is delivered, and Herdr removes a tab when its last pane closes. Persistent specialists keep their pane between tasks. Managed worktree roots return to retained interactive shells. Subagent launches do not steal keyboard focus.
+
+Core starts a background program atomically, without a shell-readiness step or
+Desktop placement. Pi sidecars still supply results; native execution state
+independently proves exit. Finished terminal records remain until delivery or
+suppression permits removal. Core's own child-completion notes are disabled to
+avoid duplicate results. Uncertain starts never trigger automatic retry or
+model fallback; an observed terminal ID alone does not confer ownership.
 
 Status labels, the stall watchdog, and no-progress advisories are described in [In-progress status updates](docs/tools.md#in-progress-status-updates) and [Supervision transport](docs/configuration.md#supervision-transport).
 
@@ -127,12 +144,12 @@ The parent session gets these tools:
 
 | Tool | Use |
 | --- | --- |
-| `subagent` | Launch a child in a Herdr pane. Acknowledges acquisition without waiting for the task. |
+| `subagent` | Launch a child in a Herdr pane or Core terminal. Acknowledges acquisition without waiting for the task. |
 | `subagent_interrupt` | Stop the current turn of a running child. The session stays open. |
 | `subagent_cancel` | End an ordinary run. No fallback model is tried, and one cancelled result is delivered. |
 | `subagent_send` | Send the next task to an idle persistent specialist. |
 | `subagent_stop` | Stop a persistent specialist after its active task settles. |
-| `subagent_resume` | Resume an earlier child session in a new ordinary pane. |
+| `subagent_resume` | Resume an earlier child session in a new ordinary pane or Core terminal. |
 | `subagents_list` | List agent definitions, live specialists, and the supervision mode. |
 | `worktree_list` | List managed worktrees and what blocks their cleanup. |
 | `worktree_remove` | Remove one managed worktree on explicit request. |
@@ -248,6 +265,9 @@ A `read, bash` allowlist is not a read-only boundary, because shell commands can
 
 ## Sidebar plugin
 
+This plugin is for legacy Herdr, not Core/Desktop. Desktop visual parity is not
+implemented; the native child tree is not a replacement for this contract.
+
 The optional [Pi Herdr Agents Sidebar](plugins/sidebar/README.md) Herdr plugin adds two actions and turns Focus on by default. Focus hides delegated Pi children from Herdr's Agents view. All removes this plugin's filter and stays off until you run Focus again. It needs:
 
 - A `pi-herdr-agents` release newer than `3.3.1`, which marks children with no setting. Releases `3.2.0` through `3.3.1` also need `"sidebar": { "enabled": true }` in `config.json`, and macOS needs a release newer than `3.2.1`.
@@ -280,12 +300,13 @@ The durable configuration file is `$PI_CODING_AGENT_DIR/herdr-agents/config.json
 
 | Key | Default | Controls |
 | --- | --- | --- |
+| `herdr.backend` | `"auto"` | Select native-context Core or legacy Herdr; `"core"` and `"legacy"` are explicit overrides. |
 | `status.enabled` | `true` | The live subagent widget. This section is required. |
 | `models.default`, `models.agents`, `models.tasks` | none | Model defaults and task-category candidates. |
 | `persistent.maxAgents` | `3` | How many persistent specialists can stay open. |
 | `spawning.maxDepth` | `3` | Deepest child any launch may create (parent is depth `0`); deeper launches are refused. |
 | `supervision.forcePolling`, `supervision.hangWarningMinutes` | `false`, `15` | Supervision transport and no-progress advisories. |
-| `panes.mode`, `panes.direction`, `panes.maxPerTab` | `"grouped"`, `"right"`, `4` | Where child panes open. |
+| `panes.mode`, `panes.direction`, `panes.maxPerTab` | `"grouped"`, `"right"`, `4` | Where legacy Herdr child panes open. |
 | `guidelines.launchRoster` | `true` | Whether the parent is asked to print a markdown roster table after launching a group. |
 | `outcomeLedger` | `true` | Whether each model attempt appends one line (no task text, output, or environment) to `herdr-agents/outcomes.jsonl`. |
 
@@ -293,10 +314,10 @@ See [Configuration](docs/configuration.md) for every key, the task-model writer,
 
 ## Safety and uninstall
 
-- Child agents are real Pi processes running with your user account's permissions, inside Herdr panes. Worktrees isolate Git checkouts, not processes or permissions.
+- Child agents are real Pi processes running with your user account's permissions, inside Herdr panes or Core terminals. Worktrees isolate Git checkouts, not processes or permissions.
 - The extension creates Herdr panes, tabs and managed worktrees only when a launch asks for them. It never pushes, merges, opens pull requests, deletes branches or removes worktrees on its own; cleanup is an explicit parent action ([worktree cleanup](docs/tools.md#explicit-worktree-cleanup)).
 - What it writes: `$PI_CODING_AGENT_DIR/herdr-agents/config.json` (only through `/subagents-init` or the writer tool, never on startup); per-launch artifacts under the parent session's `artifacts/<session-id>/` directory beside Pi's session store, which hold the child's full task text and any `systemPrompt` as Markdown files, activity snapshots and worktree manifests; the child's own Pi session file; and one [outcome-ledger](docs/configuration.md#outcome-ledger) line per model attempt in `$PI_CODING_AGENT_DIR/herdr-agents/outcomes.jsonl` (turn it off with `outcomeLedger: false`). An accept check is a shell command the parent itself also runs, with your permissions, in the child's checkout. A managed worktree that carries its own `.pi/agent` directory receives that child's session inside the checkout. Treat task text as potentially sensitive when you share or inspect those files.
-- Managed worktree children record their PID, process start time, boot ID, and PID namespace in `<session>.process.json` beside their session. Inside Herdr, the parent reads each child pane's agent session from Herdr and reports one display-only [sidebar marker](docs/configuration.md#sidebar-markers), the pane token `piha_delegated_v1`, on that pane through the Herdr socket. It writes no other pane metadata.
+- Managed worktree children record their PID, process start time, boot ID, and PID namespace in `<session>.process.json` beside their session. Inside legacy Herdr, the parent reads each child pane's agent session from Herdr and reports one display-only [sidebar marker](docs/configuration.md#sidebar-markers), the pane token `piha_delegated_v1`, on that pane through the Herdr socket. It writes no other pane metadata.
 - To uninstall: first list and remove any retained worktrees while the extension is still loaded (`/worktree list`, then `/worktree remove <target>`), because those commands leave with the package. If you installed the optional sidebar plugin, remove it with `herdr plugin uninstall pi-herdr-agents.sidebar` (or `herdr plugin unlink` for a linked copy). Then run `pi remove npm:pi-herdr-agents`, and delete `$PI_CODING_AGENT_DIR/herdr-agents/` and the `artifacts/` directories above if you no longer want the configuration and launch records.
 
 ## Troubleshooting
@@ -304,6 +325,7 @@ See [Configuration](docs/configuration.md) for every key, the task-model writer,
 - **A child finished, but the parent did not react.** Check that a `subagent_result` entry reached the parent session. See [Troubleshooting completion delivery](docs/troubleshooting.md#troubleshooting-completion-delivery).
 - **A child shows `stalled` or a no-progress advisory.** Advisories never stop a child. Interrupt, cancel, or stop it yourself. See [Supervision transport](docs/configuration.md#supervision-transport).
 - **A model fails at launch or during the run.** The completion keeps each raw provider reason. See [Model resolution and fallback](docs/configuration.md#model-resolution-and-fallback).
+- **Core children do not appear in Agents tabs, or worktrees are refused.** These capabilities are not implemented on Core; see [Core limitations](docs/configuration.md#herdr-backend).
 - **Worktree removal is refused.** The report names each blocker. See [cleanup and recovery](docs/worktree-subagents.md#cleanup).
 
 More checks are in [Troubleshooting](docs/troubleshooting.md).
@@ -334,7 +356,7 @@ npm run lint
 npm pack --dry-run
 ```
 
-Run the deterministic integration suite from inside Herdr with `npm run test:integration`. See [Development](docs/development.md) for the code map, tool versions, and the optional live-provider test, and [RELEASING.md](RELEASING.md) for releases.
+Run the legacy deterministic integration suite from inside isolated Herdr with `npm run test:integration`. The independent `npm run test:integration:core` creates private Core servers and drives real parent Pi sessions without provider credentials. See [Development](docs/development.md) for the code map, tool versions, and the optional live-provider test, and [RELEASING.md](RELEASING.md) for releases.
 
 ## Acknowledgements
 
