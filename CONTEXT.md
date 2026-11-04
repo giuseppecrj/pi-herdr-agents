@@ -258,15 +258,19 @@ Fresh evidence of cwd containment, registered checkout identity, a named branch,
 no detected process holder, known live child, or persistent lease, and clean Git
 state. Only Herdr-confirmed idle retained shells are exempt from process checks,
 never runtimes at the same PID. Ignored files and individual process-visibility
-gaps are disclosed, not blockers. Other unknown evidence blocks removal.
+gaps, including an undetermined cwd, are disclosed, not blockers. Other unknown
+evidence blocks removal.
 _Avoid_: Guessed idle, presumed clean
 
 **Process-inspection warning**:
 Non-blocking disclosure of incomplete same-user process visibility, separate
 from cleanup blockers and requiring no override flag. Scanning continues after
-unreadable details; detected holders still block. Other-user processes are not
-inspected, and a protected process could hold the checkout undetected. Failed
-global enumeration and unsupported platforms remain blockers.
+unreadable details, including a cwd that cannot be resolved without opening.
+Detected holders still block. Other-user processes are not inspected, and a
+protected process could hold the checkout undetected. A Linux
+`/proc/<pid>/cwd` error other than ENOENT or ESRCH is that warning. It is not
+proof the process is idle. Failed global enumeration and unsupported platforms
+remain blockers.
 _Avoid_: Proven unrelated, machine-wide inactivity, bypass permission
 
 **Explicit worktree removal**:
