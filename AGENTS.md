@@ -136,8 +136,8 @@ The separate `.github/workflows/linux-integration.yml` runs the complete
 credential-free deterministic suite on Ubuntu with checksum-pinned Herdr binaries.
 `scripts/run-linux-integration.ts` reuses the private verification lab and verifies
 one real-parent delegation first. Check its result separately from the static/unit
-**CI** workflow; neither publishes. Evidence is retained for seven days.
-Desktop GUI coverage is deferred. See `docs/development.md`.
+**CI** workflow; neither publishes. Evidence is retained for seven days, and the
+Desktop GUI fixture remains skipped. See `docs/development.md`.
 
 Core lifecycle changes additionally require `npm run test:integration:core`. It
 starts independent private servers and real parent Pi sessions via
@@ -145,6 +145,13 @@ starts independent private servers and real parent Pi sessions via
 operator's Core/Desktop. Missing binaries cause explicit skips, never passing
 evidence. The older verification lab uses Linux `/proc`; report that gate as
 unavailable on macOS rather than treating the Core suite as a substitute.
+
+The optional macOS Desktop fixture (`test/integration/herdr-desktop-lab.ts`) uses
+copied app/Core binaries and private state, but **does not isolate the physical
+display**. It may take keyboard focus. Obtain explicit operator consent before
+`PI_TEST_DESKTOP_WINDOW=1 npm run test:integration:desktop`; otherwise it skips.
+Its screenshot/status smoke is not Agents/sidebar parity acceptance. Fixture
+unit tests use fake executables and open no GUI. See `docs/development.md`.
 
 Use `PI_TEST_MODEL="openai-codex/gpt-5.6-luna" PI_TEST_TIMEOUT=180000 npm run test:integration:live` only for optional provider-compatibility smoke coverage. Do not use skipped Herdr tests as passing evidence.
 

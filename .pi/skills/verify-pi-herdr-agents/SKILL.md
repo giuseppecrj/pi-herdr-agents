@@ -67,6 +67,25 @@ This verifies Core execution only, not legacy pane/worktree behavior or Desktop
 pixel parity. Do not run the legacy doctor on macOS and interpret its `/proc`
 failure as a passed gate; record the unavailable legacy checks separately.
 
+## Optional macOS Desktop fixture
+
+`test/integration/herdr-desktop-lab.ts` copies the signed app bundle and Core
+executable into a private lab, uses private HOME/XDG/app/install paths, and serves
+pinned update metadata on loopback. It controls only the exact private app socket
+and confirms the owned process exits before Core shutdown/removal.
+
+This is **state isolation, not display isolation**. The app can take keyboard
+focus. Ask the operator before running
+`PI_TEST_DESKTOP_WINDOW=1 npm run test:integration:desktop`; without that opt-in
+the test skips. `HERDR_DESKTOP_BUNDLE`, `HERDR_CORE_BIN` and `PI_BIN` select source
+binaries. No daily configuration, layout or service is a test target. Unknown
+shutdown retains resources; never clean them by process name.
+
+Evidence includes `ls`, `status` and a PNG under `/tmp/piha-desktop-evidence-*`.
+The fixture smoke is not visual parity acceptance; that additionally needs real
+legacy reference images and interaction/focus tests. Unit tests use fake
+version-only executables and cannot establish that the real app renders or exits.
+
 ## Doctor
 
 Run this first, and again whenever anything looks off. It is read-only.
@@ -160,7 +179,7 @@ Proof standards:
 - Tell a regression from a pre-existing failure by running the same test on `main`: `git worktree add --detach /tmp/x main`, symlink `node_modules`, run there, then `git worktree remove /tmp/x`.
 - For sidebar or suspended-session behavior, check the Herdr version first. `HERDR_BIN=<path>` runs the lab, and `test/integration/sidebar.test.ts`, against another binary.
 - uutils coreutils hosts (`readlink -f /bin/sleep` gives `/usr/lib/cargo/bin/coreutils/...`) dispatch on argv[0]. A binary symlinked under another name fails there, so test stand-ins use `process.execPath`, never a renamed `sleep` or `true`.
-- The **CI** workflow covers static/unit gates; **Linux integration** separately runs the complete deterministic suite with pinned Herdr binaries and a private real-parent lab. Compare the exact commit and workflow, not just a green badge. Host differences (coreutils, Herdr/Pi version) still matter. Its `linux-integration-evidence` artifact retains TAP and lab evidence for seven days; Desktop GUI coverage is deferred ([RELEASING.md](../../../RELEASING.md)).
+- The **CI** workflow covers static/unit gates; **Linux integration** separately runs the complete deterministic suite with pinned Herdr binaries and a private real-parent lab. Compare the exact commit and workflow, not just a green badge. Host differences (coreutils, Herdr/Pi version) still matter. Its `linux-integration-evidence` artifact retains TAP and lab evidence for seven days; Desktop GUI stays skipped ([RELEASING.md](../../../RELEASING.md)).
 
 ## Cleanup
 

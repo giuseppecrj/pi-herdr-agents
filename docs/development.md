@@ -109,7 +109,7 @@ pushes to `main` or manual dispatch. It pins legacy Herdr 0.9.5 and Core 0.1.17
 with SHA-256 checks, uses the lockfile's Pi, and runs on Ubuntu 24.04 without
 provider credentials or a GUI. `scripts/run-linux-integration.ts` reuses the
 private verification lab for a real-parent delegation, then runs the complete
-deterministic integration suite sequentially. Desktop GUI coverage is deferred.
+deterministic integration suite sequentially. The Desktop fixture stays skipped.
 Always-run cleanup verifies the owned legacy lab stopped; TAP, parent evidence,
 and Core sessions are uploaded as `linux-integration-evidence` for seven days.
 Both workflows have read-only repository permissions and never publish. The
@@ -159,6 +159,32 @@ and save sessions, provider requests and native inventory/screens under the
 reported `/tmp/piha-core-evidence-*` directories before removing lab resources.
 Unknown startup/shutdown ownership retains the lab and fails the test. No daily
 Core/Desktop layout, configuration or authentication is used.
+
+### Optional macOS Desktop fixture
+
+`test/integration/herdr-desktop-lab.ts` copies the app bundle and Core executable
+into a private Core lab. It sets private HOME/XDG/app/install paths, disables
+telemetry and clipboard writes, and serves pinned update metadata on loopback.
+It never modifies the daily bundle, selects a daily layout, or sends a command to
+the daily app socket. Shutdown uses the owned app process handle and exact
+private control socket, then the identity-checked private Core shutdown; an
+unconfirmed shutdown retains the lab.
+
+**The physical display is not isolated.** Starting the copied app can activate a
+window and take keyboard focus. Obtain explicit operator consent before running:
+
+```bash
+PI_TEST_DESKTOP_WINDOW=1 npm run test:integration:desktop
+```
+
+Use `HERDR_DESKTOP_BUNDLE` for another installed bundle and absolute
+`HERDR_CORE_BIN` / `PI_BIN` as needed. Without the opt-in, the test skips without
+opening a window. `test/maestro/desktop-lab.test.ts` instead uses fake
+version-only executables and private fake sockets; it opens no app or Core.
+The optional smoke test captures `ls`, `status` and the app's own PNG under
+`/tmp/piha-desktop-evidence-*`. This is fixture verification, **not** Agents/sidebar
+implementation or visual parity acceptance. No Desktop GUI run is implied by a
+passing unit test.
 
 The older `scripts/lab.ts` verification driver and some legacy fixtures require
 Linux `/proc`; a Core pass on macOS does not substitute for those legacy gates.
