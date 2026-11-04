@@ -7,7 +7,7 @@ description: Verify pi-herdr-agents changes end to end. Drives a real parent Pi 
 
 The product is a Pi extension. A parent Pi inside Herdr calls `subagent`; the child runs in a Herdr pane; its result returns as a steer message wrapped in a `<subagent_report>` envelope ([docs/delegation-outcome-contract.md](../../../docs/delegation-outcome-contract.md)).
 
-Primary surface: a real parent Pi in an isolated Herdr lab, driven through the real tool path (`scripts/lab.ts`). Secondary: the unit gates and the tool-schema contract.
+Primary surface: a real parent Pi in an isolated Herdr lab, driven through the real tool path. Legacy uses `scripts/lab.ts` (Linux `/proc` required); Core uses the independent integration fixture below. Secondary: the unit gates and the tool-schema contract.
 
 Paths below are relative to the repository root. `L` means:
 
@@ -46,6 +46,45 @@ find pi-extension/subagents -type f -size +32k
 This must print nothing.
 
 Mutation proof: for every new guard, break it, watch the gate that should catch it fail, then restore it and watch the gate pass. Report both runs.
+
+## Isolated Core verification
+
+Run `npm run test:integration:core` from the repository root. It uses
+`test/integration/herdr-core-lab.ts`, `core-parent.ts`, `herdr-core.test.ts` and
+`core-*.test.ts` to start private Core servers and real parent Pi sessions with
+the checkout extension and local deterministic provider. It runs on Linux or
+macOS, without `HERDR_ENV`, production provider credentials or a Desktop window.
+Set absolute `HERDR_CORE_BIN` / `PI_BIN` if the binaries are not on PATH.
+
+Inspect the reported `/tmp/piha-core-evidence-*` directories: parent result
+entries, child sessions, provider requests, terminal inventory and screens.
+Native record removal follows result delivery; interrupt retains the execution,
+and persistent task results retain it until stop. The fixture verifies its
+server identity before stopping and never signals a PID. Unknown ownership
+retains resources and fails. A missing binary is a skip, not passing evidence.
+
+This verifies Core execution only, not legacy pane/worktree behavior or Desktop
+pixel parity. Do not run the legacy doctor on macOS and interpret its `/proc`
+failure as a passed gate; record the unavailable legacy checks separately.
+
+## Optional macOS Desktop fixture
+
+`test/integration/herdr-desktop-lab.ts` copies the signed app bundle and Core
+executable into a private lab, uses private HOME/XDG/app/install paths, and serves
+pinned update metadata on loopback. It controls only the exact private app socket
+and confirms the owned process exits before Core shutdown/removal.
+
+This is **state isolation, not display isolation**. The app can take keyboard
+focus. Ask the operator before running
+`PI_TEST_DESKTOP_WINDOW=1 npm run test:integration:desktop`; without that opt-in
+the test skips. `HERDR_DESKTOP_BUNDLE`, `HERDR_CORE_BIN` and `PI_BIN` select source
+binaries. No daily configuration, layout or service is a test target. Unknown
+shutdown retains resources; never clean them by process name.
+
+Evidence includes `ls`, `status` and a PNG under `/tmp/piha-desktop-evidence-*`.
+The fixture smoke is not visual parity acceptance; that additionally needs real
+legacy reference images and interaction/focus tests. Unit tests use fake
+version-only executables and cannot establish that the real app renders or exits.
 
 ## Doctor
 
@@ -140,7 +179,7 @@ Proof standards:
 - Tell a regression from a pre-existing failure by running the same test on `main`: `git worktree add --detach /tmp/x main`, symlink `node_modules`, run there, then `git worktree remove /tmp/x`.
 - For sidebar or suspended-session behavior, check the Herdr version first. `HERDR_BIN=<path>` runs the lab, and `test/integration/sidebar.test.ts`, against another binary.
 - uutils coreutils hosts (`readlink -f /bin/sleep` gives `/usr/lib/cargo/bin/coreutils/...`) dispatch on argv[0]. A binary symlinked under another name fails there, so test stand-ins use `process.execPath`, never a renamed `sleep` or `true`.
-- GitHub CI passing while local runs fail usually means a host difference (coreutils, Herdr version). CI does not run the Herdr suite ([RELEASING.md](../../../RELEASING.md)).
+- The **CI** workflow covers static/unit gates; **Linux integration** separately runs the complete deterministic suite with pinned Herdr binaries and a private real-parent lab. Compare the exact commit and workflow, not just a green badge. Host differences (coreutils, Herdr/Pi version) still matter. Its `linux-integration-evidence` artifact retains TAP and lab evidence for seven days; Desktop GUI stays skipped ([RELEASING.md](../../../RELEASING.md)).
 
 ## Cleanup
 

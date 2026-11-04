@@ -15,12 +15,19 @@ from its directory, not the user's working directory.
 
 ## What the host is
 
-A Pi extension that runs asynchronous Pi child agents exclusively inside Herdr
-(the terminal multiplexer; Pi must be started from inside Herdr). It is a
+A Pi extension that runs asynchronous Pi child agents in legacy Herdr panes or
+local Herdr Core terminals. Start Pi inside the selected Herdr environment. It is a
 pack-neutral execution host: it ships no agent roles and no planning or review
 workflows. Roles and workflows come from project or global definitions and
-installed role packs. Children are real Pi processes in Herdr panes; ordinary
-children are grouped in extension-owned `Agents` tabs by default.
+installed role packs. Children are real Pi processes. Legacy Herdr groups ordinary
+children in extension-owned `Agents` tabs by default.
+
+`herdr.backend` defaults to `auto`: native `HC_TERMINAL_ID` context selects Core,
+otherwise legacy Herdr. Core supports ordinary launches, resume, persistent
+specialists and controls, but not managed worktrees, Desktop Agents placement,
+or the legacy sidebar plugin. Its native child tree is not visual parity.
+Backend/endpoint changes require a Pi restart, not reload. See
+[backend configuration and limits](../../docs/configuration.md#herdr-backend).
 
 ## Results arrive automatically: never poll
 
@@ -53,11 +60,11 @@ it does not prove that no resources exist. See
 | `fork` | `true` forces a full-context fork of your session, `false` forces standalone; omit to follow the role's `session-mode`. |
 | `interactive` | Controls parent notifications only (silences stall/recovered pings); it does not affect terminal focus. Precedence: this argument, then the role's `interactive`, then the inverse of `auto-exit` (autonomous roles get pings, others stay quiet). Bare spawns default to autonomous auto-exit unless `interactive: true`. Exception: persistent specialists are always non-interactive unless this argument says otherwise (a persistent role's `interactive: true` is ignored), and they never auto-exit. |
 | `persistent` | Keep one specialist session alive for sequential tasks (see below). Rejected at the `persistent.maxAgents` cap (default 3), including pending acquisitions. |
-| `worktree` | `{ branch, base? }` for an isolated Herdr-managed Git worktree (see below). Omit, or pass `null`, for an ordinary pane. |
+| `worktree` | `{ branch, base? }` for an isolated legacy-Herdr-managed Git worktree (unsupported on Core). Omit, or pass `null`, for an ordinary child. |
 | `accept` | `{ run, maxRetries?, timeoutSec?, paths? }`: a shell check (exit 0 passes). The child runs it before it finishes and retries with the failing output (default 1 retry); then the parent re-runs it in the child's checkout and that run decides `Check: accepted`, `rejected`, `error` (timeout or no answer), or `skipped` (cancelled, help, provider error, failed exit). Unchecked runs read `Check: none`. Refused for persistent and non-auto-exit children. A rejected verdict starts no fallback. You supply the command; the host ships none. |
 
-Label coordinated children `<task>-<role>[-n]`. Panes and tabs are created
-without stealing focus. Read-only scouts and reviewers use ordinary panes; a
+Label coordinated children `<task>-<role>[-n]`. Legacy panes and tabs are created
+without stealing focus; Core children start in the background without Desktop placement. Read-only scouts and reviewers use ordinary panes; a
 single or sequential writer can work in the parent checkout.
 
 ## Roles and role packs

@@ -1,4 +1,6 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
+import type { NativeExecutionInspection } from "../../core/surface-provider.ts";
+import { Deadline } from "../../core/deadline.ts";
 
 import { isNonEmptyString, isString } from "../../core/config/type-guards.ts";
 import {
@@ -21,6 +23,8 @@ export interface CompletionResult {
 }
 
 export interface CompletionOptions {
+	/** Native lifetime evidence is independent of OSC agent/task status. */
+	inspectExecution?: () => Promise<NativeExecutionInspection>;
 	intervalMs: number;
 	readTerminalTail: () => Promise<string>;
 	inspectPane?: () => Promise<import("../../core/types.ts").PaneInspection>;
@@ -116,7 +120,10 @@ function terminalExitCode(screen: string): number | null {
 function completionArtifact(
 	options: CompletionOptions,
 ): CompletionResult | null {
-	return readExitSidecar(options.sessionFile, !options.requireProcessExit);
+	return readExitSidecar(
+		options.sessionFile,
+		!options.requireProcessExit && !options.inspectExecution,
+	);
 }
 
 async function waitForDelayedSidecar(
@@ -127,9 +134,10 @@ async function waitForDelayedSidecar(
 	if (immediate) return immediate;
 
 	const graceMs = Math.max(0, options.paneDisappearanceGraceMs ?? 500);
-	const deadline = Date.now() + graceMs;
-	while (Date.now() < deadline) {
-		const remaining = deadline - Date.now();
+	if (graceMs === 0) return null;
+	const deadline = Deadline.after(graceMs);
+	while (!deadline.expired()) {
+		const remaining = deadline.remainingMs();
 		await abortableDelay(Math.min(25, remaining), signal);
 		const result = completionArtifact(options);
 		if (result) return result;
@@ -161,7 +169,10 @@ export async function waitForCompletion(
 	options: CompletionOptions,
 ): Promise<CompletionResult> {
 	const result = await detectCompletion(signal, options);
-	if (options.requireProcessExit && options.sessionFile) {
+	if (
+		(options.requireProcessExit || options.inspectExecution) &&
+		options.sessionFile
+	) {
 		try {
 			rmSync(`${options.sessionFile}.exit`, { force: true });
 		} catch {
@@ -188,10 +199,69 @@ async function detectCompletion(
 		// owner, including when all waiters abort and a later wait starts afresh.
 		const sidecarResult = readExitSidecar(
 			options.sessionFile,
-			!options.requireProcessExit,
+			!options.requireProcessExit && !options.inspectExecution,
 		);
-		if (sidecarResult && !options.requireProcessExit) return sidecarResult;
+		if (
+			sidecarResult &&
+			!options.requireProcessExit &&
+			!options.inspectExecution
+		)
+			return sidecarResult;
 		options.onLocalEvidence?.();
+
+		if (options.inspectExecution) {
+			let execution: NativeExecutionInspection;
+			try {
+				execution = await options.inspectExecution();
+			} catch {
+				execution = { kind: "unavailable" };
+			}
+			if (execution.kind === "finished" || execution.kind === "missing") {
+				const completion = await waitForDelayedSidecar(signal, options);
+				if (completion) return completion;
+				if (execution.kind === "finished") {
+					try {
+						const exitCode = terminalExitCode(await options.readTerminalTail());
+						options.onLocalEvidence?.();
+						const racedCompletion = completionArtifact(options);
+						if (racedCompletion) return racedCompletion;
+						// Manual interactive exit may have no sidecar. The script's
+						// marker is admissible only after independent native exit,
+						// and must not contradict a known native exit code.
+						if (
+							exitCode !== null &&
+							(execution.exitCode === undefined ||
+								execution.exitCode === exitCode)
+						)
+							return { reason: "sentinel", exitCode };
+					} catch {
+						/* Native exit remains proven; missing output is not success. */
+					}
+				}
+				return {
+					reason: "error",
+					exitCode:
+						execution.kind === "finished" ? (execution.exitCode ?? 1) : 1,
+					errorMessage:
+						"Subagent native execution ended before completion evidence was recorded.",
+					errorSource: "host",
+				};
+			}
+			const observedAt = Date.now();
+			options.onPaneInspection?.(
+				execution.kind === "unavailable"
+					? execution
+					: { kind: "present", agentStatus: "unknown", observedAt },
+				observedAt,
+			);
+			// Neither live nor unavailable can be overridden by stale terminal
+			// sentinels, agent status=done, sidecars, or shared-list absence.
+			options.onTick?.(Math.floor((Date.now() - startedAt) / 1000));
+			if (options.waitForNextCheck)
+				reconcile = (await options.waitForNextCheck(signal)) === "reconcile";
+			else await abortableDelay(options.intervalMs, signal);
+			continue;
+		}
 
 		if (options.requireProcessExit && options.inspectProcess?.() === "exited") {
 			const completion = await waitForDelayedSidecar(signal, options);

@@ -1,4 +1,7 @@
 {
+  "herdr": {
+    "backend": "auto"
+  },
   "status": {
     "enabled": true
   },

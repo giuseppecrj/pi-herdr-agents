@@ -328,7 +328,10 @@ for (const backend of backends) {
 			const tools = cancelToolResults(final);
 			assert.equal(tools.length, 1);
 			assert.equal(tools[0].message.details.status, "confirmed");
-			assert.match(JSON.stringify(tools[0].message.content), /pane was closed/);
+			assert.match(
+				JSON.stringify(tools[0].message.content),
+				/owned process exit is confirmed/,
+			);
 
 			noFallbackRequests();
 			assert.equal(

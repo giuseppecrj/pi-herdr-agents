@@ -1,6 +1,6 @@
 # ADR-0012: Adopt maestro seams in-repo
 
-- **Status:** Accepted
+- **Status:** Accepted; second-provider restriction superseded by [ADR-0018](0018-herdr-core-execution.md)
 - **Date:** 2026-10-04
 - **Scope:** `giuseppecrj/pi-herdr-agents`
 - **Supersedes:** Only ADR-0008's restriction on adding a runtime adapter seam without a second real execution path
@@ -20,7 +20,8 @@ directly. A dependency-rule test enforces the directory boundaries.
 Preserve the existing public tools, commands, role-pack protocol, completion
 evidence and delivery, worktree invariants, and persistent-specialist semantics.
 Do not add adapter registries, name-based runtime dispatch, or a second real
-harness or provider.
+harness or provider. [ADR-0018](0018-herdr-core-execution.md) later permits a
+second Herdr surface implementation for Core; the other restrictions remain.
 
 ## Why
 

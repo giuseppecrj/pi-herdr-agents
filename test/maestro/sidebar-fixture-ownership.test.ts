@@ -13,6 +13,7 @@ import {
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
@@ -492,7 +493,7 @@ describe("sidebar fixture foreign canary", () => {
 			repos: () => string[];
 		}) => Promise<void>,
 	): Promise<void> {
-		const tmp = mkdtempSync(join(tmpdir(), "pi-sidebar-canary-"));
+		const tmp = realpathSync(mkdtempSync(join(tmpdir(), "pi-sidebar-canary-")));
 		const { fake, commands } = fakeHerdr(tmp);
 		try {
 			await run({

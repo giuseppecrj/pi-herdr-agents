@@ -63,7 +63,7 @@ const ThinkingLevelSchema = Type.Union(
 export const SubagentParams = Type.Object({
 	name: Type.String({
 		description:
-			"Short stable label for the subagent; for a new coordinated group use <task>-<role>[-n] (shown in the widget and pane title)",
+			"Short stable label for the subagent; for a new coordinated group use <task>-<role>[-n] (shown in the widget and legacy Herdr pane title)",
 	}),
 	task: Type.String({ description: "Task/prompt for the sub-agent" }),
 	agent: Type.Optional(
@@ -121,7 +121,7 @@ export const SubagentParams = Type.Object({
 			],
 			{
 				description:
-					"Optional isolated Herdr-managed Git worktree. Omit or pass null to use an ordinary pane in cwd.",
+					"Optional isolated Herdr-managed Git worktree; requires legacy Herdr and is unsupported on Core. Omit or pass null for an ordinary child in cwd.",
 			},
 		),
 	),
