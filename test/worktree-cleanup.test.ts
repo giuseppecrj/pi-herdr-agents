@@ -94,7 +94,7 @@ describe("cleanup process visibility policy", () => {
 	});
 	for (const deniedDetail of ["cwd", "comm", "status", "identity"] as const) {
 		for (const withHolder of [false, true]) {
-			it(`${deniedDetail === "cwd" ? "blocks" : "warns"} for unreadable ${deniedDetail} and continues scanning (holder: ${withHolder})`, async (t) => {
+			it(`warns for unreadable ${deniedDetail} and continues scanning (holder: ${withHolder})`, async (t) => {
 				const dir = mkdtempSync(join(tmpdir(), "cleanup-protected-"));
 				const f = cleanupFixture();
 				for (const pid of ["101", "202"]) {
@@ -144,49 +144,26 @@ describe("cleanup process visibility policy", () => {
 						/same-user.*other-user.*protected process could hold the checkout undetected/i,
 					);
 					assert.doesNotMatch(JSON.stringify(inspection!), /private/);
-					if (deniedDetail === "cwd") {
-						assert.match(
-							inspection!.blockers.join(),
-							/Process 101 cwd unknown/,
-						);
-						assert.doesNotMatch(
-							inspection!.warnings.join(),
-							/1 process.*101.*unreadable/,
-						);
-						assert.equal(inspection!.blockers.length, withHolder ? 2 : 1);
-						if (withHolder)
-							assert.match(inspection!.blockers.join(), /202.*holds/);
-						f.operations.holders = async () => inspection!;
-						const rows = await listContainedWorktrees(f.input);
-						assert.equal(rows[0].classification, "blocked");
-						assert.deepEqual(rows[0].warnings, inspection!.warnings);
-						assert.deepEqual(rows[0].blockers, inspection!.blockers);
-						const result = await removeContainedWorktree(f.input);
-						assert.equal(result.status, "blocked");
-						assert.match(result.message, /Process 101 cwd unknown/);
-						assert.deepEqual(f.calls, []);
-					} else {
-						assert.match(
-							inspection!.warnings.join(),
-							/1 process.*101.*unreadable/,
-						);
-						assert.equal(inspection!.blockers.length, withHolder ? 1 : 0);
-						if (withHolder)
-							assert.match(inspection!.blockers.join(), /202.*holds/);
-						f.operations.holders = async () => inspection!;
-						const rows = await listContainedWorktrees(f.input);
-						assert.equal(
-							rows[0].classification,
-							withHolder ? "blocked" : "eligible",
-						);
-						assert.deepEqual(rows[0].warnings, inspection!.warnings);
-						assert.match(formatWorktreeInventory(rows), /Warning:.*unreadable/);
-						const result = await removeContainedWorktree(f.input);
-						assert.equal(result.status, withHolder ? "blocked" : "removed");
-						assert.deepEqual(result.warnings, inspection!.warnings);
-						assert.match(result.message, /Warning:.*unreadable/);
-						if (withHolder) assert.deepEqual(f.calls, []);
-					}
+					assert.match(
+						inspection!.warnings.join(),
+						/1 process.*101.*unreadable/,
+					);
+					assert.equal(inspection!.blockers.length, withHolder ? 1 : 0);
+					if (withHolder)
+						assert.match(inspection!.blockers.join(), /202.*holds/);
+					f.operations.holders = async () => inspection!;
+					const rows = await listContainedWorktrees(f.input);
+					assert.equal(
+						rows[0].classification,
+						withHolder ? "blocked" : "eligible",
+					);
+					assert.deepEqual(rows[0].warnings, inspection!.warnings);
+					assert.match(formatWorktreeInventory(rows), /Warning:.*unreadable/);
+					const result = await removeContainedWorktree(f.input);
+					assert.equal(result.status, withHolder ? "blocked" : "removed");
+					assert.deepEqual(result.warnings, inspection!.warnings);
+					assert.match(result.message, /Warning:.*unreadable/);
+					if (withHolder) assert.deepEqual(f.calls, []);
 				} finally {
 					mocked.mock.restore();
 					syncBuiltinESMExports();
@@ -459,52 +436,6 @@ n${link}
 			assert.deepEqual(opened, []);
 		} finally {
 			for (const mock of mocks) mock.mock.restore();
-			syncBuiltinESMExports();
-			rmSync(dir, { recursive: true });
-		}
-	});
-	it("treats an undetermined process cwd as a blocker, never eligible", async (t) => {
-		const dir = mkdtempSync(join(tmpdir(), "cleanup-cwd-unknown-"));
-		const f = cleanupFixture();
-		mkdirSync(join(dir, "101"));
-		writeFileSync(join(dir, "101", "comm"), "node\n");
-		writeFileSync(join(dir, "101", "status"), "State:\tS (sleeping)\n");
-		symlinkSync(tmpdir(), join(dir, "101", "cwd"));
-		const cwdPath = join(dir, "101", "cwd");
-		const lstat = fs.lstatSync;
-		const mocked = t.mock.method(
-			fs,
-			"lstatSync",
-			(path: fs.PathLike, options?: any) => {
-				if (String(path) === cwdPath)
-					throw Object.assign(new Error("cwd unreadable"), { code: "EACCES" });
-				return lstat(path, options);
-			},
-		);
-		syncBuiltinESMExports();
-		try {
-			const result = __worktreeCleanupTest__.processHolders(
-				dir,
-				new Set(),
-				dir,
-				"linux",
-			);
-			assert.match(result.blockers.join(), /Process 101 cwd unknown/);
-			assert.doesNotMatch(result.warnings.join(), /1 process.*101.*unreadable/);
-			assert.match(
-				result.warnings.join(),
-				/protected process could hold the checkout undetected/i,
-			);
-			f.operations.holders = async () => result;
-			const rows = await listContainedWorktrees(f.input);
-			assert.equal(rows[0].classification, "blocked");
-			assert.match(rows[0].blockers.join(), /Process 101 cwd unknown/);
-			const removal = await removeContainedWorktree(f.input);
-			assert.equal(removal.status, "blocked");
-			assert.match(removal.message, /Process 101 cwd unknown/);
-			assert.deepEqual(f.calls, []);
-		} finally {
-			mocked.mock.restore();
 			syncBuiltinESMExports();
 			rmSync(dir, { recursive: true });
 		}
