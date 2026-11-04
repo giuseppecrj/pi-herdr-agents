@@ -179,7 +179,7 @@ Proof standards:
 - Tell a regression from a pre-existing failure by running the same test on `main`: `git worktree add --detach /tmp/x main`, symlink `node_modules`, run there, then `git worktree remove /tmp/x`.
 - For sidebar or suspended-session behavior, check the Herdr version first. `HERDR_BIN=<path>` runs the lab, and `test/integration/sidebar.test.ts`, against another binary.
 - uutils coreutils hosts (`readlink -f /bin/sleep` gives `/usr/lib/cargo/bin/coreutils/...`) dispatch on argv[0]. A binary symlinked under another name fails there, so test stand-ins use `process.execPath`, never a renamed `sleep` or `true`.
-- GitHub CI passing while local runs fail usually means a host difference (coreutils, Herdr version). CI does not run the Herdr suite ([RELEASING.md](../../../RELEASING.md)).
+- The **CI** workflow covers static/unit gates; **Linux integration** separately runs the complete deterministic suite with pinned Herdr binaries and a private real-parent lab. Compare the exact commit and workflow, not just a green badge. Host differences (coreutils, Herdr/Pi version) still matter. Its `linux-integration-evidence` artifact retains TAP and lab evidence for seven days; Desktop GUI stays skipped ([RELEASING.md](../../../RELEASING.md)).
 
 ## Cleanup
 

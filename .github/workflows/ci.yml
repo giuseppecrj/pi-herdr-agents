@@ -41,6 +41,9 @@ jobs:
       - name: Check formatting
         run: npm run format:check
 
+      - name: Check generated tool documentation
+        run: npm run docs:tools:check
+
       - name: Run lint
         run: npm run lint
 

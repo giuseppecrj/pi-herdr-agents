@@ -131,6 +131,13 @@ When a test reports that a `pi-integ-*` worktree path already exists, first chec
 npm run test:integration
 ```
 
+The separate `.github/workflows/linux-integration.yml` runs the complete
+credential-free deterministic suite on Ubuntu with checksum-pinned Herdr binaries.
+`scripts/run-linux-integration.ts` reuses the private verification lab and verifies
+one real-parent delegation first. Check its result separately from the static/unit
+**CI** workflow; neither publishes. Evidence is retained for seven days, and the
+Desktop GUI fixture remains skipped. See `docs/development.md`.
+
 Core lifecycle changes additionally require `npm run test:integration:core`. It
 starts independent private servers and real parent Pi sessions via
 `test/integration/herdr-core-lab.ts` and `core-parent.ts`, without using the

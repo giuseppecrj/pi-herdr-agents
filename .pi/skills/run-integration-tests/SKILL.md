@@ -9,6 +9,17 @@ The package supports legacy Herdr and local Herdr Core execution. Desktop
 presentation is not yet implemented. Select the matching suite; a Core pass is
 not a substitute for legacy coverage.
 
+## Linux GitHub Actions
+
+The **Linux integration** workflow runs on pushes to `main` or manual dispatch,
+with read-only permissions and no publishing. It installs checksum-pinned legacy
+Herdr 0.9.5 and Core 0.1.17, uses the lockfile's Pi, and runs
+`scripts/run-linux-integration.ts` on Ubuntu 24.04. That driver proves a real
+parent delegation in the existing private verification lab before running the
+complete deterministic suite sequentially. Always-run cleanup stops only the
+owned lab; `linux-integration-evidence` keeps TAP, parent evidence and Core
+sessions for seven days. The Desktop GUI fixture remains skipped, not passed.
+
 ## Isolated Core suite
 
 From the repository root:
