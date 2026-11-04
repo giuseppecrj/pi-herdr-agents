@@ -354,53 +354,6 @@ function directories(path: string): string[] {
 		.map((item) => join(path, item.name));
 }
 
-/**
- * Resolve a path that must be opened. Used for Linux `/proc/<pid>/cwd`, whose
- * magic symlink still requires an open on some runtimes. The child is killed
- * when the deadline expires; callers treat timeout or failure as unknown and
- * never as proof the process is idle.
- */
-function realpathByOpeningWithDeadline(path: string): string {
-	const output = execFileSync(
-		process.execPath,
-		[
-			"-e",
-			"process.stdout.write(require('node:fs').realpathSync(process.argv[1]))",
-			path,
-		],
-		{
-			encoding: "utf8",
-			timeout: CLEANUP_TIMEOUT_MS,
-			killSignal: "SIGKILL",
-			stdio: ["ignore", "pipe", "ignore"],
-		},
-	).trimEnd();
-	if (!output) throw new Error("Process cwd resolution returned empty path");
-	return output;
-}
-
-/**
- * Resolve Linux `/proc/<pid>/cwd` without an unbounded open. Prefer the no-open
- * resolver; only if that cannot see through the magic symlink, open inside a
- * child with a deadline.
- */
-function resolveLinuxProcessCwd(cwdPath: string): string {
-	try {
-		return realpathWithoutOpening(cwdPath);
-	} catch (error) {
-		// SAFETY: filesystem probes throw Node errors with an optional errno code.
-		const code = (error as NodeJS.ErrnoException).code;
-		if (
-			code === "ENOENT" ||
-			code === "EACCES" ||
-			code === "EPERM" ||
-			code === "ELOOP"
-		)
-			throw error;
-	}
-	return realpathByOpeningWithDeadline(cwdPath);
-}
-
 /** Source identity is resolved independently of status so Git failures remain visible. */
 function resolveSource(path: string): string {
 	const common = realpathWithoutOpening(
@@ -572,7 +525,19 @@ function processHolders(
 				}
 				// A shell can exec a runtime without changing PID/process group.
 				if (idleShellPids.has(Number(pid)) && shellNames.has(command)) continue;
-				const cwd = resolveLinuxProcessCwd(`${procRoot}/${pid}/cwd`);
+				let cwd: string;
+				try {
+					// Linux /proc/<pid>/cwd is readable without opening on Node;
+					// never fall back to a blocking open or deadline child.
+					cwd = realpathWithoutOpening(`${procRoot}/${pid}/cwd`);
+				} catch (cwdError) {
+					// SAFETY: filesystem probes throw Node errors with an optional errno code.
+					const code = (cwdError as NodeJS.ErrnoException).code ?? "";
+					if (["ENOENT", "ESRCH"].includes(code)) throw cwdError;
+					// Unknown cwd is never proof the process is idle: block removal.
+					blockers.push(`Process ${pid} cwd unknown`);
+					continue;
+				}
 				if (contained(checkout, cwd))
 					blockers.push(`Live process ${pid} holds the checkout`);
 			} catch (error) {
@@ -670,8 +635,6 @@ function processHolders(
 export const __worktreeCleanupTest__ = {
 	processHolders,
 	realpathWithoutOpening,
-	realpathByOpeningWithDeadline,
-	resolveLinuxProcessCwd,
 };
 
 export function createWorktreeCleanupOperations(

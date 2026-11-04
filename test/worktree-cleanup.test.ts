@@ -94,7 +94,7 @@ describe("cleanup process visibility policy", () => {
 	});
 	for (const deniedDetail of ["cwd", "comm", "status", "identity"] as const) {
 		for (const withHolder of [false, true]) {
-			it(`warns for unreadable ${deniedDetail} and continues scanning (holder: ${withHolder})`, async (t) => {
+			it(`${deniedDetail === "cwd" ? "blocks" : "warns"} for unreadable ${deniedDetail} and continues scanning (holder: ${withHolder})`, async (t) => {
 				const dir = mkdtempSync(join(tmpdir(), "cleanup-protected-"));
 				const f = cleanupFixture();
 				for (const pid of ["101", "202"]) {
@@ -141,29 +141,52 @@ describe("cleanup process visibility policy", () => {
 					});
 					assert.match(
 						inspection!.warnings.join(),
-						/1 process.*101.*unreadable/,
-					);
-					assert.match(
-						inspection!.warnings.join(),
 						/same-user.*other-user.*protected process could hold the checkout undetected/i,
 					);
 					assert.doesNotMatch(JSON.stringify(inspection!), /private/);
-					assert.equal(inspection!.blockers.length, withHolder ? 1 : 0);
-					if (withHolder)
-						assert.match(inspection!.blockers.join(), /202.*holds/);
-					f.operations.holders = async () => inspection!;
-					const rows = await listContainedWorktrees(f.input);
-					assert.equal(
-						rows[0].classification,
-						withHolder ? "blocked" : "eligible",
-					);
-					assert.deepEqual(rows[0].warnings, inspection!.warnings);
-					assert.match(formatWorktreeInventory(rows), /Warning:.*unreadable/);
-					const result = await removeContainedWorktree(f.input);
-					assert.equal(result.status, withHolder ? "blocked" : "removed");
-					assert.deepEqual(result.warnings, inspection!.warnings);
-					assert.match(result.message, /Warning:.*unreadable/);
-					if (withHolder) assert.deepEqual(f.calls, []);
+					if (deniedDetail === "cwd") {
+						assert.match(
+							inspection!.blockers.join(),
+							/Process 101 cwd unknown/,
+						);
+						assert.doesNotMatch(
+							inspection!.warnings.join(),
+							/1 process.*101.*unreadable/,
+						);
+						assert.equal(inspection!.blockers.length, withHolder ? 2 : 1);
+						if (withHolder)
+							assert.match(inspection!.blockers.join(), /202.*holds/);
+						f.operations.holders = async () => inspection!;
+						const rows = await listContainedWorktrees(f.input);
+						assert.equal(rows[0].classification, "blocked");
+						assert.deepEqual(rows[0].warnings, inspection!.warnings);
+						assert.deepEqual(rows[0].blockers, inspection!.blockers);
+						const result = await removeContainedWorktree(f.input);
+						assert.equal(result.status, "blocked");
+						assert.match(result.message, /Process 101 cwd unknown/);
+						assert.deepEqual(f.calls, []);
+					} else {
+						assert.match(
+							inspection!.warnings.join(),
+							/1 process.*101.*unreadable/,
+						);
+						assert.equal(inspection!.blockers.length, withHolder ? 1 : 0);
+						if (withHolder)
+							assert.match(inspection!.blockers.join(), /202.*holds/);
+						f.operations.holders = async () => inspection!;
+						const rows = await listContainedWorktrees(f.input);
+						assert.equal(
+							rows[0].classification,
+							withHolder ? "blocked" : "eligible",
+						);
+						assert.deepEqual(rows[0].warnings, inspection!.warnings);
+						assert.match(formatWorktreeInventory(rows), /Warning:.*unreadable/);
+						const result = await removeContainedWorktree(f.input);
+						assert.equal(result.status, withHolder ? "blocked" : "removed");
+						assert.deepEqual(result.warnings, inspection!.warnings);
+						assert.match(result.message, /Warning:.*unreadable/);
+						if (withHolder) assert.deepEqual(f.calls, []);
+					}
 				} finally {
 					mocked.mock.restore();
 					syncBuiltinESMExports();
@@ -376,11 +399,22 @@ n${link}
 		mkdirSync(protectedDir);
 		symlinkSync(protectedDir, escape);
 		const opened: string[] = [];
+		const readdirSeen: string[] = [];
 		const realpath = fs.realpathSync;
 		const readdir = fs.readdirSync;
 		const refuseProtected = (path: fs.PathLike) => {
-			if (String(path).startsWith(protectedDir)) {
-				opened.push(String(path));
+			const raw = String(path);
+			// Resolve through symlinks before the prefix check so a readdir of
+			// managed/escape (the symlink itself) is caught as opening protected.
+			// Use the unbound native helper so this resolve never hits the mock.
+			let resolved = raw;
+			try {
+				resolved = realpath.native(raw);
+			} catch {
+				// Keep the unresolved path for the prefix check.
+			}
+			if (raw.startsWith(protectedDir) || resolved.startsWith(protectedDir)) {
+				opened.push(raw);
 				throw new Error("would block on open");
 			}
 		};
@@ -390,6 +424,7 @@ n${link}
 				return realpath(path, options);
 			}),
 			t.mock.method(fs, "readdirSync", (path: fs.PathLike, options?: any) => {
+				readdirSeen.push(String(path));
 				refuseProtected(path);
 				return readdir(path, options);
 			}),
@@ -407,6 +442,10 @@ n${link}
 			assert.equal(ops.managedRoot(), realpath(managed));
 			assert.deepEqual(ops.scan(), [safeTask]);
 			assert.deepEqual(opened, []);
+			assert.ok(
+				!readdirSeen.includes(escape),
+				"scan must not readdir an escaping managed symlink",
+			);
 			assert.equal(
 				__herdrTest__.sameCheckoutPath(safeTask, realpath(safeTask)),
 				true,
@@ -424,55 +463,48 @@ n${link}
 			rmSync(dir, { recursive: true });
 		}
 	});
-	it("treats a timed-out obligatory cwd open as unknown, never idle", (t) => {
-		const dir = mkdtempSync(join(tmpdir(), "cleanup-cwd-deadline-"));
+	it("treats an undetermined process cwd as a blocker, never eligible", async (t) => {
+		const dir = mkdtempSync(join(tmpdir(), "cleanup-cwd-unknown-"));
+		const f = cleanupFixture();
 		mkdirSync(join(dir, "101"));
 		writeFileSync(join(dir, "101", "comm"), "node\n");
 		writeFileSync(join(dir, "101", "status"), "State:\tS (sleeping)\n");
 		symlinkSync(tmpdir(), join(dir, "101", "cwd"));
 		const cwdPath = join(dir, "101", "cwd");
 		const lstat = fs.lstatSync;
-		const originalExec = childProcess.execFileSync;
-		const mocks = [
-			// Force the magic-symlink fallback that must open with a deadline.
-			t.mock.method(fs, "lstatSync", (path: fs.PathLike, options?: any) => {
+		const mocked = t.mock.method(
+			fs,
+			"lstatSync",
+			(path: fs.PathLike, options?: any) => {
 				if (String(path) === cwdPath)
-					throw Object.assign(new Error("magic symlink"), { code: "EINVAL" });
+					throw Object.assign(new Error("cwd unreadable"), { code: "EACCES" });
 				return lstat(path, options);
-			}),
-			t.mock.method(
-				childProcess,
-				"execFileSync",
-				(...args: Parameters<typeof childProcess.execFileSync>) => {
-					if (args[0] === process.execPath)
-						throw Object.assign(new Error("spawn sync timeout"), {
-							code: "ETIMEDOUT",
-							killed: true,
-						});
-					return originalExec(...args);
-				},
-			),
-		];
+			},
+		);
 		syncBuiltinESMExports();
 		try {
-			assert.throws(
-				() => __worktreeCleanupTest__.resolveLinuxProcessCwd(cwdPath),
-				(error: NodeJS.ErrnoException) => error.code === "ETIMEDOUT",
-			);
 			const result = __worktreeCleanupTest__.processHolders(
 				dir,
 				new Set(),
 				dir,
 				"linux",
 			);
-			assert.deepEqual(result.blockers, []);
-			assert.match(result.warnings.join(), /1 process.*101.*unreadable/);
+			assert.match(result.blockers.join(), /Process 101 cwd unknown/);
+			assert.doesNotMatch(result.warnings.join(), /1 process.*101.*unreadable/);
 			assert.match(
 				result.warnings.join(),
 				/protected process could hold the checkout undetected/i,
 			);
+			f.operations.holders = async () => result;
+			const rows = await listContainedWorktrees(f.input);
+			assert.equal(rows[0].classification, "blocked");
+			assert.match(rows[0].blockers.join(), /Process 101 cwd unknown/);
+			const removal = await removeContainedWorktree(f.input);
+			assert.equal(removal.status, "blocked");
+			assert.match(removal.message, /Process 101 cwd unknown/);
+			assert.deepEqual(f.calls, []);
 		} finally {
-			for (const mock of mocks) mock.mock.restore();
+			mocked.mock.restore();
 			syncBuiltinESMExports();
 			rmSync(dir, { recursive: true });
 		}
