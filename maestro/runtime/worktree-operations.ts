@@ -5,10 +5,7 @@ import {
 	renameSync,
 	lstatSync,
 	readdirSync,
-	readlinkSync,
-	realpathSync,
 	readFileSync,
-	statSync,
 	writeFileSync,
 	unlinkSync,
 } from "node:fs";
@@ -17,6 +14,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isRecord, type JsonObject } from "../core/config/type-guards.ts";
 import { gitEnvironment } from "../core/git-environment.ts";
 import { Deadline } from "../core/deadline.ts";
+import { realpathWithoutOpening } from "../core/realpath-without-opening.ts";
 import type { SurfaceProvider } from "../core/surface-provider.ts";
 import type {
 	CleanupGitState,
@@ -349,37 +347,6 @@ function exists(path: string): boolean {
 		throw error;
 	}
 }
-/**
- * Resolve symbolic links with lstat, stat, and readlink only, matching Node's
- * JavaScript realpathSync, including its lexical `..` handling. Bun's
- * realpathSync opens the path, and open() blocks indefinitely on some
- * protected macOS directories, such as another app's sandbox container,
- * freezing the whole process.
- */
-function realpathWithoutOpening(path: string): string {
-	const parts = (from: string) => resolve(from).split(sep).filter(Boolean);
-	let pending = parts(path);
-	let resolved: string = sep;
-	let links = 0;
-	while (pending.length) {
-		const next = join(resolved, pending.shift() ?? "");
-		if (!lstatSync(next).isSymbolicLink()) {
-			resolved = next;
-			continue;
-		}
-		// Like Node, let the kernel validate the target: missing targets throw
-		// ENOENT and real cycles throw ELOOP.
-		statSync(next);
-		// Backstop only; valid repeated traversals stay far below this.
-		if (++links > 4096)
-			throw Object.assign(new Error(`Too many symbolic links: ${path}`), {
-				code: "ELOOP",
-			});
-		pending = [...parts(resolve(resolved, readlinkSync(next))), ...pending];
-		resolved = sep;
-	}
-	return resolved;
-}
 function directories(path: string): string[] {
 	if (!exists(path)) return [];
 	return readdirSync(path, { withFileTypes: true })
@@ -387,9 +354,56 @@ function directories(path: string): string[] {
 		.map((item) => join(path, item.name));
 }
 
+/**
+ * Resolve a path that must be opened. Used for Linux `/proc/<pid>/cwd`, whose
+ * magic symlink still requires an open on some runtimes. The child is killed
+ * when the deadline expires; callers treat timeout or failure as unknown and
+ * never as proof the process is idle.
+ */
+function realpathByOpeningWithDeadline(path: string): string {
+	const output = execFileSync(
+		process.execPath,
+		[
+			"-e",
+			"process.stdout.write(require('node:fs').realpathSync(process.argv[1]))",
+			path,
+		],
+		{
+			encoding: "utf8",
+			timeout: CLEANUP_TIMEOUT_MS,
+			killSignal: "SIGKILL",
+			stdio: ["ignore", "pipe", "ignore"],
+		},
+	).trimEnd();
+	if (!output) throw new Error("Process cwd resolution returned empty path");
+	return output;
+}
+
+/**
+ * Resolve Linux `/proc/<pid>/cwd` without an unbounded open. Prefer the no-open
+ * resolver; only if that cannot see through the magic symlink, open inside a
+ * child with a deadline.
+ */
+function resolveLinuxProcessCwd(cwdPath: string): string {
+	try {
+		return realpathWithoutOpening(cwdPath);
+	} catch (error) {
+		// SAFETY: filesystem probes throw Node errors with an optional errno code.
+		const code = (error as NodeJS.ErrnoException).code;
+		if (
+			code === "ENOENT" ||
+			code === "EACCES" ||
+			code === "EPERM" ||
+			code === "ELOOP"
+		)
+			throw error;
+	}
+	return realpathByOpeningWithDeadline(cwdPath);
+}
+
 /** Source identity is resolved independently of status so Git failures remain visible. */
 function resolveSource(path: string): string {
-	const common = realpathSync(
+	const common = realpathWithoutOpening(
 		git(path, [
 			"rev-parse",
 			"--path-format=absolute",
@@ -406,13 +420,17 @@ function resolveSource(path: string): string {
 		"--get",
 		"core.worktree",
 	]).trim();
-	const root = realpathSync(
+	const root = realpathWithoutOpening(
 		configured ? resolve(common, configured) : dirname(common),
 	);
-	if (realpathSync(git(root, ["rev-parse", "--show-toplevel"]).trim()) !== root)
+	if (
+		realpathWithoutOpening(
+			git(root, ["rev-parse", "--show-toplevel"]).trim(),
+		) !== root
+	)
 		throw new Error("Cannot prove source repository root");
 	if (
-		realpathSync(
+		realpathWithoutOpening(
 			git(root, [
 				"rev-parse",
 				"--path-format=absolute",
@@ -464,7 +482,9 @@ async function inspectGit(
 	const record = records.find((fields) => {
 		if (!fields[0]?.startsWith("worktree ")) return false;
 		const registeredPath = fields[0].slice("worktree ".length);
-		return exists(registeredPath) && realpathSync(registeredPath) === path;
+		return (
+			exists(registeredPath) && realpathWithoutOpening(registeredPath) === path
+		);
 	});
 	// rev-parse returns HEAD for a detached checkout, without treating a valid
 	// detached state as an inspection error. Only named refs may be preserved.
@@ -531,7 +551,9 @@ function processHolders(
 	const unreadable = new Set<string>();
 	const shellNames = new Set(["bash", "zsh", "fish", "sh", "dash"]);
 	const checkout =
-		platform === "linux" || platform === "darwin" ? realpathSync(path) : path;
+		platform === "linux" || platform === "darwin"
+			? realpathWithoutOpening(path)
+			: path;
 	if (!process.getuid) throw new Error("Process user identity unavailable");
 	const uid = process.getuid();
 	if (platform === "linux") {
@@ -550,7 +572,7 @@ function processHolders(
 				}
 				// A shell can exec a runtime without changing PID/process group.
 				if (idleShellPids.has(Number(pid)) && shellNames.has(command)) continue;
-				const cwd = realpathSync(`${procRoot}/${pid}/cwd`);
+				const cwd = resolveLinuxProcessCwd(`${procRoot}/${pid}/cwd`);
 				if (contained(checkout, cwd))
 					blockers.push(`Live process ${pid} holds the checkout`);
 			} catch (error) {
@@ -561,8 +583,9 @@ function processHolders(
 					)
 				) {
 					try {
-						// Confirm disappearance separately from unreadable status.
-						realpathSync(`${procRoot}/${pid}`);
+						// Confirm disappearance without opening: a dangling /proc
+						// entry must not look like a live holder.
+						realpathWithoutOpening(`${procRoot}/${pid}`);
 						if (
 							/^State:\s+[ZX]/m.test(
 								readFileSync(`${procRoot}/${pid}/status`, "utf8"),
@@ -574,7 +597,7 @@ function processHolders(
 					} catch {
 						// Missing status alone is not proof of process disappearance.
 						try {
-							realpathSync(`${procRoot}/${pid}`);
+							realpathWithoutOpening(`${procRoot}/${pid}`);
 						} catch (presenceError) {
 							// SAFETY: these are Node filesystem errors.
 							if (
@@ -647,6 +670,8 @@ function processHolders(
 export const __worktreeCleanupTest__ = {
 	processHolders,
 	realpathWithoutOpening,
+	realpathByOpeningWithDeadline,
+	resolveLinuxProcessCwd,
 };
 
 export function createWorktreeCleanupOperations(
@@ -660,13 +685,28 @@ export function createWorktreeCleanupOperations(
 	const root = input.managedRoot ?? join(homedir(), ".herdr", "worktrees");
 	let canonicalRoot: string;
 	return {
-		managedRoot: () => canonicalRoot ?? realpathSync(root),
+		managedRoot: () => canonicalRoot ?? realpathWithoutOpening(root),
 		scan: () => {
 			if (!exists(root)) return [];
-			canonicalRoot = realpathSync(root);
-			return directories(canonicalRoot).flatMap(directories);
+			canonicalRoot = realpathWithoutOpening(root);
+			const checkouts: string[] = [];
+			for (const repo of directories(canonicalRoot)) {
+				let resolvedRepo: string;
+				try {
+					resolvedRepo = realpathWithoutOpening(repo);
+				} catch {
+					// Unresolvable residue stays out of the inventory rather than
+					// blocking the whole scan; callers never see it as eligible.
+					continue;
+				}
+				// Never readdir a managed entry until containment is proven without
+				// opening: a symlink to a protected directory would freeze Pi.
+				if (!contained(canonicalRoot, resolvedRepo)) continue;
+				checkouts.push(...directories(resolvedRepo));
+			}
+			return checkouts;
 		},
-		realpath: realpathSync,
+		realpath: realpathWithoutOpening,
 		resolveSource,
 		inspectGit,
 		listWorktrees: (source) =>
@@ -687,7 +727,7 @@ export function createWorktreeCleanupOperations(
 		holders: async (entry) => {
 			const blockers: string[] = input
 				.liveHolders()
-				.filter((holder) => realpathSync(holder.path) === entry.path)
+				.filter((holder) => realpathWithoutOpening(holder.path) === entry.path)
 				.map((holder) =>
 					holder.persistent
 						? "Persistent-specialist lease holds the worktree"

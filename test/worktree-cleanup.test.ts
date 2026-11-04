@@ -112,12 +112,12 @@ describe("cleanup process visibility policy", () => {
 					"101",
 					deniedDetail === "identity" ? "" : deniedDetail,
 				);
+				// cwd resolution uses the no-open helper (lstat/stat/readlink), not
+				// realpathSync, so deny the lstat of the magic cwd symlink.
 				const method =
-					deniedDetail === "identity"
+					deniedDetail === "identity" || deniedDetail === "cwd"
 						? "lstatSync"
-						: deniedDetail === "cwd"
-							? "realpathSync"
-							: "readFileSync";
+						: "readFileSync";
 				const original: (...args: any[]) => any = fs[method];
 				const mocked = t.mock.method(fs, method, (...args: any[]) => {
 					if (String(args[0]) === denied)
@@ -356,6 +356,121 @@ n${link}
 				"Live process 202 holds the checkout",
 			]);
 			assert.doesNotMatch(result.warnings.join(), /unreadable/);
+		} finally {
+			for (const mock of mocks) mock.mock.restore();
+			syncBuiltinESMExports();
+			rmSync(dir, { recursive: true });
+		}
+	});
+	it("scans and canonicalizes cleanup paths without opening protected directories", (t) => {
+		// Regression for #97: managedRoot/scan/ops.realpath and escaped managed
+		// symlinks used realpathSync/readdirSync, which Bun implements with open()
+		// and can freeze Pi on a protected macOS directory.
+		const dir = mkdtempSync(join(tmpdir(), "cleanup-scan-open-"));
+		const managed = join(dir, "managed");
+		const safeRepo = join(managed, "repo");
+		const safeTask = join(safeRepo, "task");
+		const protectedDir = join(dir, "protected");
+		const escape = join(managed, "escape");
+		mkdirSync(safeTask, { recursive: true });
+		mkdirSync(protectedDir);
+		symlinkSync(protectedDir, escape);
+		const opened: string[] = [];
+		const realpath = fs.realpathSync;
+		const readdir = fs.readdirSync;
+		const refuseProtected = (path: fs.PathLike) => {
+			if (String(path).startsWith(protectedDir)) {
+				opened.push(String(path));
+				throw new Error("would block on open");
+			}
+		};
+		const mocks = [
+			t.mock.method(fs, "realpathSync", (path: string, options?: any) => {
+				refuseProtected(path);
+				return realpath(path, options);
+			}),
+			t.mock.method(fs, "readdirSync", (path: fs.PathLike, options?: any) => {
+				refuseProtected(path);
+				return readdir(path, options);
+			}),
+			t.mock.method(fs, "openSync", refuseProtected),
+			t.mock.method(fs, "opendirSync", refuseProtected),
+		];
+		syncBuiltinESMExports();
+		try {
+			const ops = createWorktreeCleanupOperations({
+				managedRoot: managed,
+				manifestDir: join(dir, "manifests"),
+				liveHolders: () => [],
+			});
+			assert.equal(ops.realpath(safeTask), realpath(safeTask));
+			assert.equal(ops.managedRoot(), realpath(managed));
+			assert.deepEqual(ops.scan(), [safeTask]);
+			assert.deepEqual(opened, []);
+			assert.equal(
+				__herdrTest__.sameCheckoutPath(safeTask, realpath(safeTask)),
+				true,
+			);
+			assert.equal(
+				__herdrTest__.canonicalPath(
+					join(managed, "repo", "..", "repo", "task"),
+				),
+				realpath(safeTask),
+			);
+			assert.deepEqual(opened, []);
+		} finally {
+			for (const mock of mocks) mock.mock.restore();
+			syncBuiltinESMExports();
+			rmSync(dir, { recursive: true });
+		}
+	});
+	it("treats a timed-out obligatory cwd open as unknown, never idle", (t) => {
+		const dir = mkdtempSync(join(tmpdir(), "cleanup-cwd-deadline-"));
+		mkdirSync(join(dir, "101"));
+		writeFileSync(join(dir, "101", "comm"), "node\n");
+		writeFileSync(join(dir, "101", "status"), "State:\tS (sleeping)\n");
+		symlinkSync(tmpdir(), join(dir, "101", "cwd"));
+		const cwdPath = join(dir, "101", "cwd");
+		const lstat = fs.lstatSync;
+		const originalExec = childProcess.execFileSync;
+		const mocks = [
+			// Force the magic-symlink fallback that must open with a deadline.
+			t.mock.method(fs, "lstatSync", (path: fs.PathLike, options?: any) => {
+				if (String(path) === cwdPath)
+					throw Object.assign(new Error("magic symlink"), { code: "EINVAL" });
+				return lstat(path, options);
+			}),
+			t.mock.method(
+				childProcess,
+				"execFileSync",
+				(...args: Parameters<typeof childProcess.execFileSync>) => {
+					if (args[0] === process.execPath)
+						throw Object.assign(new Error("spawn sync timeout"), {
+							code: "ETIMEDOUT",
+							killed: true,
+						});
+					return originalExec(...args);
+				},
+			),
+		];
+		syncBuiltinESMExports();
+		try {
+			assert.throws(
+				() => __worktreeCleanupTest__.resolveLinuxProcessCwd(cwdPath),
+				(error: NodeJS.ErrnoException) => error.code === "ETIMEDOUT",
+			);
+			const result = __worktreeCleanupTest__.processHolders(
+				dir,
+				new Set(),
+				dir,
+				"linux",
+			);
+			assert.deepEqual(result.blockers, []);
+			assert.match(result.warnings.join(), /1 process.*101.*unreadable/);
+			assert.match(
+				result.warnings.join(),
+				/protected process could hold the checkout undetected/i,
+			);
 		} finally {
 			for (const mock of mocks) mock.mock.restore();
 			syncBuiltinESMExports();

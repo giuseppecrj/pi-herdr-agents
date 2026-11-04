@@ -265,8 +265,10 @@ _Avoid_: Guessed idle, presumed clean
 Non-blocking disclosure of incomplete same-user process visibility, separate
 from cleanup blockers and requiring no override flag. Scanning continues after
 unreadable details; detected holders still block. Other-user processes are not
-inspected, and a protected process could hold the checkout undetected. Failed
-global enumeration and unsupported platforms remain blockers.
+inspected, and a protected process could hold the checkout undetected. A timed-out
+or failed obligatory path open (such as Linux `/proc/<pid>/cwd`) is unknown, never
+proof the process is idle. Failed global enumeration and unsupported platforms
+remain blockers.
 _Avoid_: Proven unrelated, machine-wide inactivity, bypass permission
 
 **Explicit worktree removal**:
