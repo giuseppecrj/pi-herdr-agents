@@ -532,8 +532,8 @@ function processHolders(
 					// SAFETY: filesystem probes throw Node errors with an optional errno code.
 					const code = (cwdError as NodeJS.ErrnoException).code ?? "";
 					if (["ENOENT", "ESRCH"].includes(code)) throw cwdError;
-					// Unknown cwd is never proof the process is idle: block removal.
-					blockers.push(`Process ${pid} cwd unknown`);
+					// Same-uid agents can deny stat and readlink here while staying live.
+					unreadable.add(pid);
 					continue;
 				}
 				if (contained(checkout, cwd))
