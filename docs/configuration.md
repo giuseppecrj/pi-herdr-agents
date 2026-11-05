@@ -94,6 +94,18 @@ authoring family is known; `task:review` does not establish independence. Family
 is the independence boundary; project policy may separately require a different
 provider. This is guidance, not extension enforcement.
 
+### Model catalog in the prompt
+
+The `subagent` tool's guidelines in the parent's system prompt tell it which
+models it can launch. With no configured shortlists, they list the first 24
+authenticated models, sorted by ID, with each model's thinking levels and
+limits. When `models.tasks` has at least one authenticated candidate, they list
+the shortlists and capabilities of their unique models. Other authenticated
+models appear as compact IDs, capped at 24, so reviewers can choose another
+family without guessing an ID. A session that scopes models (`--models` or
+`enabledModels`) lists its scoped set instead; see
+[Model resolution and fallback](#model-resolution-and-fallback).
+
 ## Draft task-model preferences
 
 Run `/subagents-init [preferences]` to draft task-model preferences. For example:
@@ -157,6 +169,13 @@ sent. Once an offer is recorded, a refusal or failure also stops init: it never
 falls back to the direct writer. See [Task-model init events](#task-model-init-events).
 
 ## Task-model writer
+
+The writer tool registers inactive, so its schema stays out of the model's tool
+list. `/subagents-init` activates it when it sends a prompt that names it. A
+successful write deactivates it again, even when it was enabled manually or
+restored by a reload or resume. A failed write leaves it active for a retry.
+An init that does not start undoes only its own activation. Another extension's
+approval flow never activates the writer.
 
 The writer validates and atomically replaces `models.tasks` and `tasksMeta`,
 preserving unrelated settings. Its tool schema accepts partial nonempty

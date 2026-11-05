@@ -803,30 +803,14 @@ describe("authenticated model catalog", () => {
 		assert.match(catalog, /200k context/);
 		assert.match(catalog, /other\/plain/);
 		assert.match(catalog, /non-reasoning/);
-		assert.match(
-			catalog,
-			/explicitly select an exact authenticated provider\/model-id by task tier first/,
-		);
-		assert.match(
-			catalog,
-			/For ordinary review, prefer a different authenticated model family/,
-		);
-		assert.match(
-			catalog,
-			/context-isolated/,
-			"generic catalog must describe context-isolated same-family fallback",
-		);
-		assert.match(
-			catalog,
-			/inherits the parent runtime as a discouraged fallback/,
-		);
 	});
 
-	it("renders authenticated configured shortlists in order with review guidance", () => {
+	it("keeps shortlisted capabilities and compact alternatives when categories are configured", () => {
 		const entries = [
 			model("fake", "parent"),
 			model("other", "first"),
 			model("other", "second"),
+			model("third", "alternative"),
 			model("other", "unauthed"),
 		];
 		const tasks = {
@@ -848,21 +832,36 @@ describe("authenticated model catalog", () => {
 		assert.match(catalog, /- coding: other\/second, other\/first/);
 		assert.match(catalog, /- review: fake\/parent/);
 		assert.doesNotMatch(catalog, /other\/unauthed/);
-		assert.match(catalog, /The extension does not enforce this/);
-		assert.match(
-			catalog,
-			/context-isolated/,
-			"shortlist catalog must describe context-isolated same-family fallback",
-		);
+		assert.match(catalog, /^- other\/second — reasoning \(/m);
+		assert.match(catalog, /^- other\/first — reasoning \(/m);
+		assert.match(catalog, /^- fake\/parent — reasoning \(/m);
+		assert.match(catalog, /Other authenticated model IDs: third\/alternative/);
+		assert.doesNotMatch(catalog, /^- third\/alternative — /m);
+		assert.doesNotMatch(catalog, /Authenticated subagent models/);
 	});
 
-	it("keeps generic tier guidance when shortlists are empty or unconfigured", () => {
-		for (const tasks of [undefined, {}]) {
+	it("caps compact alternatives without repeating shortlisted model facts", () => {
+		const entries = Array.from({ length: 8 }, (_, index) =>
+			model("fake", `model-${index}`),
+		);
+		const catalog = buildAuthenticatedModelCatalog(registry(entries), 2, {
+			coding: ["fake/model-0"],
+			docs: ["fake/model-0"],
+		});
+		assert.equal((catalog.match(/^- fake\/model-0 — /gm) ?? []).length, 1);
+		assert.match(
+			catalog,
+			/Other authenticated model IDs: fake\/model-1, fake\/model-2/,
+		);
+		assert.doesNotMatch(catalog, /fake\/model-3/);
+		assert.match(catalog, /5 more authenticated models omitted/);
+	});
+
+	it("lists models when shortlists are empty, unconfigured, or unauthenticated", () => {
+		for (const tasks of [undefined, {}, { coding: ["missing/model"] }]) {
 			const catalog = buildAuthenticatedModelCatalog(registry(), 24, tasks);
-			assert.match(
-				catalog,
-				/explicitly select an exact authenticated provider\/model-id by task tier first/,
-			);
+			assert.match(catalog, /Authenticated subagent models/);
+			assert.match(catalog, /^- fake\/parent — /m);
 			assert.doesNotMatch(catalog, /Task-category shortlists/);
 		}
 	});
@@ -954,7 +953,7 @@ describe("authenticated model catalog", () => {
 		assert.match(catalog, /- none discovered; omitting model still inherits/);
 	});
 
-	it("keeps ordinary fallback separate from strict orchestration guidance in both catalog branches", () => {
+	it("leaves review and fallback policy to tool metadata in both catalog branches", () => {
 		const catalogs = [
 			[
 				"shortlist",
@@ -968,32 +967,11 @@ describe("authenticated model catalog", () => {
 			const compact = normalized(catalog);
 			for (const clause of ordinaryReviewClauses)
 				assert.ok(
-					compact.includes(clause),
-					`${label} catalog must include: ${clause}`,
+					!compact.includes(clause),
+					`${label} catalog must not repeat: ${clause}`,
 				);
-			assert.match(
-				compact,
-				/exact authenticated provider\/model-id/,
-				`${label} catalog must require an exact authenticated provider/model-id`,
-			);
+			assert.doesNotMatch(compact, /discouraged fallback/, label);
+			assert.doesNotMatch(compact, /For orchestrated children/, label);
 		}
-
-		const genericLines = catalogs[1][1].split("\n");
-		const orchestratedLine = genericLines.find((line) =>
-			line.startsWith("For orchestrated children"),
-		);
-		assert.ok(
-			orchestratedLine,
-			"generic catalog must include an orchestrated line",
-		);
-		assert.doesNotMatch(
-			orchestratedLine,
-			/ordinary|same-family|context-isolated/i,
-			"generic catalog's orchestrated line must not embed ordinary-review fallback",
-		);
-		assert.ok(
-			genericLines.some((line) => line.startsWith("For ordinary review")),
-			"generic catalog must put ordinary-review guidance on a separate line",
-		);
 	});
 });

@@ -15,6 +15,7 @@ import {
 } from "../../maestro/core/host-text.ts";
 import {
 	SUBAGENT_CANCEL_DESCRIPTION,
+	SUBAGENT_CANCEL_SNIPPET,
 	type SubagentCancelDetails,
 	type Controls,
 } from "./controls.ts";
@@ -101,7 +102,7 @@ export function registerControlTools(
 			name: "subagent_stop",
 			label: "Stop Persistent Specialist",
 			description:
-				"Gracefully stop a persistent specialist after its active task settles. Exit is confirmed before the specialist is removed.",
+				"Stop a persistent specialist after its active task finishes.",
 			parameters: Type.Object({
 				id: Type.Optional(
 					Type.String({
@@ -140,13 +141,9 @@ export function registerControlTools(
 			name: "subagent_interrupt",
 			label: "Interrupt Subagent",
 			description:
-				"Send Escape to the active turn of a currently running Pi-backed subagent. " +
-				"The child pane, session, watcher, and running entry remain alive; this returns only a local acknowledgement " +
-				"and does not emit a subagent_result solely because of this request.",
+				"Send Escape to a running subagent's active turn. The subagent keeps running, and this call delivers no result.",
 			promptSnippet:
-				"Send Escape to the active turn of a currently running Pi-backed subagent. " +
-				"The child pane, session, watcher, and running entry remain alive; this returns only a local acknowledgement " +
-				"and does not emit a subagent_result solely because of this request.",
+				"Send Escape to a running subagent's active turn without ending the subagent",
 			parameters: Type.Object({
 				id: Type.Optional(
 					Type.String({ description: "Exact running subagent id" }),
@@ -201,7 +198,7 @@ export function registerControlTools(
 			name: "subagent_cancel",
 			label: "Cancel Subagent",
 			description: SUBAGENT_CANCEL_DESCRIPTION,
-			promptSnippet: SUBAGENT_CANCEL_DESCRIPTION,
+			promptSnippet: SUBAGENT_CANCEL_SNIPPET,
 			parameters: Type.Object({
 				id: Type.Optional(
 					Type.String({ description: "Exact running subagent id" }),
@@ -256,11 +253,8 @@ export function registerControlTools(
 			name: "subagents_list",
 			label: "List Subagents",
 			description:
-				"List all available package, global, and project subagent definitions. " +
-				"Project agents override global definitions, which override package definitions.",
-			promptSnippet:
-				"List all available package, global, and project subagent definitions. " +
-				"Project agents override global definitions, which override package definitions.",
+				"List subagent role definitions, live persistent specialists, and the supervision mode.",
+			promptSnippet: "List the subagent role definitions available to launch",
 			parameters: Type.Object({}),
 
 			async execute() {

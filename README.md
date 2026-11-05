@@ -136,7 +136,7 @@ The parent session gets these tools:
 | `subagents_list` | List agent definitions, live specialists, and the supervision mode. |
 | `worktree_list` | List managed worktrees and what blocks their cleanup. |
 | `worktree_remove` | Remove one managed worktree on explicit request. |
-| `subagents_write_task_models` | Internal writer for `models.tasks` preferences. |
+| `subagents_write_task_models` | Internal writer for `models.tasks` preferences. Inactive until `/subagents-init` needs it. |
 
 Children get `caller_ping` to ask the parent for help. Interactive children also get `subagent_done` to mark themselves complete, and are asked whether they are done when a run ends without it.
 
