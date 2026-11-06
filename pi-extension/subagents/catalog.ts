@@ -31,17 +31,16 @@ export function buildSubagentRoutingGuidelines(
 	options: { launchRoster?: boolean } = {},
 ): string[] {
 	return [
-		"Act as the coordinator: decompose the work, give each child one bounded outcome — goal, allowed files, verification, and whether to commit — and keep dependent writes sequential; parallelize only independent tasks.",
-		"Children are leaves by default: they do not push, merge, deploy, or orchestrate further agents unless their task explicitly authorizes it. The parent inspects each result or worktree handoff (diff against the reported base, run relevant tests) and owns integration, verification, and cleanup.",
+		"Act as the coordinator. Give each child one bounded outcome: goal, allowed files, verification, and whether to commit. Keep dependent writes sequential and parallelize only independent tasks.",
+		"Children do not push, merge, deploy, or launch further agents unless their task allows it. Review each result or worktree yourself (diff against the reported base, run the relevant tests). Integration and cleanup are yours.",
 		...(Object.keys(authenticatedTaskPreferences ?? {}).length > 0
 			? [
-					"For non-review work, prefer the configured task-category shortlists below and use task:<category> only as the entire model value. Use exact IDs for reviews when the authoring family is known.",
+					"For non-review work, prefer the configured task-category shortlists below. Use exact IDs for reviews when the authoring family is known.",
 				]
 			: [
 					"For orchestrated subagent work, explicitly set both model and thinking for every child: first choose a fast, mid, or frontier provider-family tier matched to task complexity, then set thinking within that model's supported range.",
 					"Use fast tier for bounded mechanical work and recon, mid tier for ordinary implementation or review, and frontier tier for architecture, security, hard diagnosis, or adversarial review. Use minimal/low thinking for mechanical work, medium for ordinary work, and high+ for hard work.",
 				]),
-		"For ordinary review, prefer a different authenticated model family. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback. Use an exact authenticated provider/model-id from the live catalog below, never an alias or fuzzy name.",
 		"Omitting model and thinking still inherits the parent runtime, but this is a discouraged fallback for orchestrated children.",
 		"Before launching a new group of subagents, choose a short task slug and name each new child <task>-<role>[-n], for example login-api or login-test2. Use only plan, research, ui, api, build, test, review, browser, security, perf, or merge as roles; leave existing names unchanged. " +
 			(options.launchRoster === false
@@ -56,20 +55,19 @@ const ThinkingLevelSchema = Type.Union(
 	THINKING_LEVELS.map((level) => Type.Literal(level)),
 	{
 		description:
-			"Pi thinking level. Pick the model tier first, then set thinking within that model's range: minimal/low for bounded mechanical work, medium for ordinary implementation or review, high+ for architecture, security, or hard diagnosis. Omitting still inherits the parent level; do not omit on orchestrated child work.",
+			"Pi thinking level, within the chosen model's supported range. Use low for mechanical work, medium for ordinary work, and high+ for hard work.",
 	},
 );
 
 export const SubagentParams = Type.Object({
 	name: Type.String({
-		description:
-			"Short stable label for the subagent; for a new coordinated group use <task>-<role>[-n] (shown in the widget and legacy Herdr pane title)",
+		description: "Short label shown in the widget and legacy pane title.",
 	}),
 	task: Type.String({ description: "Task/prompt for the sub-agent" }),
 	agent: Type.Optional(
 		Type.String({
 			description:
-				"Role definition name to load defaults from. Discovery precedence is project .pi/agents, global ~/.pi/agent/agents, then installed role packs; this extension ships no roles. A missing name fails before launch. Omit for a bare agent.",
+				"Role definition to load defaults from (see subagents_list). Omit for a bare agent.",
 		}),
 	),
 	systemPrompt: Type.Optional(
@@ -81,7 +79,7 @@ export const SubagentParams = Type.Object({
 	model: Type.Optional(
 		Type.String({
 			description:
-				"Explicitly pick an exact authenticated provider/model-id, an ordered comma-separated fallback list, or task:<category> as the entire value. task: categories are case-insensitive and expand configured authenticated candidates; worktrees use only the first. For ordinary review, prefer a different authenticated model family. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback. Omitting still inherits the parent model; do not omit for orchestrated children. Fallback lists cannot be used with worktrees.",
+				"Exact authenticated provider/model-id, a comma-separated fallback list, or task:<category> as the whole value. Worktree launches take one model: a task: category uses its first candidate, and fallback lists are rejected. For ordinary review, prefer a different authenticated model family. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback.",
 		}),
 	),
 	thinking: Type.Optional(ThinkingLevelSchema),
@@ -98,7 +96,7 @@ export const SubagentParams = Type.Object({
 	cwd: Type.Optional(
 		Type.String({
 			description:
-				"Working directory for the sub-agent. Without worktree, the agent starts in this folder. With worktree, this selects the source Git repository and the agent starts at the created worktree root.",
+				"Working directory. With `worktree`, the source repository; the child then starts at the new worktree root.",
 		}),
 	),
 	worktree: Type.Optional(
@@ -107,13 +105,12 @@ export const SubagentParams = Type.Object({
 				Type.Object({
 					branch: Type.String({
 						minLength: 1,
-						description:
-							"New branch name for an isolated Herdr-managed Git worktree",
+						description: "Unique new branch name.",
 					}),
 					base: Type.Optional(
 						Type.String({
 							description:
-								"Git revision to branch from. Defaults to the source checkout's committed HEAD.",
+								"Git revision to branch from. Defaults to the committed HEAD.",
 						}),
 					),
 				}),
@@ -121,20 +118,20 @@ export const SubagentParams = Type.Object({
 			],
 			{
 				description:
-					"Optional isolated Herdr-managed Git worktree; requires legacy Herdr and is unsupported on Core. Omit or pass null for an ordinary child in cwd.",
+					"New managed Git worktree (legacy Herdr only, not Core). Omit or pass null for an ordinary child in cwd.",
 			},
 		),
 	),
 	fork: Type.Optional(
 		Type.Boolean({
 			description:
-				"Override the child session mode for this spawn. `true` forces full-context fork; `false` forces standalone. Omit to inherit the agent frontmatter session-mode.",
+				"`true` copies this conversation into the child; `false` starts it fresh. Omit to use the role's session-mode.",
 		}),
 	),
 	persistent: Type.Optional(
 		Type.Boolean({
 			description:
-				"Keep this stable specialist session alive between turn-based tasks. Persistent agents accept follow-up work only through subagent_send.",
+				"Keep the child alive between tasks. Send later tasks with subagent_send.",
 		}),
 	),
 	accept: Type.Optional(
@@ -143,14 +140,13 @@ export const SubagentParams = Type.Object({
 				run: Type.String({
 					minLength: 1,
 					description:
-						"Shell command run with `sh -c`. Exit 0 passes. The child runs it before it finishes and retries on failure; then the host re-runs it in the child's checkout (the worktree for worktree children) and that run decides the verdict.",
+						"Shell command run with `sh -c`; exit 0 passes. The child runs it and retries on failure. The host then reruns it in the child's checkout, and that run decides the verdict.",
 				}),
 				maxRetries: Type.Optional(
 					Type.Integer({
 						minimum: 0,
 						maximum: ACCEPT_MAX_RETRIES,
-						description:
-							"Extra child turns after a failed check, each with the failing output. Default 1.",
+						description: "Extra child turns after a failed check. Default 1.",
 					}),
 				),
 				timeoutSec: Type.Optional(
@@ -158,26 +154,26 @@ export const SubagentParams = Type.Object({
 						minimum: 1,
 						maximum: ACCEPT_MAX_TIMEOUT_SEC,
 						description:
-							"Per-run timeout in seconds. Default 600. A timeout is verdict `error`.",
+							"Per-run timeout in seconds. Default 600. A timeout gives verdict `error`.",
 					}),
 				),
 				paths: Type.Optional(
 					Type.Array(Type.String({ minLength: 1 }), {
 						description:
-							"Repo-relative check files (for example tests). The delivery reports any the child changed; the verdict is unchanged.",
+							"Check files, such as tests. The result lists any the child changed, without affecting the verdict.",
 					}),
 				),
 			},
 			{
 				description:
-					"Optional accept check. The delivery carries `Check: <verdict>` from the closed set accepted, rejected, error, skipped, none. Only auto-exit, non-persistent children support it.",
+					"Optional acceptance check. The result reports `Check: <verdict>`: accepted, rejected, error, skipped, or none. Only for auto-exit, non-persistent children.",
 			},
 		),
 	),
 	interactive: Type.Optional(
 		Type.Boolean({
 			description:
-				"Mark the subagent as interactive (long-running, user drives the conversation in its own pane). When true, the main session is not woken by status transitions (stalled/recovered) for this subagent. If omitted, falls back to the agent's `interactive` frontmatter, otherwise the inverse of `auto-exit` (agents that auto-exit are autonomous and get stall pings; agents that don't are interactive and stay quiet).",
+				"True when the user drives the child in its own pane. Interactive children do not wake the parent on stall or recovery. Defaults to the role's `interactive` setting, else the opposite of `auto-exit`.",
 		}),
 	),
 });

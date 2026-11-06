@@ -2736,16 +2736,16 @@ describe("subagent_cancel public tool", { timeout: 20_000 }, () => {
 			"name",
 		]);
 		for (const pattern of [
-			/terminal intent first/,
 			/exactly one cancelled result/,
-			/No model fallback, retry, or recovery/,
+			/no model fallback, retry, or recovery/i,
 			/keeps the workspace, checkout, commits, and manifest/,
 			/confirmed, requested .*unconfirmed .*already-terminal/,
 			/Persistent specialists are rejected; use subagent_stop/,
 			/Do not poll/,
 		])
 			assert.match(tool.description, pattern);
-		assert.equal(tool.promptSnippet, tool.description);
+		assert.ok(tool.promptSnippet.length < 100, tool.promptSnippet);
+		assert.doesNotMatch(tool.promptSnippet, /\n/);
 		assert.equal(
 			subagentsModule.__test__
 				.resolveDenyTools({ spawning: false })
@@ -10733,6 +10733,113 @@ describe("commands", () => {
 		assert.equal(sentUserMessages.length, 1);
 	});
 
+	it("keeps the task-model writer inactive until /subagents-init needs it", async () => {
+		const dir = createTestDir();
+		const previous = process.env.PI_CODING_AGENT_DIR;
+		process.env.PI_CODING_AGENT_DIR = dir;
+		try {
+			const writeOnce = async (userActivated: boolean) => {
+				const { api, registeredCommands, registeredTools, sentUserMessages } =
+					createMockExtensionApi();
+				subagentsModule.default(api);
+				const writerActive = () =>
+					api.getActiveTools().includes("subagents_write_task_models");
+				assert.equal(writerActive(), false, "inactive after load");
+				if (userActivated)
+					api.setActiveTools([
+						...api.getActiveTools(),
+						"subagents_write_task_models",
+					]);
+				await registeredCommands
+					.find((command) => command.name === "subagents-init")!
+					.handler("", initContext({ getAvailable: () => [INIT_MODEL] }));
+				assert.equal(sentUserMessages.length, 1);
+				assert.equal(writerActive(), true, "active while init runs");
+				const writer = registeredTools.find(
+					(tool) => tool.name === "subagents_write_task_models",
+				)!;
+				await assert.rejects(
+					writer.execute(
+						"invalid-init-write",
+						{ tasks: {}, tasksMeta: { method: "registry-only" } },
+						undefined,
+						undefined,
+						{ modelRegistry: { getAvailable: () => [] } },
+					),
+				);
+				assert.equal(writerActive(), true, "a failed write remains retryable");
+				await writer.execute(
+					"init-write",
+					{
+						tasks: { coding: ["p/m"] },
+						tasksMeta: {
+							generatedAt: "2026-09-18T00:00:00Z",
+							method: "registry-only",
+						},
+					},
+					undefined,
+					undefined,
+					{
+						modelRegistry: {
+							find: () => INIT_MODEL,
+							getAvailable: () => [INIT_MODEL],
+							hasConfiguredAuth: () => true,
+						},
+					},
+				);
+				return writerActive();
+			};
+			assert.equal(
+				await writeOnce(false),
+				false,
+				"a successful write deactivates a writer that init activated",
+			);
+			assert.equal(
+				await writeOnce(true),
+				false,
+				"a successful write also deactivates an explicitly activated or restored writer",
+			);
+		} finally {
+			restoreEnvVar("PI_CODING_AGENT_DIR", previous);
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("deactivates the task-model writer when init does not start", async () => {
+		const { api, invalidate, registeredCommands } = createMockExtensionApi();
+		subagentsModule.default(api);
+		invalidate();
+		const notifications: string[] = [];
+		await registeredCommands
+			.find((command) => command.name === "subagents-init")!
+			.handler(
+				"",
+				initContext({ getAvailable: () => [INIT_MODEL] }, notifications),
+			);
+		assert.match(notifications[0], /Pi did not accept the init prompt/);
+		assert.equal(
+			api.getActiveTools().includes("subagents_write_task_models"),
+			false,
+		);
+	});
+
+	it("a failed init does not release a writer activated by an earlier init", async () => {
+		const { api, invalidate, registeredCommands } = createMockExtensionApi();
+		subagentsModule.default(api);
+		const init = registeredCommands.find(
+			(command) => command.name === "subagents-init",
+		)!;
+		const context = initContext({ getAvailable: () => [INIT_MODEL] });
+		await init.handler("", context);
+		assert.ok(api.getActiveTools().includes("subagents_write_task_models"));
+		invalidate();
+		await init.handler("", context);
+		assert.ok(
+			api.getActiveTools().includes("subagents_write_task_models"),
+			"a failed submission can undo only this invocation's activation",
+		);
+	});
+
 	it("returns saved tool details and text from normalized config while preserving unrelated preferences", async () => {
 		const dir = createTestDir();
 		const previous = process.env.PI_CODING_AGENT_DIR;
@@ -11491,13 +11598,13 @@ describe("tool registration", () => {
 			/explicitly set both model and thinking for every child/,
 		);
 		assert.match(
-			subagent.promptGuidelines.join("\n"),
+			subagent.parameters.properties.model.description,
 			/For ordinary review, prefer a different authenticated model family/,
 		);
-		assert.match(
+		assert.doesNotMatch(
 			subagent.promptGuidelines.join("\n"),
 			/context-isolated/,
-			"injected routing guidelines must describe context-isolated same-family fallback",
+			"the model parameter carries review policy without repeating it in guidelines",
 		);
 		assert.match(
 			subagent.promptGuidelines.join("\n"),
@@ -11737,6 +11844,11 @@ describe("tool registration", () => {
 			"Disclose that this review is context-isolated, not cross-family independent.",
 			"Cross-family verification must not use this fallback.",
 		];
+		const { api, registeredTools } = createMockExtensionApi();
+		subagentsModule.default(api);
+		const modelDescription = registeredTools.find(
+			(tool) => tool.name === "subagent",
+		).parameters.properties.model.description;
 		const preferenceCases: Array<[string, TaskPreferences]> = [
 			["shortlist", { coding: ["fake/worker"] }],
 			["generic", {}],
@@ -11747,20 +11859,28 @@ describe("tool registration", () => {
 				24,
 				taskPreferences,
 			);
-			const combined = subagentsModule.__test__
-				.buildSubagentRoutingGuidelines(catalog, taskPreferences)
+			const combined = [
+				...subagentsModule.__test__.buildSubagentRoutingGuidelines(
+					catalog,
+					taskPreferences,
+				),
+				modelDescription,
+			]
 				.join("\n")
 				.replace(/\s+/g, " ")
 				.trim();
 			for (const clause of clauses)
-				assert.ok(
-					combined.includes(clause),
-					`${label} combined guidance must include: ${clause}`,
+				assert.equal(
+					combined.split(clause).length - 1,
+					1,
+					`${label} combined guidance must state once: ${clause}`,
 				);
 			if (label === "generic") {
-				const orchestratedLine = catalog
-					.split("\n")
-					.find((line) => line.startsWith("For orchestrated children"));
+				const orchestratedLine = subagentsModule.__test__
+					.buildSubagentRoutingGuidelines(catalog, taskPreferences)
+					.find((line: string) =>
+						line.startsWith("For orchestrated subagent work"),
+					);
 				assert.ok(orchestratedLine);
 				assert.doesNotMatch(
 					orchestratedLine,
@@ -11770,12 +11890,45 @@ describe("tool registration", () => {
 		}
 	});
 
-	it("states the complete ordinary-review taxonomy in routing guidelines", () => {
-		const guidelines = subagentsModule.__test__
-			.buildSubagentRoutingGuidelines("catalog", { coding: ["fake/worker"] })
-			.join("\n")
-			.replace(/\s+/g, " ")
-			.trim();
+	it("keeps Core capability limits while shortening launch and control snippets", () => {
+		const { api, registeredTools } = createMockExtensionApi();
+		subagentsModule.default(api);
+		const launch = registeredTools.find((tool) => tool.name === "subagent");
+		const resume = registeredTools.find(
+			(tool) => tool.name === "subagent_resume",
+		);
+		const cancel = registeredTools.find(
+			(tool) => tool.name === "subagent_cancel",
+		);
+		for (const tool of [launch, resume, cancel]) {
+			assert.ok(tool);
+			assert.ok(tool.promptSnippet.length < 100, tool.promptSnippet);
+			assert.doesNotMatch(tool.promptSnippet, /\n/);
+			assert.match(tool.description, /Do not poll/i);
+		}
+		for (const tool of [launch, resume])
+			assert.match(
+				tool.description,
+				/legacy Herdr pane or local Core terminal/,
+			);
+		assert.match(launch.description, /Managed worktrees require legacy Herdr/);
+		assert.match(
+			launch.description,
+			/without Desktop Agents tabs or sidebar integration/,
+		);
+		assert.match(
+			launch.parameters.properties.worktree.description,
+			/legacy Herdr only, not Core/,
+		);
+		assert.match(resume.description, /does not reattach a retained worktree/);
+		assert.match(cancel.description, /Core confirms.*exit.*after delivery/);
+	});
+
+	it("keeps the complete review policy in the schema when custom prompts omit guidelines", () => {
+		const { api, registeredTools } = createMockExtensionApi();
+		subagentsModule.default(api);
+		const description = registeredTools.find((tool) => tool.name === "subagent")
+			.parameters.properties.model.description;
 		for (const clause of [
 			"For ordinary review, prefer a different authenticated model family.",
 			"When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session.",
@@ -11783,8 +11936,8 @@ describe("tool registration", () => {
 			"Cross-family verification must not use this fallback.",
 		])
 			assert.ok(
-				guidelines.includes(clause),
-				`routing guidelines must include: ${clause}`,
+				description.includes(clause),
+				`the always-sent model schema must include: ${clause}`,
 			);
 	});
 
@@ -11942,31 +12095,20 @@ describe("tool registration", () => {
 		assert.match(subagentTool.description, /retain.*parent review/i);
 	});
 
-	it("describes the complete ordinary-review taxonomy in the model parameter", () => {
+	it("keeps model selection mechanics alongside the review policy", () => {
 		const { api, registeredTools } = createMockExtensionApi();
 		subagentsModule.default(api);
 		const subagentTool = registeredTools.find(
 			(tool) => tool.name === "subagent",
 		);
-		const modelDesc = (
-			subagentTool.parameters.properties.model.description ?? ""
-		)
-			.replace(/\s+/g, " ")
-			.trim();
-		for (const clause of [
-			"For ordinary review, prefer a different authenticated model family.",
-			"When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session.",
-			"Disclose that this review is context-isolated, not cross-family independent.",
-			"Cross-family verification must not use this fallback.",
-		])
-			assert.ok(
-				modelDesc.includes(clause),
-				`model description must include: ${clause}`,
-			);
-		assert.doesNotMatch(
-			modelDesc,
-			/when unavailable/i,
-			"model description must use the authenticated-family availability gate",
+		const modelDesc =
+			subagentTool.parameters.properties.model.description ?? "";
+		assert.match(modelDesc, /task:<category>/);
+		assert.match(modelDesc, /fallback lists are rejected/);
+		assert.match(modelDesc, /ordinary review|context-isolated/i);
+		assert.match(
+			subagentTool.parameters.properties.thinking.description,
+			/low for mechanical work, medium for ordinary work, and high\+/,
 		);
 	});
 

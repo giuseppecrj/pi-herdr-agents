@@ -341,7 +341,7 @@ describe("generated tool docs", () => {
 			output.split("\n").find((line) => line.startsWith(`| \`${path}\` |`));
 		assert.match(
 			row("worktree.branch") ?? "",
-			/^\| `worktree\.branch` \| string \| yes \| New branch name/,
+			/^\| `worktree\.branch` \| string \| yes \| Unique new branch name/,
 		);
 		assert.match(
 			row("worktree.base") ?? "",

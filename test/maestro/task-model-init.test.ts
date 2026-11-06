@@ -310,6 +310,34 @@ describe("task-model init composition", () => {
 		assert.deepEqual(inactive.events, ["emit"]);
 	});
 
+	it("asks the host to activate the destination tool before checking it", () => {
+		const direct = initHost((events) => ({
+			activateTool: (name) => events.push(`activate ${name}`),
+			isToolActive: (name) => {
+				events.push(`check ${name}`);
+				return true;
+			},
+		}));
+		assert.equal(direct.outcome.kind, "started");
+		assert.deepEqual(direct.events, [
+			"emit",
+			"activate subagents_write_task_models",
+			"check subagents_write_task_models",
+			"submit",
+		]);
+		const offered = initHost((events) => ({
+			emitApprovalRequest: (_brief, offer) => {
+				events.push("emit");
+				offer({
+					owner: "p",
+					open: () => ready("pack_apply", "Use pack_apply."),
+				});
+			},
+			activateTool: (name) => events.push(`activate ${name}`),
+		}));
+		assert.deepEqual(offered.events, ["emit", "activate pack_apply", "submit"]);
+	});
+
 	it("cancels an opened offer whose prompt is not submitted, and only then", () => {
 		const offering =
 			(events: string[], cancel = () => events.push("cancel")) =>

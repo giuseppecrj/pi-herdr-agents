@@ -41,6 +41,9 @@ Fakes are for conformance tests only.
   the selected provider, with the binding retained by `pi-run-session.ts`.
 - `maestro/core/worktree.ts`, `maestro/core/worktree-cleanup.ts` — manifest
   schema/state, handoff types, and cleanup eligibility/formatting.
+- `maestro/core/realpath-without-opening.ts` — lstat/stat/readlink realpath for
+  cleanup canonicalization and Herdr checkout comparisons; avoids Bun `open()`
+  freezes on protected directories.
 - `maestro/core/git-environment.ts` removes inherited repository-selection and
   command-local Git configuration overrides from host-managed Git subprocesses.
   It retains user configuration, identity, and hooks.

@@ -20,13 +20,15 @@ interface SubagentInterruptDetails {
 }
 
 export const SUBAGENT_CANCEL_DESCRIPTION =
-	"Cancel a running ordinary (non-persistent) Pi-backed subagent, including an interrupted one: " +
-	"records terminal intent first, terminates its owned process, and delivers exactly one cancelled result. " +
-	"No model fallback, retry, or recovery starts after a cancel. " +
-	"An ordinary legacy pane is closed; Core confirms native process exit and removes its terminal record after delivery. " +
-	"A managed-worktree child stops only its Pi process and keeps the workspace, checkout, commits, and manifest. " +
-	"Returns confirmed, requested (launch still in flight), unconfirmed (the run stays live; call again to retry), or already-terminal. " +
-	"Persistent specialists are rejected; use subagent_stop. Do not poll: the cancelled result arrives automatically.";
+	"Cancel a running non-persistent subagent, including an interrupted one. " +
+	"The host stops its process and delivers exactly one cancelled result, with no model fallback, retry, or recovery. Do not poll for it. " +
+	"A legacy pane closes; Core confirms exit and removes its terminal record after delivery. " +
+	"A worktree child keeps the workspace, checkout, commits, and manifest. " +
+	"Returns confirmed, requested (launch still in flight), unconfirmed (still running; call again), or already-terminal. " +
+	"Persistent specialists are rejected; use subagent_stop.";
+
+export const SUBAGENT_CANCEL_SNIPPET =
+	"Cancel a running non-persistent subagent; one cancelled result arrives later";
 
 export interface SubagentCancelDetails {
 	error?: string;

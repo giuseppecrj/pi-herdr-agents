@@ -557,30 +557,23 @@ function finishModelCatalog(
 		lines.push(
 			"- none discovered; omitting model still inherits the parent runtime",
 		);
-	const configured = Object.entries(
-		getAuthenticatedTaskPreferences(registry, taskPreferences),
-	);
-	if (configured.length > 0) {
-		lines.push(
-			"Task-category shortlists (use task:<category> only as the entire model value):",
-		);
-		for (const [category, candidates] of configured)
-			lines.push(`- ${category}: ${candidates.join(", ")}`);
-		lines.push(
-			"For ordinary review, prefer a different authenticated model family. Use an exact authenticated provider/model-id from the shortlist when the authoring family is known. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback. The extension does not enforce this.",
-		);
-	} else {
-		lines.push(
-			"For orchestrated children, explicitly select an exact authenticated provider/model-id by task tier first (fast for bounded mechanical work and recon, mid for implementation and review, frontier for architecture, security, hard diagnosis, or adversarial review), then set supported thinking.",
-		);
-		lines.push(
-			"For ordinary review, prefer a different authenticated model family. Use an exact authenticated provider/model-id from the catalog when the authoring family is known. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback.",
-		);
-	}
 	lines.push(
-		"Omitting model and thinking inherits the parent runtime as a discouraged fallback.",
+		...taskShortlistLines(
+			getAuthenticatedTaskPreferences(registry, taskPreferences),
+		),
 	);
 	return lines.join("\n");
+}
+
+function taskShortlistLines(shortlists: TaskPreferences): string[] {
+	const configured = Object.entries(shortlists);
+	if (configured.length === 0) return [];
+	return [
+		"Task-category shortlists:",
+		...configured.map(
+			([category, candidates]) => `- ${category}: ${candidates.join(", ")}`,
+		),
+	];
 }
 
 export function buildAuthenticatedModelCatalog(
@@ -594,6 +587,33 @@ export function buildAuthenticatedModelCatalog(
 		.sort((a, b) =>
 			`${a.provider}/${a.id}`.localeCompare(`${b.provider}/${b.id}`),
 		);
+	const shortlists = getAuthenticatedTaskPreferences(registry, taskPreferences);
+	if (Object.keys(shortlists).length > 0) {
+		const refs = new Set(Object.values(shortlists).flat());
+		const shortlisted = models.filter((model) =>
+			refs.has(`${model.provider}/${model.id}`),
+		);
+		const alternatives = models.filter(
+			(model) => !refs.has(`${model.provider}/${model.id}`),
+		);
+		const lines = [
+			...taskShortlistLines(shortlists),
+			"Shortlisted model capabilities:",
+			...shortlisted.map((model) => modelCatalogLine(registry, model)),
+		];
+		if (alternatives.length > 0)
+			lines.push(
+				`Other authenticated model IDs: ${alternatives
+					.slice(0, limit)
+					.map((model) => `${model.provider}/${model.id}`)
+					.join(", ")}`,
+			);
+		if (alternatives.length > limit)
+			lines.push(
+				`- … ${alternatives.length - limit} more authenticated models omitted`,
+			);
+		return lines.join("\n");
+	}
 	const visibleModels = models.slice(0, limit);
 	const lines = [
 		"Authenticated subagent models (use exact provider/model-id only):",

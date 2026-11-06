@@ -153,7 +153,7 @@ The parent session gets these tools:
 | `subagents_list` | List agent definitions, live specialists, and the supervision mode. |
 | `worktree_list` | List managed worktrees and what blocks their cleanup. |
 | `worktree_remove` | Remove one managed worktree on explicit request. |
-| `subagents_write_task_models` | Internal writer for `models.tasks` preferences. |
+| `subagents_write_task_models` | Internal writer for `models.tasks` preferences. Inactive until `/subagents-init` needs it. |
 
 Children get `caller_ping` to ask the parent for help. Interactive children also get `subagent_done` to mark themselves complete, and are asked whether they are done when a run ends without it.
 
@@ -231,7 +231,7 @@ Cleanup is an explicit parent action:
 /worktree remove ticket/123
 ```
 
-Removal rechecks eligibility at the moment it runs. It requires the source repository to be inside the parent session's cwd, no detected process holder or live child, and a clean checkout with no untracked files or conflicts. Unknown Git state or failed process enumeration blocks removal. Unreadable individual process details produce warnings, not proof of inactivity. `--preserve` (or `preserve: true`) commits dirty work as a WIP commit first. Ignored files are not preserved and can be deleted. Cleanup never deletes branches, uses force flags, or closes the source repository's primary workspace.
+Removal rechecks eligibility at the moment it runs. It requires the source repository to be inside the parent session's cwd, no detected process holder or live child, and a clean checkout with no untracked files or conflicts. Unknown Git state or failed process enumeration blocks removal. Unreadable individual process details, including an undetermined process cwd, produce warnings, not proof of inactivity. `--preserve` (or `preserve: true`) commits dirty work as a WIP commit first. Ignored files are not preserved and can be deleted. Cleanup never deletes branches, uses force flags, or closes the source repository's primary workspace.
 
 Read [Worktree subagents](docs/worktree-subagents.md) before you run writing agents in worktrees. It covers task selection, review, recovery, and cleanup. The tool-level contract is in [Isolated worktree runs](docs/tools.md#isolated-worktree-runs) and [Explicit worktree cleanup](docs/tools.md#explicit-worktree-cleanup).
 

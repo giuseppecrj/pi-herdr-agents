@@ -31,6 +31,11 @@ export interface TaskModelInitInput {
 	): TaskModelRegistrySnapshot;
 	/** Emits the approval request for this brief and returns when listeners did. */
 	emitApprovalRequest(brief: TaskModelBrief, offer: OfferCallback): void;
+	/**
+	 * Called with the chosen destination tool before the active-tool check, so
+	 * the host can activate a writer it keeps inactive outside init.
+	 */
+	activateTool?(name: string): void;
 	isToolActive(name: string): boolean;
 	/** Hands the prompt to Pi; a throw means Pi did not take it. */
 	submit(prompt: string): void;
@@ -106,6 +111,7 @@ export function startTaskModelInit(
 		const problem = cancel();
 		return notStarted(problem ? `${reason}; ${problem}` : reason);
 	};
+	input.activateTool?.(destination.toolName);
 	if (!input.isToolActive(destination.toolName))
 		return cancelled(`${destination.toolName} is not an active tool`);
 	try {

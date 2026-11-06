@@ -276,8 +276,9 @@ changes. Without a real file, only non-model settings fall back to the example.
 Model values must be exact authenticated IDs. `/subagents-init [preferences]`
 drafts task preferences from the live model registry and the saved config's
 `configRevision`, then saves them through `subagents_write_task_models`
-(parent-only; validates, atomically replaces `models.tasks` and `tasksMeta`,
-preserves other settings). When one loaded extension offers to approve the
+(parent-only and inactive until init activates it; validates, atomically
+replaces `models.tasks` and `tasksMeta`, preserves other settings). A successful
+write deactivates it again. When one loaded extension offers to approve the
 write, the init prompt names that extension's tool instead; follow the prompt
 and do not call the writer around it. Payload: `tasks`
 (partial but nonempty categories; empty `tasks: {}` and duplicate refs within a
