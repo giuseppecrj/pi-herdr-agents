@@ -13,16 +13,16 @@ This page is the detailed reference for the tools, commands, and run lifecycle o
 
 | Tool | Sessions | Description |
 | --- | --- | --- |
-| `subagent` | parent, child | Spawn a sub-agent in a dedicated terminal herdr pane, or in an isolated Herdr-managed Git worktree when worktree is provided. |
-| `subagent_cancel` | parent, child | Cancel a running ordinary (non-persistent) Pi-backed subagent, including an interrupted one: records terminal intent first, terminates its owned process, and delivers exactly one cancelled result. |
-| `subagent_interrupt` | parent, child | Send Escape to the active turn of a currently running Pi-backed subagent. |
-| `subagent_resume` | parent, child | Resume a previous Pi-backed sub-agent session in a new herdr pane. |
+| `subagent` | parent, child | Launch a Pi subagent in a terminal pane, or in a new managed Git worktree when `worktree` is set. |
+| `subagent_cancel` | parent, child | Cancel a running non-persistent subagent, including an interrupted one. |
+| `subagent_interrupt` | parent, child | Send Escape to a running subagent's active turn. |
+| `subagent_resume` | parent, child | Resume a saved subagent session in a new terminal pane, to continue a cancelled run or send follow-up work. |
 | `subagent_send` | parent, child | Deliver one follow-up task to an idle persistent specialist. |
-| `subagent_stop` | parent, child | Gracefully stop a persistent specialist after its active task settles. |
-| `subagents_list` | parent, child | List all available package, global, and project subagent definitions. |
+| `subagent_stop` | parent, child | Stop a persistent specialist after its active task finishes. |
+| `subagents_list` | parent, child | List subagent role definitions, live persistent specialists, and the supervision mode. |
 | `subagents_write_task_models` | parent only | Validate and atomically replace models.tasks and models.tasksMeta in the durable Pi agent config, preserving unrelated settings. |
-| `worktree_list` | parent only | Inspect managed worktrees, including cross-session orphans. |
-| `worktree_remove` | parent only | Explicitly remove one managed worktree by exact path, branch, or workspace ID. |
+| `worktree_list` | parent only | List managed worktrees, including orphans from other sessions. |
+| `worktree_remove` | parent only | Remove one managed worktree by exact path, branch, or workspace ID, only when the user asks. |
 <!-- generated:tools:end -->
 
 | Skill | Description |
@@ -151,26 +151,26 @@ subagent({
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `name` | string | yes | Short stable label for the subagent; for a new coordinated group use \<task>-\<role>[-n] (shown in the widget and pane title) |
+| `name` | string | yes | Short label shown in the widget and pane title. |
 | `task` | string | yes | Task/prompt for the sub-agent |
-| `agent` | string | no | Role definition name to load defaults from. Discovery precedence is project .pi/agents, global ~/.pi/agent/agents, then installed role packs; this extension ships no roles. A missing name fails before launch. Omit for a bare agent. |
+| `agent` | string | no | Role definition to load defaults from (see subagents_list). Omit for a bare agent. |
 | `systemPrompt` | string | no | Role/system-prompt text for a bare spawn. Named agents keep their definition body. |
-| `model` | string | no | Explicitly pick an exact authenticated provider/model-id, an ordered comma-separated fallback list, or task:\<category> as the entire value. task: categories are case-insensitive and expand configured authenticated candidates; worktrees use only the first. For ordinary review, prefer a different authenticated model family. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback. Omitting still inherits the parent model; do not omit for orchestrated children. Fallback lists cannot be used with worktrees. |
-| `thinking` | `"off"` \| `"minimal"` \| `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"` | no | Pi thinking level. Pick the model tier first, then set thinking within that model's range: minimal/low for bounded mechanical work, medium for ordinary implementation or review, high+ for architecture, security, or hard diagnosis. Omitting still inherits the parent level; do not omit on orchestrated child work. |
+| `model` | string | no | Exact authenticated provider/model-id, a comma-separated fallback list, or task:\<category> as the whole value. Worktree launches take one model: a task: category uses its first candidate, and fallback lists are rejected. For ordinary review, prefer a different authenticated model family. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback. |
+| `thinking` | `"off"` \| `"minimal"` \| `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"` | no | Pi thinking level, within the chosen model's supported range. Use low for mechanical work, medium for ordinary work, and high+ for hard work. |
 | `skills` | string | no | Comma-separated skills (overrides agent default) |
 | `tools` | string | no | Comma-separated tools (overrides agent default) |
-| `cwd` | string | no | Working directory for the sub-agent. Without worktree, the agent starts in this folder. With worktree, this selects the source Git repository and the agent starts at the created worktree root. |
-| `worktree` | object \| null | no | Optional isolated Herdr-managed Git worktree. Omit or pass null to use an ordinary pane in cwd. |
-| `worktree.branch` | string | yes | New branch name for an isolated Herdr-managed Git worktree |
-| `worktree.base` | string | no | Git revision to branch from. Defaults to the source checkout's committed HEAD. |
-| `fork` | boolean | no | Override the child session mode for this spawn. `true` forces full-context fork; `false` forces standalone. Omit to inherit the agent frontmatter session-mode. |
-| `persistent` | boolean | no | Keep this stable specialist session alive between turn-based tasks. Persistent agents accept follow-up work only through subagent_send. |
-| `accept` | object | no | Optional accept check. The delivery carries `Check: \<verdict>` from the closed set accepted, rejected, error, skipped, none. Only auto-exit, non-persistent children support it. |
-| `accept.run` | string | yes | Shell command run with `sh -c`. Exit 0 passes. The child runs it before it finishes and retries on failure; then the host re-runs it in the child's checkout (the worktree for worktree children) and that run decides the verdict. |
-| `accept.maxRetries` | integer | no | Extra child turns after a failed check, each with the failing output. Default 1. |
-| `accept.timeoutSec` | integer | no | Per-run timeout in seconds. Default 600. A timeout is verdict `error`. |
-| `accept.paths` | string[] | no | Repo-relative check files (for example tests). The delivery reports any the child changed; the verdict is unchanged. |
-| `interactive` | boolean | no | Mark the subagent as interactive (long-running, user drives the conversation in its own pane). When true, the main session is not woken by status transitions (stalled/recovered) for this subagent. If omitted, falls back to the agent's `interactive` frontmatter, otherwise the inverse of `auto-exit` (agents that auto-exit are autonomous and get stall pings; agents that don't are interactive and stay quiet). |
+| `cwd` | string | no | Working directory. With `worktree`, the source repository; the child then starts at the new worktree root. |
+| `worktree` | object \| null | no | Run in a new managed Git worktree. Omit or pass null for a plain pane in cwd. |
+| `worktree.branch` | string | yes | Unique new branch name. |
+| `worktree.base` | string | no | Git revision to branch from. Defaults to the committed HEAD. |
+| `fork` | boolean | no | `true` copies this conversation into the child; `false` starts it fresh. Omit to use the role's session-mode. |
+| `persistent` | boolean | no | Keep the child alive between tasks. Send later tasks with subagent_send. |
+| `accept` | object | no | Optional acceptance check. The result reports `Check: \<verdict>`: accepted, rejected, error, skipped, or none. Only for auto-exit, non-persistent children. |
+| `accept.run` | string | yes | Shell command run with `sh -c`; exit 0 passes. The child runs it and retries on failure. The host then reruns it in the child's checkout, and that run decides the verdict. |
+| `accept.maxRetries` | integer | no | Extra child turns after a failed check. Default 1. |
+| `accept.timeoutSec` | integer | no | Per-run timeout in seconds. Default 600. A timeout gives verdict `error`. |
+| `accept.paths` | string[] | no | Check files, such as tests. The result lists any the child changed, without affecting the verdict. |
+| `interactive` | boolean | no | True when the user drives the child in its own pane. Interactive children do not wake the parent on stall or recovery. Defaults to the role's `interactive` setting, else the opposite of `auto-exit`. |
 <!-- generated:subagent-params:end -->
 
 Defaults and behavior the schema does not carry:
@@ -514,8 +514,8 @@ Registered in: parent, child sessions.
 | --- | --- | --- | --- |
 | `sessionPath` | string | yes | Path to the session .jsonl file to resume |
 | `name` | string | no | Display name for the terminal tab. Default: 'Resume' |
-| `message` | string | no | Optional message to send after resuming (e.g. follow-up instructions) |
-| `autoExit` | boolean | no | Whether the resumed session should automatically exit after completing its response. Defaults to true for autonomous follow-up work; set false for interactive resumed sessions. |
+| `message` | string | no | Message to send after resuming. |
+| `autoExit` | boolean | no | Exit after the response. Defaults to true; set false to leave the session open for the user. |
 
 ### `subagent_send`
 

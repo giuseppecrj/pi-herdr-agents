@@ -8,6 +8,10 @@ export function createMockExtensionApi(extensionEvents = createEventBus()) {
 	const eventHandlers = new Map<string, Array<Function>>();
 	const sentUserMessages: string[] = [];
 	const sentMessages: Array<any> = [];
+	// Pi activates a registered tool unless it sets `defaultActive: false`.
+	// setActiveTools() overrides that per tool. Tests may push straight into
+	// registeredTools, so the active set is derived from it on each read.
+	const activeOverride = new Map<string, boolean>();
 	let stale = false;
 	// Mirrors Pi's assertActive(): a replaced extension API throws on every action.
 	const assertActive = () => {
@@ -61,9 +65,19 @@ export function createMockExtensionApi(extensionEvents = createEventBus()) {
 			getAllTools() {
 				return [];
 			},
-			// Pi activates registered tools by default.
 			getActiveTools() {
-				return registeredTools.map((tool) => tool.name);
+				return registeredTools
+					.filter(
+						(tool) =>
+							activeOverride.get(tool.name) ?? tool.defaultActive !== false,
+					)
+					.map((tool) => tool.name);
+			},
+			// Like Pi, unknown names are ignored.
+			setActiveTools(names: string[]) {
+				const wanted = new Set(names);
+				for (const tool of registeredTools)
+					activeOverride.set(tool.name, wanted.has(tool.name));
 			},
 		} as any,
 	};

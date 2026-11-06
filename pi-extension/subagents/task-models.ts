@@ -20,6 +20,7 @@ import {
 	writeTaskModelConfig,
 } from "../../maestro/core/config/model-config.ts";
 import {
+	DIRECT_WRITER_TOOL,
 	type OfferCallback,
 	type TaskModelBrief,
 	TASK_MODEL_INIT_APPROVAL_EVENT,
@@ -79,18 +80,24 @@ function parseInitStartRequest(raw: any):
 	};
 }
 
+// Keep this init-only schema out of normal requests. A successful write
+// always deactivates it, including after reload or explicit user activation.
+function releaseWriterAfterInit(pi: ExtensionAPI): void {
+	pi.setActiveTools(
+		pi.getActiveTools().filter((name) => name !== DIRECT_WRITER_TOOL),
+	);
+}
+
 /** The subagents_write_task_models tool (parent sessions only). */
 export function registerTaskModelTool(
 	pi: ExtensionAPI,
 	{ shouldRegister }: { shouldRegister: (name: string) => boolean },
 ): void {
-	if (
-		!process.env.PI_SUBAGENT_ID &&
-		shouldRegister("subagents_write_task_models")
-	)
+	if (!process.env.PI_SUBAGENT_ID && shouldRegister(DIRECT_WRITER_TOOL))
 		pi.registerTool({
-			name: "subagents_write_task_models",
+			name: DIRECT_WRITER_TOOL,
 			label: "Write task model preferences",
+			defaultActive: false,
 			description: `Validate and atomically replace models.tasks and models.tasksMeta in the durable Pi agent config, preserving unrelated settings. Supported categories: ${TASK_CATEGORIES.join(", ")}. Partial nonempty categories are accepted; omitted categories are removed. Rejects duplicate exact refs within a category. Review the active authenticated registry and existing preferences first. Optional expectedConfigRevision makes the write conditional: it fails without replacing configuration when the config file no longer matches the revision the proposal was read from. Optional basis records what the ranking rests on; its kind must equal tasksMeta.method, and it is returned but not saved. Cooperating writes are serialized and fail on contention rather than waiting. Returns normalized saved preferences, missing categories, the configRevision of the written file, and any basis; reload required.`,
 			parameters: Type.Object({
 				tasks: Type.Object(
@@ -183,6 +190,7 @@ export function registerTaskModelTool(
 						? { expectedConfigRevision: params.expectedConfigRevision }
 						: {},
 				);
+				releaseWriterAfterInit(pi);
 				const details = basis ? { ...saved, basis } : saved;
 				return {
 					content: [
@@ -217,7 +225,8 @@ export function registerTaskModelInit(pi: ExtensionAPI): void {
 					reason:
 						"no model is selected, so Pi cannot run the init prompt. Select a model, then retry",
 				};
-			return startTaskModelInit({
+			let activatedWriter = false;
+			const outcome = startTaskModelInit({
 				preferences,
 				readConfig: () => readModelConfigSnapshot(getSubagentsConfigDir()),
 				projectActiveRegistry: (project) => project(ctx.modelRegistry),
@@ -231,9 +240,19 @@ export function registerTaskModelInit(pi: ExtensionAPI): void {
 							offer,
 						} satisfies TaskModelApprovalRequest),
 					),
+				activateTool: (name) => {
+					if (name !== DIRECT_WRITER_TOOL) return;
+					const active = pi.getActiveTools();
+					if (active.includes(name)) return;
+					pi.setActiveTools([...active, name]);
+					activatedWriter = pi.getActiveTools().includes(name);
+				},
 				isToolActive: (name) => pi.getActiveTools().includes(name),
 				submit: (prompt) => pi.sendUserMessage(prompt),
 			});
+			if (outcome.kind === "not-started" && activatedWriter)
+				releaseWriterAfterInit(pi);
+			return outcome;
 		};
 		pi.registerCommand("subagents-init", {
 			description:
