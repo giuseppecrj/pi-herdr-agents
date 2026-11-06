@@ -13,10 +13,10 @@ This page is the detailed reference for the tools, commands, and run lifecycle o
 
 | Tool | Sessions | Description |
 | --- | --- | --- |
-| `subagent` | parent, child | Launch a Pi subagent in a terminal pane, or in a new managed Git worktree when `worktree` is set. |
+| `subagent` | parent, child | Launch a Pi subagent in a legacy Herdr pane or local Core terminal. |
 | `subagent_cancel` | parent, child | Cancel a running non-persistent subagent, including an interrupted one. |
 | `subagent_interrupt` | parent, child | Send Escape to a running subagent's active turn. |
-| `subagent_resume` | parent, child | Resume a saved subagent session in a new terminal pane, to continue a cancelled run or send follow-up work. |
+| `subagent_resume` | parent, child | Resume a saved subagent session in a new legacy Herdr pane or local Core terminal. |
 | `subagent_send` | parent, child | Deliver one follow-up task to an idle persistent specialist. |
 | `subagent_stop` | parent, child | Stop a persistent specialist after its active task finishes. |
 | `subagents_list` | parent, child | List subagent role definitions, live persistent specialists, and the supervision mode. |
@@ -48,11 +48,32 @@ This page is the detailed reference for the tools, commands, and run lifecycle o
 | `/worktree` | `/worktree <name> [task]`<br>`/worktree list`<br>`/worktree remove <target>` | Fork into a worktree, list retained worktrees, or explicitly remove one |
 <!-- generated:commands:end -->
 
+## Execution backends
+
+Ordinary launches use legacy Herdr panes or local Core terminals, selected by
+[`herdr.backend`](configuration.md#herdr-backend). Public request parameters and
+Pi result envelopes are unchanged. Managed worktree launch, handoff, inventory
+and removal require legacy Herdr; Core rejects them before acquiring resources.
+An ordinary Core child may use an existing checkout as `cwd`.
+
+Core starts programs atomically in the background, with no Desktop placement or
+legacy sidebar markers. Agent status such as `done` is not process-exit evidence.
+Pi sidecars supply semantic results, while native `finished`/confirmed absence
+proves lifetime exit. Persistent task results do not release the process.
+Interrupt sends Escape to the exact owned terminal and leaves it open; cancel
+confirms native exit before delivering its result. Record removal is a separate,
+delivery-gated step. A Core error after start submission, including `spawn_failed`,
+is conservative acquisition uncertainty, not permission to retry.
+
+Reload preserves the selected endpoint and owner. Changing backend or Core
+endpoint requires restarting Pi. Core's native child tree is not acceptance of
+Desktop Agents tabs/sidebar visual parity; that presentation is not implemented.
+
 ## Async Subagent Flow
 
 ```
 1. Agent calls subagent()          → acknowledges acquisition, not task completion
-2. Sub-agent runs in herdr pane    → widget shows live status
+2. Child runs in a pane/terminal  → widget shows live status
 3. User keeps chatting             → main session fully interactive
 4. Sub-agent finishes              → result steered back as a normal completion/failure
 5. Main agent processes result     → continues with new context
@@ -78,7 +99,7 @@ Completion messages render with a colored background and are expandable with `Ct
 
 The widget projects each sub-agent from a **process + turn lifecycle**:
 
-- **Herdr pane inspection** is the coarse authority for whether the child process is present and whether Herdr reports it as idle, working, blocked, or done.
+- **Legacy Herdr pane inspection** is the coarse authority for whether the child process is present and whether Herdr reports it as idle, working, blocked, or done. Core uses native execution inspection for lifetime and Pi activity for turn detail; reported agent status is not exit evidence.
 - **Child activity snapshots** enrich the label with Pi-only detail (tool name, streaming, etc.) when available.
 - Session JSONL is still used for transcript, resume, lineage, and result extraction — not for liveness.
 
@@ -101,7 +122,7 @@ The widget header counts **active** vs **open**:
 
 When `activeCount === 0` (every tracked row is open), the border uses an amber accent. Process elapsed time (`MM:SS` on the left) freezes when the process reaches finalizing/completed/failed. Interrupt does **not** freeze that process clock; the interrupted state shows its own duration on the right while the process remains open.
 
-A fixed internal watchdog marks a run as `stalled` when pane inspection fails or the pane disappears without a completion sidecar; valid long-running `active` or `waiting` states do not become `stalled` just because time passes. When a run enters `stalled` or recovers from it, the parent agent receives a steer message so it can react. All other status transitions stay in the widget only.
+A fixed internal watchdog marks a run as `stalled` when pane inspection fails or the pane disappears without a completion sidecar; valid long-running `active` or `waiting` states do not become `stalled` just because time passes. On Core, unavailable native-execution inspection feeds the same watchdog; a verified live execution clears the inspection failure. When a run enters `stalled` or recovers from it, the parent agent receives a steer message so it can react. All other status transitions stay in the widget only.
 
 **Interactive subagents stay silent.** Long-running user-driven subagents (for example, an interactive planning role or a bare `interactive: true` fork) do not wake the parent session on `stalled`/`recovered` transitions — the user is working directly in the subagent's pane, and a steer message there would just burn an orchestrator turn on a no-op "still waiting" ping. The widget still updates normally, and activity snapshots are still recorded/classified regardless of the `interactive` setting. By default, agents with `auto-exit: true` are treated as autonomous and get stall pings; agents without it are treated as interactive and stay quiet. Override per-agent with `interactive: true|false` in frontmatter, or per-spawn with `interactive: true|false` on the tool call.
 
@@ -151,7 +172,7 @@ subagent({
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `name` | string | yes | Short label shown in the widget and pane title. |
+| `name` | string | yes | Short label shown in the widget and legacy pane title. |
 | `task` | string | yes | Task/prompt for the sub-agent |
 | `agent` | string | no | Role definition to load defaults from (see subagents_list). Omit for a bare agent. |
 | `systemPrompt` | string | no | Role/system-prompt text for a bare spawn. Named agents keep their definition body. |
@@ -160,7 +181,7 @@ subagent({
 | `skills` | string | no | Comma-separated skills (overrides agent default) |
 | `tools` | string | no | Comma-separated tools (overrides agent default) |
 | `cwd` | string | no | Working directory. With `worktree`, the source repository; the child then starts at the new worktree root. |
-| `worktree` | object \| null | no | Run in a new managed Git worktree. Omit or pass null for a plain pane in cwd. |
+| `worktree` | object \| null | no | New managed Git worktree (legacy Herdr only, not Core). Omit or pass null for an ordinary child in cwd. |
 | `worktree.branch` | string | yes | Unique new branch name. |
 | `worktree.base` | string | no | Git revision to branch from. Defaults to the committed HEAD. |
 | `fork` | boolean | no | `true` copies this conversation into the child; `false` starts it fresh. Omit to use the role's session-mode. |
@@ -355,7 +376,7 @@ subagent_cancel({ name: "Scout" });
 
 Target resolution matches `subagent_interrupt`: an exact running ID or an exact, unambiguous display name. Persistent specialists are rejected; use `subagent_stop`, whose graceful v1 semantics are unchanged.
 
-The cancel intent is recorded before anything is aborted or killed. From then on the run never advances its model shortlist or starts another execution attempt, even when terminating the pane makes the watcher observe a lost pane, and even when a fallback launch was already in flight. The result reports one status:
+The cancel intent is recorded before anything is aborted or killed. From then on the run never advances its model shortlist or starts another execution attempt, even when terminating the pane makes the watcher observe a lost pane, and even when a fallback launch was already in flight. On Core, cancellation before `terminal.run` submission prevents submission, including during its connection handshake. After submission, the host still receives the acquisition result so it can terminate an acquired owner; a lost reply remains uncertain, not a safe retry. The result reports one status:
 
 | Status | Meaning |
 | --- | --- |
@@ -513,7 +534,7 @@ Registered in: parent, child sessions.
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `sessionPath` | string | yes | Path to the session .jsonl file to resume |
-| `name` | string | no | Display name for the terminal tab. Default: 'Resume' |
+| `name` | string | no | Display name for the run (and legacy Herdr tab). Default: 'Resume' |
 | `message` | string | no | Message to send after resuming. |
 | `autoExit` | boolean | no | Exit after the response. Defaults to true; set false to leave the session open for the user. |
 

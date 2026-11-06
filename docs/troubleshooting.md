@@ -2,6 +2,19 @@
 
 This page collects the checks for common problems. Each section links to the full reference.
 
+## Core selection or missing Desktop placement
+
+Check [`herdr.backend`](configuration.md#herdr-backend) and the current native
+terminal context. Auto selects Core from `HC_TERMINAL_ID`, not from installed
+binaries or a running Desktop. A missing/incompatible socket is an error, never a
+reason to switch to legacy automatically. Restart Pi to change its backend,
+endpoint or parent-terminal binding; reload cannot redirect existing children.
+
+Core ordinary children run in the background. Desktop Agents tabs/sidebar parity,
+remote terminals and managed worktrees are not implemented. The legacy Node
+sidebar plugin cannot be installed as a Desktop mod. Do not work around those
+limits by altering the daily layout or reusing unrelated terminal IDs.
+
 ## Troubleshooting completion delivery
 
 If a child finishes but the parent returns an empty or unrelated response, first verify that the result reached the parent session:
@@ -21,14 +34,20 @@ pi install git:github.com/giuseppecrj/pi-herdr-agents@main
 
 Smoke-test delivery with an autonomous subagent instructed to return one exact marker. Success means the marker itself—not only a generic wake-up notice—automatically appears in the parent turn.
 
-Subagent tabs, panes, and worktree workspaces are created without stealing keyboard focus. Launch commands target child panes by explicit ID, so focus and command delivery are independent. If a fresh or resumed launch fails, the extension attempts confirmed rollback of the ordinary pane it created and preserves the original launch error. Unconfirmed rollback retains ownership instead of claiming cleanup succeeded. It does not close a caller-supplied surface, and managed worktree workspaces remain retained on failure. Note: the `interactive` option controls parent status notifications, not terminal focus.
+Legacy subagent tabs, panes, and worktree workspaces are created without stealing keyboard focus. Launch commands target child panes by explicit ID, so focus and command delivery are independent. If a fresh or resumed launch fails, the extension attempts confirmed rollback of the ordinary pane it created and preserves the original launch error. Unconfirmed rollback retains ownership instead of claiming cleanup succeeded. It does not close a caller-supplied surface, and managed worktree workspaces remain retained on failure. Note: the `interactive` option controls parent status notifications, not terminal focus.
 
 ## An acquisition or dispatch is uncertain
 
 Do not repeat the launch immediately. A timed-out Herdr client does not establish
 that the server stopped creating a resource or delivering a command.
 
-1. Read the exact pane, workspace, session, and manifest identities in the error
+For Core, `spawn_failed` can mean the holder failed to acknowledge an already
+submitted program. It is not safe-retry evidence. An observed terminal ID alone
+is diagnostic, not permission to control it; only an acquired owner is eligible
+for the run's controls. If the Core identity or a terminal's launch identity
+changed, controls fail closed. Do not kill by name or guess another terminal.
+
+1. Read the exact terminal, pane, workspace, session, and manifest identities in the error
    or acknowledgement. Never choose a resource by its display label.
 2. For an acknowledgement with `status: "uncertain"`, use the existing run's
    control tools. Its acquired owner stays supervised, and fallback is disabled.
@@ -84,5 +103,7 @@ Project trust: a session that reports no trust decision (Pi 0.79.0 gates project
 Unknown shells such as nushell keep the bare `bash '<script>'` line and are not protected from the WSL launcher.
 
 ## Sidebar Focus hides nothing
+
+This section is for legacy Herdr only, not Core/Desktop.
 
 Focus applies at the first agent Herdr detects after install, so launch or start an agent first. If you ran All, Focus stays off until you run Focus. Check that the parent loads a `pi-herdr-agents` release newer than `3.3.1` (older releases also need `"sidebar": { "enabled": true }` in `config.json`), that you ran `/reload` in the parent after installing or upgrading it, and that you launched the child after the reload. Run `herdr pane get <child-pane-id>`: the pane must report the child's session file as `agent_session`. If it reports none, install Herdr's Pi integration with `herdr integration install pi` in the agent directory children use, then launch new children. Read the plugin log with `herdr plugin log list --plugin pi-herdr-agents.sidebar`. See the plugin's [troubleshooting](../plugins/sidebar/README.md#troubleshooting).

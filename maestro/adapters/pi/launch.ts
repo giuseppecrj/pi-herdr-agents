@@ -200,7 +200,7 @@ interface ResolvedLaunch {
 }
 
 interface PreparedSurface {
-	surface: string;
+	surface?: string;
 	targetCwd: string;
 	effectiveAgentDir: string;
 	localAgentDir: string | null;
@@ -231,6 +231,13 @@ export async function launchPiSubagent(
 ): Promise<PiRunningChild> {
 	if (request.kind === "resume")
 		return launchResumedPiSubagent(request, operations);
+	if (
+		operations.nativeExecution &&
+		(request.worktree || request.handoff || request.surface)
+	)
+		throw new Error(
+			"Herdr Core supports ordinary native execution only; managed worktrees, handoffs and supplied panes are deferred",
+		);
 	// Last checks before any resource exists: the plan must be in the live
 	// scope, and the scope must be representable as the child's --models.
 	assertModelInScope(request.runtimePlan.model, { scope: request.modelScope });
@@ -275,6 +282,8 @@ async function launchFreshPiSubagent(
 	operations: PiLaunchOperations,
 ): Promise<PiRunningChild> {
 	const resolved = resolveLaunchRequest(request);
+	if (operations.nativeExecution)
+		return launchNativePiSubagent(resolved, operations);
 	let surface: PreparedSurface | undefined;
 	let running: PiRunningChild | undefined;
 
@@ -300,7 +309,10 @@ async function launchFreshPiSubagent(
 		request.acquisitionSignal?.throwIfAborted();
 		// Complete fallible initialization while this transaction still owns the
 		// surface, before any child can run or mutate its session artifacts.
-		const initialized = createRunningChild(resolved, artifacts);
+		const initialized: PiRunningChild = {
+			...createRunningChild(resolved, artifacts),
+			surface: requiredSurface(artifacts),
+		};
 		try {
 			initialized.launchScriptFile = await startPiProcess(
 				resolved,
@@ -323,7 +335,7 @@ async function launchFreshPiSubagent(
 				throw new Error("Pi startup confirmation is unavailable");
 			}
 			await operations.waitForPiReady(
-				artifacts.surface,
+				requiredSurface(artifacts),
 				artifacts.sessionFile,
 				artifacts.targetCwd,
 			);
@@ -342,7 +354,7 @@ async function launchFreshPiSubagent(
 		if (!surface.worktree) {
 			if (!request.surface) {
 				try {
-					await operations.closePane(surface.surface);
+					await operations.closePane(requiredSurface(surface));
 				} catch (rollback) {
 					if (running)
 						throw new AcquiredPiLaunchError(
@@ -400,6 +412,59 @@ async function launchFreshPiSubagent(
 				`(workspace ${surface.worktree.workspaceId}): ${errorMessage(error)}`,
 		);
 	}
+}
+
+async function launchNativePiSubagent(
+	resolved: ResolvedLaunch,
+	operations: PiLaunchOperations,
+): Promise<PiRunningChild> {
+	const execution = operations.nativeExecution;
+	if (!execution) throw new Error("Native execution unavailable");
+	const { request } = resolved;
+	request.acquisitionSignal?.throwIfAborted();
+	const session = prepareChildSession(
+		resolved,
+		{
+			targetCwd: resolved.sourceCwd,
+			effectiveAgentDir: resolved.localAgentDir ?? resolved.agentDir,
+			localAgentDir: resolved.localAgentDir,
+		},
+		operations,
+	);
+	const artifacts = prepareTaskArtifacts(resolved, session, operations);
+	const command = buildPiCommand(resolved, artifacts);
+	// This also writes the persistent dispatch ledger. Nothing fallible remains
+	// locally after submission, and no surface ID exists until Core replies.
+	const initialized = createRunningChild(resolved, artifacts);
+	try {
+		const surface = await execution.start({
+			cwd: artifacts.targetCwd,
+			command,
+			scriptPath: initialized.launchScriptFile,
+			scriptPreamble: shellComment(
+				`Subagent launch script for ${request.name}`,
+			),
+			signal: request.acquisitionSignal,
+		});
+		return { ...initialized, surface };
+	} catch (error) {
+		if (
+			isAcquisitionUncertainError(error) &&
+			error.uncertainty.kind === "execution-start" &&
+			error.uncertainty.acquiredSurfaceId
+		)
+			throw new AcquiredPiLaunchError(
+				{ ...initialized, surface: error.uncertainty.acquiredSurfaceId },
+				error,
+			);
+		throw error;
+	}
+}
+
+function requiredSurface(surface: PreparedSurface): string {
+	if (!surface.surface)
+		throw new Error("Shell launch requires an acquired surface");
+	return surface.surface;
 }
 
 function resolveLaunchRequest(request: FreshPiLaunchRequest): ResolvedLaunch {
@@ -628,7 +693,7 @@ async function confirmShellReady(
 	session: PreparedSession,
 	operations: PiLaunchOperations,
 ): Promise<void> {
-	await operations.waitForShellReady(session.surface);
+	await operations.waitForShellReady(requiredSurface(session));
 }
 
 function buildWorktreeHandoffMessage(
@@ -819,7 +884,8 @@ function buildPiCommand(
 		env.push(`PI_SUBAGENT_SESSION=${shellQuote(artifacts.sessionFile)}`);
 		env.push(`PI_SUBAGENT_ID=${shellQuote(resolved.id)}`);
 		env.push(`PI_SUBAGENT_ACTIVITY_FILE=${shellQuote(artifacts.activityFile)}`);
-		env.push(`PI_SUBAGENT_SURFACE=${shellQuote(artifacts.surface)}`);
+		if (artifacts.surface)
+			env.push(`PI_SUBAGENT_SURFACE=${shellQuote(artifacts.surface)}`);
 		if (artifacts.processIdentityFile)
 			env.push(
 				`PI_SUBAGENT_PROCESS_FILE=${shellQuote(artifacts.processIdentityFile)}`,
@@ -831,7 +897,9 @@ function buildPiCommand(
 		`${env.join(" ")} ${parts.join(" ")}`;
 	return request.handoff
 		? piCommand
-		: `${piCommand}; echo '__SUBAGENT_DONE_'$?'__'`;
+		: artifacts.surface
+			? `${piCommand}; echo '__SUBAGENT_DONE_'$?'__'`
+			: `${piCommand}; piha_exit=$?; echo "__SUBAGENT_DONE_\${piha_exit}__"; exit "$piha_exit"`;
 }
 
 async function startPiProcess(
@@ -841,7 +909,7 @@ async function startPiProcess(
 	launchScriptFile: string,
 	operations: PiLaunchOperations,
 ): Promise<string> {
-	return await operations.runScript(artifacts.surface, command, {
+	return await operations.runScript(requiredSurface(artifacts), command, {
 		scriptPath: launchScriptFile,
 		scriptPreamble: [
 			shellComment(`Subagent launch script for ${resolved.request.name}`),
@@ -855,13 +923,12 @@ async function startPiProcess(
 function createRunningChild(
 	resolved: ResolvedLaunch,
 	artifacts: PreparedArtifacts,
-): PiRunningChild {
-	const child: PiRunningChild = {
+): Omit<PiRunningChild, "surface"> {
+	const child: Omit<PiRunningChild, "surface"> = {
 		id: resolved.id,
 		name: resolved.request.name,
 		task: resolved.request.task,
 		agent: resolved.request.agent,
-		surface: artifacts.surface,
 		ownsSurface: !artifacts.worktree && !resolved.request.surface,
 		startTime: resolved.startTime,
 		sessionFile: artifacts.sessionFile,

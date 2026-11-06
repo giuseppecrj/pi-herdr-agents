@@ -4,7 +4,7 @@ These instructions apply to humans and coding agents changing `pi-herdr-agents`.
 
 ## What this package is
 
-`pi-herdr-agents` (Pi Herdr Agents) is a Pi extension that launches asynchronous Pi child agents exclusively in Herdr. Ordinary runs group child panes in extension-owned `Agents` tabs by default. Writing tasks may opt into one isolated Herdr-managed Git worktree per branch. Legacy role definitions that request an external CLI fail before Herdr creates resources.
+`pi-herdr-agents` (Pi Herdr Agents) is a Pi extension that launches asynchronous Pi child agents exclusively in Herdr. Legacy Herdr runs group child panes in extension-owned `Agents` tabs by default. Local Herdr Core supports ordinary native execution; Desktop placement/sidebar parity and Core managed worktrees remain unsupported ([ADR-0018](docs/adr/0018-herdr-core-execution.md)). Writing tasks may opt into one isolated Herdr-managed Git worktree per branch. Legacy role definitions that request an external CLI fail before Herdr creates resources.
 
 The package is a pack-neutral execution host: it ships no agent roles and no planning or review workflows. Its only skill is `pi-herdr-agents`, a general operating guide for the host; do not add methodology or workflow skills here. Roles come from project or global definitions and separately installed role packs. Do not add bundled roles, a privileged default pack, or name-keyed workflow behavior; see [ADR-0013](docs/adr/0013-pack-neutral-execution-host.md).
 
@@ -34,6 +34,7 @@ Former bundled roles, `/plan`, its plan skill, and `/skill:orchestrate` now belo
 - `maestro/core/` — seam interfaces and types; activity/lifecycle/status projection, routing, wake-ups, and supervision; `undelivered-children.ts` names the process-local registry slot and tells the child protocol whether launched children still owe a delivery
 - `plugins/sidebar/` — optional standalone Node companion Herdr plugin; it imports nothing from the extension
 - `maestro/core/roles/discovery.ts`, `maestro/core/config/` — role parsing/discovery, injected-directory config loaders, and task-model init prompt construction
+- `maestro/core/config/herdr-config.ts`, `maestro/runtime/herdr-backend.ts` — strict backend selection and explicit legacy/Core composition; the run owner pins its Core endpoint and parent terminal across reload
 - `maestro/core/worktree.ts`, `worktree-cleanup.ts` — manifest schema/state, handoff types, and cleanup eligibility/formatting
 - `maestro/core/realpath-without-opening.ts` — lstat/stat/readlink realpath used by cleanup and Herdr checkout comparisons so Bun never `open()`s a path that can freeze Pi
 - `maestro/core/git-environment.ts` owns repository-local environment isolation for host-managed Git commands while preserving user configuration, identity, and hooks.
@@ -45,6 +46,7 @@ Former bundled roles, `/plan`, its plan skill, and `/skill:orchestrate` now belo
 - `maestro/core/accept.ts`, `maestro/adapters/pi/accept-runner.ts`, `maestro/adapters/pi/accept-groups.ts`, `maestro/adapters/pi/child/accept-check.ts`, `maestro/runtime/accept-recheck.ts` — the accept check ([ADR-0017](docs/adr/0017-accept-check.md)): spec validation, the closed verdict set and the outcome-ledger line; the `sh -c` runner with timeout and process-group kill; the process-wide registry of running check groups that owners terminate at shutdown, with its `exit` hook; the child's `agent_before_settle` retry loop; and the parent re-check that `finalize` runs and the outcome-ledger append
 - `maestro/core/script-launch.ts`, `maestro/adapters/pi/script-shell.ts` — the Windows launch line: the pure builder spells an absolute bash call for the pane's shell (PowerShell, cmd, Git Bash; unknown shells keep the bare `bash` line), and the only SDK-importing resolver finds that bash from Pi's `shellPath` for the launching session's cwd and project trust (`PiLaunchSnapshot.scriptShell`); `surfaces/herdr/terminal.ts` reads the pane shell from `pane process-info`
 - `maestro/surfaces/herdr/` — `HerdrSurfaceProvider`, Herdr CLI driver (`herdr-cli.ts` exec, `herdr-pane.ts` pane inspection and readiness, `herdr.ts` placement, worktrees and pane commands), and terminal scripts, plus `herdr-socket.ts` for socket pane metadata
+- `maestro/surfaces/herdr/herdr-core-protocol.ts`, `herdr-core-surface-provider.ts` — bounded native Core RPC, atomic-start uncertainty, per-launch ownership, confirmed termination and delivery-gated record removal; no Desktop layout or worktree operations
 - `maestro/runtime/` — `RunSession`, Pi composition, run ownership, controls/retries, observation, delivery-gated cleanup, worktree operations/handoff, and task-model init composition, plus `delegated-marker.ts` for delegated-child sidebar markers; `pi-run-session.ts` composes the Pi run session, `pi-run-session-types.ts` holds its public contract types, and `pi-persistent-io.ts` its persistent-specialist inbox and ledger I/O
 - `maestro/adapters/fake/`, `maestro/surfaces/fake/`, `test/maestro/` — conformance fakes, seam tests, and the dependency-rule test
 - `CONTEXT.md` — orchestration-domain glossary
@@ -130,6 +132,20 @@ When a test reports that a `pi-integ-*` worktree path already exists, first chec
 ```bash
 npm run test:integration
 ```
+
+The separate `.github/workflows/linux-integration.yml` runs the complete
+credential-free deterministic suite on Ubuntu with checksum-pinned Herdr binaries.
+`scripts/run-linux-integration.ts` reuses the private verification lab and verifies
+one real-parent delegation first. Check its result separately from the static/unit
+**CI** workflow; neither publishes. Evidence is retained for seven days.
+Desktop GUI coverage is deferred. See `docs/development.md`.
+
+Core lifecycle changes additionally require `npm run test:integration:core`. It
+starts independent private servers and real parent Pi sessions via
+`test/integration/herdr-core-lab.ts` and `core-parent.ts`, without using the
+operator's Core/Desktop. Missing binaries cause explicit skips, never passing
+evidence. The older verification lab uses Linux `/proc`; report that gate as
+unavailable on macOS rather than treating the Core suite as a substitute.
 
 Use `PI_TEST_MODEL="openai-codex/gpt-5.6-luna" PI_TEST_TIMEOUT=180000 npm run test:integration:live` only for optional provider-compatibility smoke coverage. Do not use skipped Herdr tests as passing evidence.
 

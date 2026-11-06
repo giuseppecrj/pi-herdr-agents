@@ -6,7 +6,8 @@
 The single real execution path for fresh and resumed children, coordinated by a
 run session through the Pi harness adapter. `launchPiSubagent()` still owns each
 complete launch transaction; completion uses Pi sidecar evidence first and the
-terminal exit marker as fallback.
+terminal exit marker as fallback. Core also requires independent native exit
+evidence before releasing lifetime ownership.
 _Avoid_: Runtime dispatch, adapter registry, split launch ownership
 
 **Harness adapter**:
@@ -17,9 +18,22 @@ _Avoid_: Runtime selector, adapter registry, external CLI compatibility
 
 **Surface provider**:
 An object implementing the core interface for panes, commands, inspection, and
-worktree surfaces. Herdr is the only real implementation; the fake is for
-conformance tests.
+worktree surfaces, with an optional atomic native-execution capability. Real
+implementations are legacy Herdr and local Herdr Core; the fake is for
+conformance tests. Core does not implement managed worktree or Desktop placement.
 _Avoid_: Supported multiplexer catalog, harness adapter, security sandbox
+
+**Herdr backend binding**:
+The selected legacy/Core execution path and, for Core, its endpoint and native
+parent terminal. A reload-surviving owner retains the binding and verifies Core's
+identity; Desktop is a presentation client, not a third execution backend.
+_Avoid_: Binary auto-detection, Desktop window ownership, provider registry
+
+**Native terminal**:
+A Core execution record addressed by a stable local terminal ID. Its execution
+state and agent-reported status are separate. A finished record can remain after
+process exit; removing that record is not the same operation as terminating it.
+_Avoid_: Pane ID, worktree workspace, proof of successful task completion
 
 **Run session**:
 The runtime owner coordinating launched attempts, retries, observations,

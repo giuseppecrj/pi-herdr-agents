@@ -95,7 +95,9 @@ describe("cleanup process visibility policy", () => {
 	for (const deniedDetail of ["cwd", "comm", "status", "identity"] as const) {
 		for (const withHolder of [false, true]) {
 			it(`warns for unreadable ${deniedDetail} and continues scanning (holder: ${withHolder})`, async (t) => {
-				const dir = mkdtempSync(join(tmpdir(), "cleanup-protected-"));
+				const dir = fs.realpathSync(
+					mkdtempSync(join(tmpdir(), "cleanup-protected-")),
+				);
 				const f = cleanupFixture();
 				for (const pid of ["101", "202"]) {
 					mkdirSync(join(dir, pid));
@@ -366,7 +368,9 @@ n${link}
 		// Regression for #97: managedRoot/scan/ops.realpath and escaped managed
 		// symlinks used realpathSync/readdirSync, which Bun implements with open()
 		// and can freeze Pi on a protected macOS directory.
-		const dir = mkdtempSync(join(tmpdir(), "cleanup-scan-open-"));
+		const dir = fs.realpathSync(
+			mkdtempSync(join(tmpdir(), "cleanup-scan-open-")),
+		);
 		const managed = join(dir, "managed");
 		const safeRepo = join(managed, "repo");
 		const safeTask = join(safeRepo, "task");
