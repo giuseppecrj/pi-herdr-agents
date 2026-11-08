@@ -88,6 +88,9 @@ export function createMockExtensionApi(extensionEvents = createEventBus()) {
 					},
 				}));
 			},
+			getSettings() {
+				return {};
+			},
 			getActiveTools() {
 				return registeredTools
 					.filter(

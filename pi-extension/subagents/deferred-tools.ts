@@ -29,11 +29,19 @@ export function isNativeToolSearch(tool: ToolSearchCandidate): boolean {
 	);
 }
 
+/**
+ * Whether the user's `defaultTools` setting removes `tool_search` with
+ * `-tool_search`. A setting that never names it leaves the search to the host.
+ */
+function isSearchTurnedOff(pi: ExtensionAPI): boolean {
+	return (pi.getSettings().defaultTools ?? []).includes(`-${TOOL_SEARCH_NAME}`);
+}
+
 /** How {@link DeferredTools.ensureReachable} made the routine tools reachable. */
 export type DeferredReach =
 	/** Pi's `tool_search` is active and loads the routine tools on demand. */
 	| "search"
-	/** No usable native search: the permitted routine tools are active now. */
+	/** No usable native search, or the user turned it off: the permitted routine tools are active now. */
 	| "eager"
 	/** Pi kept none of this load's routine tools (allowlist, exclusion, or deny list). */
 	| "none";
@@ -44,8 +52,9 @@ export interface DeferredTools {
 	/**
 	 * Make this load's routine tools reachable once every extension has
 	 * registered: activate Pi's `tool_search`, or, when it is missing, filtered
-	 * out, or not Pi's own, activate the routine tools Pi kept. Other active and
-	 * restored tools stay active; tools Pi filtered out stay unreachable.
+	 * out, turned off by `defaultTools`, or not Pi's own, activate the routine
+	 * tools Pi kept. Other active and restored tools stay active; tools Pi
+	 * filtered out stay unreachable.
 	 */
 	ensureReachable(): DeferredReach;
 }
@@ -74,7 +83,7 @@ export function trackDeferredTools(pi: ExtensionAPI): DeferredTools {
 				.map((tool) => tool.name);
 			if (routine.length === 0) return "none";
 			const search = tools.find(isNativeToolSearch);
-			if (search) {
+			if (search && !isSearchTurnedOff(pi)) {
 				const active = pi.getActiveTools();
 				if (!active.includes(search.name))
 					pi.setActiveTools([...active, search.name]);
