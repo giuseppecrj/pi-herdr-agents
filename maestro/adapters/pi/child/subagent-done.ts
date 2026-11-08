@@ -532,7 +532,18 @@ export default function (pi: ExtensionAPI) {
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
 			const sessionFile = process.env.PI_SUBAGENT_SESSION;
 			recorder.subagentDone();
-			if (persistent && sessionFile && currentTask) {
+			if (persistent) {
+				if (!sessionFile || !currentTask) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: "No current task. Staying available for subagent_send.",
+							},
+						],
+						details: {},
+					};
+				}
 				appendPersistentTaskEvent(
 					sessionFile,
 					buildPersistentTaskEvent(currentTask, generation),
