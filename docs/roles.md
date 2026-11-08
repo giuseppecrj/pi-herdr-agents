@@ -119,7 +119,11 @@ specific exact authenticated `provider/model-id`.
 built-in, extension, or custom tool. Listing a tool does not install its
 extension. Use one non-empty inline comma-separated scalar, such as
 `tools: read, grep`; do not use YAML lists, containers, quotes, or comments.
-Omitting `tools` intentionally leaves the role unrestricted. Likewise, `skills`
+Omitting `tools` intentionally leaves the role unrestricted. Pi declares the
+host tools a `tools` list names, such as `subagent`, from the start; host tools
+it does not name do not exist in the child, and `tool_search` cannot load them.
+An unrestricted child loads host tools on demand; see
+[Tool loading](tools.md#tool-loading). Likewise, `skills`
 names must already be discoverable by Pi; this package does not install role
 prerequisites.
 

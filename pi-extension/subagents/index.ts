@@ -1,4 +1,5 @@
 import { withEncodedToolErrors } from "./tool-boundary.ts";
+import { trackDeferredTools } from "./deferred-tools.ts";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
@@ -399,10 +400,15 @@ export default function subagentsExtension(
 					),
 			}),
 	});
+	// Routine tools are deferred: their schemas and guidelines reach the model
+	// only after Pi's tool_search loads them.
+	const deferredTools = trackDeferredTools(pi);
 	// Capture the UI context for widget updates and restore presentation for
 	// subagents whose watchers survived a reload.
 	pi.on("session_start", async (_event, ctx) => {
 		runtime.latestCtx = ctx;
+		// Every extension has registered by now, so Pi's tool_search is known.
+		deferredTools.ensureReachable();
 		// This load's API is bound now: deliver results held across the gap.
 		bindLiveApi(runtime, pi);
 		if (!roleConfigDeprecationsReported) {
@@ -432,6 +438,9 @@ export default function subagentsExtension(
 			subagentRoutingGuidelines.length,
 			...refreshedGuidelines,
 		);
+		// Pi copies guidelines at registration. Refresh its copy now that the
+		// current session's model catalog and task preferences are known.
+		registerLaunchTool();
 		if (runningSubagents.size > 0) {
 			startWidgetRefresh();
 			startStatusRefresh(pi);
@@ -490,22 +499,25 @@ export default function subagentsExtension(
 
 	// Every tool and command registers through one boundary that encodes
 	// thrown errors before they reach the parent.
-	const host = withEncodedToolErrors(pi);
+	const host = withEncodedToolErrors(deferredTools.api);
 
 	registerWorktreeTools(host, { parentSession, cleanupInput });
 
 	registerTaskModelTool(host, { shouldRegister });
 
-	registerSubagentTool(host, {
-		shouldRegister,
-		runtime,
-		updateWidget,
-		subagentRoutingGuidelines,
-		persistentCapacityError,
-		resolveSubagentRuntimePlans,
-		normalizePiAttempt,
-		spawningConfig,
-	});
+	function registerLaunchTool(): void {
+		registerSubagentTool(host, {
+			shouldRegister,
+			runtime,
+			updateWidget,
+			subagentRoutingGuidelines,
+			persistentCapacityError,
+			resolveSubagentRuntimePlans,
+			normalizePiAttempt,
+			spawningConfig,
+		});
+	}
+	registerLaunchTool();
 
 	registerControlTools(host, {
 		shouldRegister,

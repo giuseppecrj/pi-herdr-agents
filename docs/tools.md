@@ -48,6 +48,22 @@ This page is the detailed reference for the tools, commands, and run lifecycle o
 | `/worktree` | `/worktree <name> [task]`<br>`/worktree list`<br>`/worktree remove <target>` | Fork into a worktree, list retained worktrees, or explicitly remove one |
 <!-- generated:commands:end -->
 
+## Tool loading
+
+The nine routine tools (`subagent`, `subagent_resume`, `subagent_interrupt`, `subagent_cancel`, `subagent_send`, `subagent_stop`, `subagents_list`, `worktree_list`, and `worktree_remove`) register with Pi's `deferred` [tool exposure](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md#tool-exposure). Their schemas stay out of model requests until Pi's built-in `tool_search` loads them. The same applies to the `subagent` guidelines, which include the [model catalog](configuration.md#model-catalog-in-the-prompt). When a session starts, the host activates `tool_search` and leaves every other active or restored tool as it was. A search such as `tool_search({ query: "subagent" })` or `tool_search({ query: "worktree" })` declares the matching tools for the next model call. Pi records loaded tools in the transcript, so they stay declared after `/reload`, and after a resume on that branch.
+
+Pi's tool policy decides which host tools exist, and the host never adds a tool the policy removed:
+
+- A `--tools` allowlist keeps only the tools it names. Pi declares the named host tools at once, and `tool_search` can load only tools the allowlist kept.
+- `--exclude-tools`, and in a child the role's `deny-tools` or `spawning: false`, remove tools from the session. Search cannot load a removed tool.
+- When Pi's own `tool_search` is unavailable or turned off, the host activates every routine tool Pi kept when the session starts, as earlier releases did. This happens with `--no-extensions`, with `-builtin:tool-search` in the `extensions` setting, with `"-tool_search"` in the `defaultTools` setting, with `--exclude-tools tool_search`, with an allowlist that omits `tool_search`, and when another extension registers a tool named `tool_search`. An SDK session uses search only when it loads the tool-search extension as the built-in `builtin:tool-search`; see [Pi's SDK documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/sdk.md).
+- Pi does not report the per-invocation `--tools -tool_search` to extensions, so the host still activates search under it. Use `--exclude-tools tool_search` to turn search off for one run.
+- The host recognizes Pi's search by the source Pi reports for it (`builtin:tool-search`), never by name alone, and activates only tools it registered itself.
+
+Codemode scripts can call registered `deferred` tools without loading them, as Pi allows for every deferred tool. The removal rules above still decide which host tools are registered.
+
+`subagents_write_task_models` is not deferred. It is a direct tool registered inactive, `tool_search` never finds it, and only `/subagents-init` activates it; see [Task-model writer](configuration.md#task-model-writer). The child-only `caller_ping` and `subagent_done` tools are declared directly, as before.
+
 ## Async Subagent Flow
 
 ```

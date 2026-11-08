@@ -106,6 +106,11 @@ family without guessing an ID. A session that scopes models (`--models` or
 `enabledModels`) lists its scoped set instead; see
 [Model resolution and fallback](#model-resolution-and-fallback).
 
+These guidelines reach the system prompt only while `subagent` is loaded. With
+Pi's built-in tool search, that starts when the model loads `subagent` through
+`tool_search`; without it, `subagent` is active from session start. See
+[Tool loading](tools.md#tool-loading).
+
 ## Draft task-model preferences
 
 Run `/subagents-init [preferences]` to draft task-model preferences. For example:
