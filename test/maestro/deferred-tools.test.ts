@@ -139,6 +139,7 @@ async function openSession(options: {
 	search: SearchMode;
 	tools?: string[];
 	excludeTools?: string[];
+	settings?: Parameters<typeof SettingsManager.inMemory>[0];
 	/** A child session's PI_SUBAGENT_ID and PI_DENY_TOOLS. */
 	child?: { denyTools?: string };
 	sessionManager?: (cwd: string) => SessionManager;
@@ -192,7 +193,7 @@ async function openSession(options: {
 		const loader = new DefaultResourceLoader({
 			cwd,
 			agentDir,
-			settingsManager: SettingsManager.inMemory(),
+			settingsManager: SettingsManager.inMemory(options.settings),
 			extensionFactories: [
 				...searchExtensions(options.search),
 				(pi) => subagentsExtension(pi),
@@ -211,7 +212,7 @@ async function openSession(options: {
 			resourceLoader: loader,
 			sessionManager:
 				options.sessionManager?.(cwd) ?? SessionManager.inMemory(cwd),
-			settingsManager: SettingsManager.inMemory(),
+			settingsManager: SettingsManager.inMemory(options.settings),
 			tools: options.tools,
 			excludeTools: options.excludeTools,
 		});
@@ -489,6 +490,30 @@ describe("without Pi's own tool_search the permitted routine tools stay eager", 
 				[...tools].sort(),
 				ROUTINE.filter((name) => name !== "worktree_remove").sort(),
 			);
+		} finally {
+			run.dispose();
+		}
+	});
+
+	it("activates them when defaultTools turns the search off", async () => {
+		const run = await openSession({
+			search: "native",
+			settings: { defaultTools: ["-tool_search"] },
+		});
+		try {
+			await run.prompt("Hello.", reply);
+			await run.reload();
+			await run.prompt("After reload.", reply);
+			for (const request of run.requests) {
+				assert.ok(
+					!request.tools.includes("tool_search"),
+					"the setting keeps search off",
+				);
+				assert.deepEqual(
+					[...hostTools(request.tools)].sort(),
+					[...ROUTINE].sort(),
+				);
+			}
 		} finally {
 			run.dispose();
 		}
