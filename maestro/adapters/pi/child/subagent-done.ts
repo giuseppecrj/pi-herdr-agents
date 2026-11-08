@@ -3,7 +3,10 @@
  * - Shows agent identity + available tools as a compact styled widget above the editor
  * - Provides a `subagent_done` tool for interactive agents to self-terminate
  */
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { writeFileSync } from "node:fs";
@@ -238,7 +241,9 @@ export default function (pi: ExtensionAPI) {
 	let agentStarted = false;
 	let latestAgentMessages: any[] | undefined;
 	let completionFinalized = false;
-	let sessionContext: { shutdown(): void } | undefined;
+	let sessionContext:
+		| Pick<ExtensionContext, "isIdle" | "abort" | "shutdown">
+		| undefined;
 	// A child without auto-exit closes only through subagent_done, so one that
 	// forgets it is asked once whether its task is complete.
 	const doneNudge =
@@ -506,6 +511,9 @@ export default function (pi: ExtensionAPI) {
 					}
 					completionFinalized = true;
 					recorder.subagentDone();
+					// The run that asked for help belongs to no task, and shutdown waits for idle.
+					if (sessionContext && !sessionContext.isIdle())
+						sessionContext.abort();
 					sessionContext?.shutdown();
 					return;
 				}
