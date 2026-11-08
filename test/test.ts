@@ -9112,6 +9112,55 @@ describe("subagent-done.ts", () => {
 				);
 			});
 		});
+
+		const startSession = (
+			mock: ReturnType<typeof createMockExtensionApi>,
+			idle: boolean,
+		) => {
+			const calls: string[] = [];
+			mock.eventHandlers.get("session_start")?.[0](
+				{ reason: "startup" },
+				{
+					ui: { setWidget() {} },
+					isIdle: () => idle,
+					abort: () => calls.push("abort"),
+					shutdown: () => calls.push("shutdown"),
+				},
+			);
+			return calls;
+		};
+
+		it("aborts the leftover run when a stop arrives while it streams", async () => {
+			await withHelpingSpecialist(async ({ sessionFile, mock, ping }) => {
+				const calls = startSession(mock, false);
+				await ping();
+				writePersistentTaskInbox(sessionFile, 1, {
+					type: "stop",
+					task: "stop",
+					message: "",
+				});
+				await new Promise((resolve) => setTimeout(resolve, 1_100));
+				assert.deepEqual(calls, ["abort", "shutdown"]);
+			});
+		});
+
+		it("stops an idle specialist without aborting", async () => {
+			await withHelpingSpecialist(async ({ sessionFile, mock }) => {
+				const calls = startSession(mock, true);
+				const doneTool = mock.registeredTools.find(
+					(tool) => tool.name === "subagent_done",
+				);
+				assert.ok(doneTool);
+				await doneTool.execute("call", {}, undefined, undefined, {});
+				writePersistentTaskInbox(sessionFile, 1, {
+					type: "stop",
+					task: "stop",
+					message: "",
+				});
+				await new Promise((resolve) => setTimeout(resolve, 1_100));
+				assert.deepEqual(calls, ["shutdown"]);
+			});
+		});
 	});
 
 	it("leaves non-auto-exit coordinators open until subagent_done", async () => {
