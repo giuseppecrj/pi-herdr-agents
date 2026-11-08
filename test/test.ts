@@ -9068,6 +9068,50 @@ describe("subagent-done.ts", () => {
 				]);
 			});
 		});
+
+		const callSubagentDone = async (
+			mock: ReturnType<typeof createMockExtensionApi>,
+		) => {
+			const doneTool = mock.registeredTools.find(
+				(tool) => tool.name === "subagent_done",
+			);
+			assert.ok(doneTool);
+			let shutdowns = 0;
+			await doneTool.execute("call", {}, undefined, undefined, {
+				shutdown: () => shutdowns++,
+			});
+			return shutdowns;
+		};
+
+		it("stays alive for the answer when subagent_done follows caller_ping", async () => {
+			await withHelpingSpecialist(async ({ sessionFile, mock, ping }) => {
+				await ping();
+				assert.equal(await callSubagentDone(mock), 0);
+				assert.equal(existsSync(`${sessionFile}.exit`), false);
+				assert.deepEqual(
+					readPersistentTaskEvents(sessionFile).map((event) => [
+						event.type,
+						event.task,
+					]),
+					[["help-request", "task-1"]],
+				);
+			});
+		});
+
+		it("stays alive when subagent_done is called with no current task", async () => {
+			await withHelpingSpecialist(async ({ sessionFile, mock }) => {
+				assert.equal(await callSubagentDone(mock), 0);
+				assert.equal(await callSubagentDone(mock), 0);
+				assert.equal(existsSync(`${sessionFile}.exit`), false);
+				assert.deepEqual(
+					readPersistentTaskEvents(sessionFile).map((event) => [
+						event.type,
+						event.task,
+					]),
+					[["task-done", "task-1"]],
+				);
+			});
+		});
 	});
 
 	it("leaves non-auto-exit coordinators open until subagent_done", async () => {
