@@ -8955,6 +8955,165 @@ describe("subagent-done.ts", () => {
 		}
 	});
 
+	describe("persistent caller_ping", () => {
+		const envKeys = [
+			"PI_SUBAGENT_PERSISTENT",
+			"PI_SUBAGENT_SESSION",
+			"PI_SUBAGENT_TASK_ID",
+			"PI_SUBAGENT_GENERATION_ID",
+			"PI_SUBAGENT_AUTO_EXIT",
+		];
+		const withHelpingSpecialist = async (
+			run: (child: {
+				sessionFile: string;
+				mock: ReturnType<typeof createMockExtensionApi>;
+				ping: () => Promise<void>;
+			}) => Promise<void>,
+		) => {
+			const dir = createTestDir();
+			const previous = Object.fromEntries(
+				envKeys.map((key) => [key, process.env[key]]),
+			);
+			const sessionFile = join(dir, "persistent-help.jsonl");
+			process.env.PI_SUBAGENT_PERSISTENT = "1";
+			process.env.PI_SUBAGENT_SESSION = sessionFile;
+			process.env.PI_SUBAGENT_TASK_ID = "task-1";
+			process.env.PI_SUBAGENT_GENERATION_ID = "generation";
+			delete process.env.PI_SUBAGENT_AUTO_EXIT;
+			let shutdown: Function | undefined;
+			try {
+				const mock = createMockExtensionApi();
+				subagentDoneExtension(mock.api);
+				shutdown = mock.eventHandlers.get("session_shutdown")?.[0];
+				const pingTool = mock.registeredTools.find(
+					(tool) => tool.name === "caller_ping",
+				);
+				assert.ok(pingTool);
+				await run({
+					sessionFile,
+					mock,
+					ping: async () => {
+						await pingTool.execute(
+							"call",
+							{ message: "which schema?" },
+							undefined,
+							undefined,
+							{},
+						);
+					},
+				});
+			} finally {
+				shutdown?.({ reason: "reload" });
+				for (const key of envKeys) restoreEnvVar(key, previous[key]);
+				rmSync(dir, { recursive: true, force: true });
+			}
+		};
+
+		it("ends the task, so the run's settlement reports no second result", async () => {
+			await withHelpingSpecialist(async ({ sessionFile, mock, ping }) => {
+				await ping();
+				const messages = [{ role: "assistant", stopReason: "stop" }];
+				const ctx = {
+					sessionManager: {
+						getBranch: () =>
+							messages.map((message) => ({ type: "message", message })),
+					},
+				};
+				mock.eventHandlers.get("agent_end")?.[0]({ messages }, ctx);
+				mock.eventHandlers.get("agent_settled")?.[0]({ aborted: false }, ctx);
+				assert.deepEqual(
+					readPersistentTaskEvents(sessionFile).map((event) => [
+						event.type,
+						event.task,
+					]),
+					[["help-request", "task-1"]],
+				);
+			});
+		});
+
+		it("takes the answer from the inbox before the run settles", async () => {
+			await withHelpingSpecialist(async ({ sessionFile, mock, ping }) => {
+				await ping();
+				writePersistentTaskInbox(sessionFile, 1, {
+					task: "answer-task",
+					message: "use schema v2",
+				});
+				await new Promise((resolve) => setTimeout(resolve, 1_100));
+				assert.deepEqual(mock.sentUserMessages, ["use schema v2"]);
+			});
+		});
+
+		it("queues the answer behind the run that is still streaming", async () => {
+			await withHelpingSpecialist(async ({ sessionFile, mock, ping }) => {
+				const queued: Array<{ message: string; deliverAs: string }> = [];
+				const rejected: string[] = [];
+				// Like Pi, a streaming session rejects a user message without deliverAs.
+				mock.api.sendUserMessage = async (
+					message: string,
+					options?: { deliverAs?: string },
+				) => {
+					if (options?.deliverAs)
+						queued.push({ message, deliverAs: options.deliverAs });
+					else rejected.push(message);
+				};
+				await ping();
+				writePersistentTaskInbox(sessionFile, 1, {
+					task: "answer-task",
+					message: "use schema v2",
+				});
+				await new Promise((resolve) => setTimeout(resolve, 1_100));
+				assert.deepEqual(rejected, []);
+				assert.deepEqual(queued, [
+					{ message: "use schema v2", deliverAs: "followUp" },
+				]);
+			});
+		});
+
+		const callSubagentDone = async (
+			mock: ReturnType<typeof createMockExtensionApi>,
+		) => {
+			const doneTool = mock.registeredTools.find(
+				(tool) => tool.name === "subagent_done",
+			);
+			assert.ok(doneTool);
+			let shutdowns = 0;
+			await doneTool.execute("call", {}, undefined, undefined, {
+				shutdown: () => shutdowns++,
+			});
+			return shutdowns;
+		};
+
+		it("stays alive for the answer when subagent_done follows caller_ping", async () => {
+			await withHelpingSpecialist(async ({ sessionFile, mock, ping }) => {
+				await ping();
+				assert.equal(await callSubagentDone(mock), 0);
+				assert.equal(existsSync(`${sessionFile}.exit`), false);
+				assert.deepEqual(
+					readPersistentTaskEvents(sessionFile).map((event) => [
+						event.type,
+						event.task,
+					]),
+					[["help-request", "task-1"]],
+				);
+			});
+		});
+
+		it("stays alive when subagent_done is called with no current task", async () => {
+			await withHelpingSpecialist(async ({ sessionFile, mock }) => {
+				assert.equal(await callSubagentDone(mock), 0);
+				assert.equal(await callSubagentDone(mock), 0);
+				assert.equal(existsSync(`${sessionFile}.exit`), false);
+				assert.deepEqual(
+					readPersistentTaskEvents(sessionFile).map((event) => [
+						event.type,
+						event.task,
+					]),
+					[["task-done", "task-1"]],
+				);
+			});
+		});
+	});
+
 	it("leaves non-auto-exit coordinators open until subagent_done", async () => {
 		const dir = createTestDir();
 		const previousAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
