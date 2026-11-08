@@ -9042,6 +9042,32 @@ describe("subagent-done.ts", () => {
 				assert.deepEqual(mock.sentUserMessages, ["use schema v2"]);
 			});
 		});
+
+		it("queues the answer behind the run that is still streaming", async () => {
+			await withHelpingSpecialist(async ({ sessionFile, mock, ping }) => {
+				const queued: Array<{ message: string; deliverAs: string }> = [];
+				const rejected: string[] = [];
+				// Like Pi, a streaming session rejects a user message without deliverAs.
+				mock.api.sendUserMessage = async (
+					message: string,
+					options?: { deliverAs?: string },
+				) => {
+					if (options?.deliverAs)
+						queued.push({ message, deliverAs: options.deliverAs });
+					else rejected.push(message);
+				};
+				await ping();
+				writePersistentTaskInbox(sessionFile, 1, {
+					task: "answer-task",
+					message: "use schema v2",
+				});
+				await new Promise((resolve) => setTimeout(resolve, 1_100));
+				assert.deepEqual(rejected, []);
+				assert.deepEqual(queued, [
+					{ message: "use schema v2", deliverAs: "followUp" },
+				]);
+			});
+		});
 	});
 
 	it("leaves non-auto-exit coordinators open until subagent_done", async () => {

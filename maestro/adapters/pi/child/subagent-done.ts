@@ -455,6 +455,7 @@ export default function (pi: ExtensionAPI) {
 					generation,
 					message: params.message,
 				});
+				currentTask = "";
 				return {
 					content: [
 						{
@@ -510,7 +511,8 @@ export default function (pi: ExtensionAPI) {
 				}
 				currentTask = inbox.task;
 				recorder.taskStart();
-				pi.sendUserMessage(inbox.message);
+				// After caller_ping the run that asked for help may still be streaming.
+				pi.sendUserMessage(inbox.message, { deliverAs: "followUp" });
 			} catch {
 				// A malformed or transiently unavailable inbox must not kill the poller.
 			}
