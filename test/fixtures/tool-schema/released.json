@@ -18,13 +18,13 @@
 		{
 			"name": "subagent",
 			"scopes": ["parent", "child"],
-			"description": "Spawn a sub-agent in a dedicated terminal herdr pane, or in an isolated Herdr-managed Git worktree when worktree is provided. Use ordinary panes for read-only tasks; a single or sequential writer can work in the parent checkout without a worktree. Reserve unique worktree branches for parallel independent writers starting from committed state — the worktree base is committed HEAD, so uncommitted parent changes are not copied. Worktree runs retain their workspace after completion for parent review; they are not pushed, merged, or removed automatically. To inspect a retained worktree result, spawn read-only agents in an ordinary pane with cwd set to that worktree path — do not create a new worktree for them. This is a fire-and-forget async tool: the call returns immediately with only an acknowledgement. When the sub-agent finishes, the harness AUTOMATICALLY delivers its result as a steer message that wakes you up and starts a new turn — you do not need to do anything to receive it. DO NOT write polling loops, sleep/wait commands, tail/watch scripts, or repeatedly read session/log files to detect completion. DO NOT call subagents_list or any other tool to 'check' status. All of that is wasted work — the harness handles delivery for you. DO NOT fabricate, assume, or summarize results after calling this tool. After spawning, either end your turn immediately, or work on other independent tasks (including spawning more subagents in parallel). The harness will wake you with the result when it is ready.",
+			"description": "Launch a Pi subagent in a terminal pane, or in a new managed Git worktree when `worktree` is set. Use a plain pane for read-only work and for a single writer, and worktrees only for parallel writers. A worktree starts from the committed HEAD, without uncommitted parent changes, and is retained after the run for parent review. To inspect one, use a plain pane with cwd set to its path. The call returns at once and the result arrives later as a new message. Do not poll or guess the result; end the turn or do other independent work.",
 			"parameters": {
 				"type": "object",
 				"required": ["name", "task"],
 				"properties": {
 					"name": {
-						"description": "Short stable label for the subagent; for a new coordinated group use <task>-<role>[-n] (shown in the widget and pane title)",
+						"description": "Short label shown in the widget and pane title.",
 						"type": "string"
 					},
 					"task": {
@@ -32,7 +32,7 @@
 						"type": "string"
 					},
 					"agent": {
-						"description": "Role definition name to load defaults from. Discovery precedence is project .pi/agents, global ~/.pi/agent/agents, then installed role packs; this extension ships no roles. A missing name fails before launch. Omit for a bare agent.",
+						"description": "Role definition to load defaults from (see subagents_list). Omit for a bare agent.",
 						"type": "string"
 					},
 					"systemPrompt": {
@@ -40,11 +40,11 @@
 						"type": "string"
 					},
 					"model": {
-						"description": "Explicitly pick an exact authenticated provider/model-id, an ordered comma-separated fallback list, or task:<category> as the entire value. task: categories are case-insensitive and expand configured authenticated candidates; worktrees use only the first. For ordinary review, prefer a different authenticated model family. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback. Omitting still inherits the parent model; do not omit for orchestrated children. Fallback lists cannot be used with worktrees.",
+						"description": "Exact authenticated provider/model-id, a comma-separated fallback list, or task:<category> as the whole value. Worktree launches take one model: a task: category uses its first candidate, and fallback lists are rejected. For ordinary review, prefer a different authenticated model family. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback.",
 						"type": "string"
 					},
 					"thinking": {
-						"description": "Pi thinking level. Pick the model tier first, then set thinking within that model's range: minimal/low for bounded mechanical work, medium for ordinary implementation or review, high+ for architecture, security, or hard diagnosis. Omitting still inherits the parent level; do not omit on orchestrated child work.",
+						"description": "Pi thinking level, within the chosen model's supported range. Use low for mechanical work, medium for ordinary work, and high+ for hard work.",
 						"anyOf": [
 							{ "const": "off", "type": "string" },
 							{ "const": "minimal", "type": "string" },
@@ -64,11 +64,11 @@
 						"type": "string"
 					},
 					"cwd": {
-						"description": "Working directory for the sub-agent. Without worktree, the agent starts in this folder. With worktree, this selects the source Git repository and the agent starts at the created worktree root.",
+						"description": "Working directory. With `worktree`, the source repository; the child then starts at the new worktree root.",
 						"type": "string"
 					},
 					"worktree": {
-						"description": "Optional isolated Herdr-managed Git worktree. Omit or pass null to use an ordinary pane in cwd.",
+						"description": "Run in a new managed Git worktree. Omit or pass null for a plain pane in cwd.",
 						"anyOf": [
 							{
 								"type": "object",
@@ -76,11 +76,11 @@
 								"properties": {
 									"branch": {
 										"minLength": 1,
-										"description": "New branch name for an isolated Herdr-managed Git worktree",
+										"description": "Unique new branch name.",
 										"type": "string"
 									},
 									"base": {
-										"description": "Git revision to branch from. Defaults to the source checkout's committed HEAD.",
+										"description": "Git revision to branch from. Defaults to the committed HEAD.",
 										"type": "string"
 									}
 								}
@@ -89,44 +89,44 @@
 						]
 					},
 					"fork": {
-						"description": "Override the child session mode for this spawn. `true` forces full-context fork; `false` forces standalone. Omit to inherit the agent frontmatter session-mode.",
+						"description": "`true` copies this conversation into the child; `false` starts it fresh. Omit to use the role's session-mode.",
 						"type": "boolean"
 					},
 					"persistent": {
-						"description": "Keep this stable specialist session alive between turn-based tasks. Persistent agents accept follow-up work only through subagent_send.",
+						"description": "Keep the child alive between tasks. Send later tasks with subagent_send.",
 						"type": "boolean"
 					},
 					"accept": {
-						"description": "Optional accept check. The delivery carries `Check: <verdict>` from the closed set accepted, rejected, error, skipped, none. Only auto-exit, non-persistent children support it.",
+						"description": "Optional acceptance check. The result reports `Check: <verdict>`: accepted, rejected, error, skipped, or none. Only for auto-exit, non-persistent children.",
 						"type": "object",
 						"required": ["run"],
 						"properties": {
 							"run": {
 								"minLength": 1,
-								"description": "Shell command run with `sh -c`. Exit 0 passes. The child runs it before it finishes and retries on failure; then the host re-runs it in the child's checkout (the worktree for worktree children) and that run decides the verdict.",
+								"description": "Shell command run with `sh -c`; exit 0 passes. The child runs it and retries on failure. The host then reruns it in the child's checkout, and that run decides the verdict.",
 								"type": "string"
 							},
 							"maxRetries": {
 								"minimum": 0,
 								"maximum": 5,
-								"description": "Extra child turns after a failed check, each with the failing output. Default 1.",
+								"description": "Extra child turns after a failed check. Default 1.",
 								"type": "integer"
 							},
 							"timeoutSec": {
 								"minimum": 1,
 								"maximum": 3600,
-								"description": "Per-run timeout in seconds. Default 600. A timeout is verdict `error`.",
+								"description": "Per-run timeout in seconds. Default 600. A timeout gives verdict `error`.",
 								"type": "integer"
 							},
 							"paths": {
-								"description": "Repo-relative check files (for example tests). The delivery reports any the child changed; the verdict is unchanged.",
+								"description": "Check files, such as tests. The result lists any the child changed, without affecting the verdict.",
 								"type": "array",
 								"items": { "minLength": 1, "type": "string" }
 							}
 						}
 					},
 					"interactive": {
-						"description": "Mark the subagent as interactive (long-running, user drives the conversation in its own pane). When true, the main session is not woken by status transitions (stalled/recovered) for this subagent. If omitted, falls back to the agent's `interactive` frontmatter, otherwise the inverse of `auto-exit` (agents that auto-exit are autonomous and get stall pings; agents that don't are interactive and stay quiet).",
+						"description": "True when the user drives the child in its own pane. Interactive children do not wake the parent on stall or recovery. Defaults to the role's `interactive` setting, else the opposite of `auto-exit`.",
 						"type": "boolean"
 					}
 				}
@@ -135,7 +135,7 @@
 		{
 			"name": "subagent_cancel",
 			"scopes": ["parent", "child"],
-			"description": "Cancel a running ordinary (non-persistent) Pi-backed subagent, including an interrupted one: records terminal intent first, terminates its owned process, and delivers exactly one cancelled result. No model fallback, retry, or recovery starts after a cancel. An ordinary pane is closed; a managed-worktree child stops only its Pi process and keeps the workspace, checkout, commits, and manifest. Returns confirmed, requested (launch still in flight), unconfirmed (the run stays live; call again to retry), or already-terminal. Persistent specialists are rejected; use subagent_stop. Do not poll: the cancelled result arrives automatically.",
+			"description": "Cancel a running non-persistent subagent, including an interrupted one. The host stops its process and delivers exactly one cancelled result, with no model fallback, retry, or recovery. Do not poll for it. A plain pane closes. A worktree child keeps the workspace, checkout, commits, and manifest. Returns confirmed, requested (launch still in flight), unconfirmed (still running; call again), or already-terminal. Persistent specialists are rejected; use subagent_stop.",
 			"parameters": {
 				"type": "object",
 				"properties": {
@@ -159,7 +159,7 @@
 		{
 			"name": "subagent_interrupt",
 			"scopes": ["parent", "child"],
-			"description": "Send Escape to the active turn of a currently running Pi-backed subagent. The child pane, session, watcher, and running entry remain alive; this returns only a local acknowledgement and does not emit a subagent_result solely because of this request.",
+			"description": "Send Escape to a running subagent's active turn. The subagent keeps running, and this call delivers no result.",
 			"parameters": {
 				"type": "object",
 				"properties": {
@@ -177,7 +177,7 @@
 		{
 			"name": "subagent_resume",
 			"scopes": ["parent", "child"],
-			"description": "Resume a previous Pi-backed sub-agent session in a new herdr pane. This does not reattach a retained managed worktree; continue worktree-bound follow-up in its existing workspace. This is a fire-and-forget async tool: the call returns immediately with only an acknowledgement. When the resumed sub-agent finishes, the harness AUTOMATICALLY delivers its result as a steer message that wakes you up and starts a new turn — you do not need to do anything to receive it. DO NOT write polling loops, sleep/wait commands, tail/watch scripts, or repeatedly read session/log files to detect completion. DO NOT poll for status. All of that is wasted work — the harness handles delivery for you. DO NOT fabricate or assume results. After resuming, either end your turn or work on other independent tasks; the harness will wake you when the result is ready. Use when a sub-agent was cancelled or needs follow-up work.",
+			"description": "Resume a saved subagent session in a new terminal pane, to continue a cancelled run or send follow-up work. It does not reattach a retained worktree; continue that work in the existing workspace. The call returns at once and the result arrives later as a message. Do not poll for it.",
 			"parameters": {
 				"type": "object",
 				"required": ["sessionPath"],
@@ -191,11 +191,11 @@
 						"type": "string"
 					},
 					"message": {
-						"description": "Optional message to send after resuming (e.g. follow-up instructions)",
+						"description": "Message to send after resuming.",
 						"type": "string"
 					},
 					"autoExit": {
-						"description": "Whether the resumed session should automatically exit after completing its response. Defaults to true for autonomous follow-up work; set false for interactive resumed sessions.",
+						"description": "Exit after the response. Defaults to true; set false to leave the session open for the user.",
 						"type": "boolean"
 					}
 				}
@@ -224,7 +224,7 @@
 		{
 			"name": "subagent_stop",
 			"scopes": ["parent", "child"],
-			"description": "Gracefully stop a persistent specialist after its active task settles. Exit is confirmed before the specialist is removed.",
+			"description": "Stop a persistent specialist after its active task finishes.",
 			"parameters": {
 				"type": "object",
 				"properties": {
@@ -242,7 +242,7 @@
 		{
 			"name": "subagents_list",
 			"scopes": ["parent", "child"],
-			"description": "List all available package, global, and project subagent definitions. Project agents override global definitions, which override package definitions.",
+			"description": "List subagent role definitions, live persistent specialists, and the supervision mode.",
 			"parameters": { "type": "object", "properties": {} }
 		},
 		{
@@ -357,13 +357,13 @@
 		{
 			"name": "worktree_list",
 			"scopes": ["parent"],
-			"description": "Inspect managed worktrees, including cross-session orphans. Only source repositories inside cwd are eligible for explicit removal. This tool never removes anything.",
+			"description": "List managed worktrees, including orphans from other sessions. Read-only.",
 			"parameters": { "type": "object", "properties": {} }
 		},
 		{
 			"name": "worktree_remove",
 			"scopes": ["parent"],
-			"description": "Explicitly remove one managed worktree by exact path, branch, or workspace ID. Rechecks cwd containment, live children/leases, and Git state. Branches and commits are retained. Dirty work requires explicit preserve: true to make a WIP commit first.",
+			"description": "Remove one managed worktree by exact path, branch, or workspace ID, only when the user asks. Its source repository must be inside cwd. Branches and commits are kept. A dirty worktree needs preserve: true, which commits the work first.",
 			"parameters": {
 				"type": "object",
 				"required": ["target"],
