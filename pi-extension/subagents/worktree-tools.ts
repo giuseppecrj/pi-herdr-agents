@@ -1,4 +1,5 @@
 import { HostEncodedError } from "./tool-boundary.ts";
+import { ROUTINE_TOOL_EXPOSURE } from "./deferred-tools.ts";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
@@ -48,6 +49,7 @@ export function registerWorktreeTools(
 	if (parentSession) {
 		pi.registerTool({
 			name: "worktree_list",
+			exposure: ROUTINE_TOOL_EXPOSURE,
 			label: "Worktree inventory",
 			description:
 				"List managed worktrees, including orphans from other sessions. Read-only.",
@@ -62,6 +64,7 @@ export function registerWorktreeTools(
 		});
 		pi.registerTool({
 			name: "worktree_remove",
+			exposure: ROUTINE_TOOL_EXPOSURE,
 			label: "Remove worktree",
 			description:
 				"Remove one managed worktree by exact path, branch, or workspace ID, only when the user asks. Its source repository must be inside cwd. Branches and commits are kept. A dirty worktree needs preserve: true, which commits the work first.",

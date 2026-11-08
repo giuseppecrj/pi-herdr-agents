@@ -138,6 +138,8 @@ The parent session gets these tools:
 | `worktree_remove` | Remove one managed worktree on explicit request. |
 | `subagents_write_task_models` | Internal writer for `models.tasks` preferences. Inactive until `/subagents-init` needs it. |
 
+The routine tools above load on demand. Their schemas and the `subagent` guidelines stay out of the prompt until the model loads them with Pi's built-in `tool_search`, which the host activates at session start. Without Pi's tool search, for example under `--no-extensions`, they are active from the start. A `--tools` allowlist, `--exclude-tools`, and a role's `deny-tools` still decide which of them exist. See [Tool loading](docs/tools.md#tool-loading).
+
 Children get `caller_ping` to ask the parent for help. Interactive children also get `subagent_done` to mark themselves complete, and are asked whether they are done when a run ends without it.
 
 | Command | Use |
