@@ -12,17 +12,44 @@ export const HERDR_RECONCILE_TIMEOUT_MS = 6_000;
 export const HERDR_COSMETIC_TIMEOUT_MS = 1_000;
 export const HERDR_OUTPUT_BYTES = 1024 * 1024;
 
-export function isHerdrAvailable(): boolean {
-	if (process.env.HERDR_ENV !== "1") return false;
-	return (process.env.PATH ?? "").split(delimiter).some((directory) => {
-		try {
-			const path = join(directory, "herdr");
-			accessSync(path, constants.X_OK);
-			return statSync(path).isFile();
-		} catch {
-			return false;
-		}
-	});
+/**
+ * Names `spawn("herdr")` can start. Without a shell, Windows resolves a bare
+ * command only to `.exe` or `.com`, never to a script or an extensionless file.
+ */
+function herdrExecutableNames(platform: NodeJS.Platform): string[] {
+	return platform === "win32" ? ["herdr.exe", "herdr.com"] : ["herdr"];
+}
+
+function pathValue(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string {
+	if (platform !== "win32") return env.PATH ?? "";
+	// Windows environment names are case-insensitive; `Path` is the usual spelling.
+	const key = Object.keys(env).find((name) => name.toUpperCase() === "PATH");
+	return (key && env[key]) || "";
+}
+
+export function isHerdrAvailable(
+	env: NodeJS.ProcessEnv = process.env,
+	platform: NodeJS.Platform = process.platform,
+): boolean {
+	if (env.HERDR_ENV !== "1") return false;
+	const names = herdrExecutableNames(platform);
+	return pathValue(env, platform)
+		.split(delimiter)
+		.map((directory) =>
+			platform === "win32" ? directory.replace(/^"(.*)"$/, "$1") : directory,
+		)
+		.filter(Boolean)
+		.some((directory) =>
+			names.some((name) => {
+				try {
+					const path = join(directory, name);
+					accessSync(path, constants.X_OK);
+					return statSync(path).isFile();
+				} catch {
+					return false;
+				}
+			}),
+		);
 }
 
 export function parseHerdrJson(value: string) {

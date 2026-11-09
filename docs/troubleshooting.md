@@ -117,6 +117,10 @@ Project trust: a session that reports no trust decision (Pi 0.79.0 gates project
 
 Unknown shells such as nushell keep the bare `bash '<script>'` line and are not protected from the WSL launcher.
 
+## `herdr is not available` on Windows inside Herdr
+
+The host runs `herdr` without a shell, and Windows starts a bare command only from a `herdr.exe` (or `herdr.com`) on `PATH`. It does not use an extensionless `herdr` script or a `.cmd`/`.bat` wrapper, so a directory that holds only one of those does not count. Put the directory holding `herdr.exe` on `PATH` in the environment Pi starts from, and check `HERDR_ENV` is `1` (Herdr sets it in its panes).
+
 ## Sidebar Focus hides nothing
 
 This section is for legacy Herdr only, not Core/Desktop.
