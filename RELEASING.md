@@ -23,7 +23,10 @@ The **CI** workflow (`.github/workflows/ci.yml`) runs on pushes and pull
 requests to `main`, and supports manual dispatch. Its **Checks** job runs the
 checks below plus `git diff --check`, with read-only repository permissions,
 no publishing, and cancellation of superseded CI runs. It uses the same pinned
-Node.js version as **Release**. Herdr integration remains a local gate.
+Node.js version as **Release**. The separate **Linux integration** workflow runs
+credential-free legacy Herdr and Core tests on pushes to `main` or manual
+dispatch, with pinned binaries and retained evidence. It never publishes and
+does not establish Desktop GUI acceptance. See [Development](docs/development.md).
 
 The separate **Release** workflow reruns the automated release gates before
 publishing; it does not depend on the CI workflow's result. These checks are
@@ -38,7 +41,8 @@ npm test
 npm pack --dry-run
 ```
 
-Manual deterministic Herdr integration (required before you push a release commit; not run in GitHub Actions):
+Local deterministic Herdr integration (still required before you push a release
+commit; also run by the separate Linux integration workflow):
 
 ```bash
 npm run test:integration

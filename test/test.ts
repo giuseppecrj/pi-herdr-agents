@@ -34,6 +34,7 @@ import {
 	mkdtempSync,
 	writeFileSync,
 	readFileSync,
+	realpathSync,
 	mkdirSync,
 	readdirSync,
 	renameSync,
@@ -240,7 +241,7 @@ after(() => {
 // --- Helpers ---
 
 function createTestDir(): string {
-	return mkdtempSync(join(tmpdir(), "subagents-test-"));
+	return realpathSync(mkdtempSync(join(tmpdir(), "subagents-test-")));
 }
 
 function createSessionFile(dir: string, entries: object[]): string {
@@ -702,9 +703,10 @@ async function withAdapterHost(run: (f: any) => Promise<void>) {
 			writeFileSync(`${child.sessionFile}.exit`, JSON.stringify(result));
 			// Observe this actual attempt, not the logical producer that may continue
 			// through another candidate. The real adapter/coordinator still reads it.
-			// Persistent shell evidence waits for the shared reconciliation cadence,
-			// not just a local sidecar wake (which cannot prove process exit).
-			const deadline = Date.now() + (child.persistent ? 8_000 : 3_000);
+			// File wakes are best-effort (notably on macOS); allow the 4.8-second
+			// reconciliation fallback for ordinary runs too. Persistent shell
+			// evidence always needs reconciliation to prove process exit.
+			const deadline = Date.now() + 8_000;
 			while (
 				child.lifecycle.process.kind !== "completed" &&
 				child.lifecycle.process.kind !== "failed"
@@ -734,6 +736,7 @@ async function withAdapterHost(run: (f: any) => Promise<void>) {
 				handle: (child: any) =>
 					runtime.session.getHandle(runtime.session.getControlTaskId(child.id)),
 				registrations: () => registrations,
+				wake,
 			});
 		} finally {
 			for (const child of runtime.runningSubagents.values()) {
@@ -984,8 +987,20 @@ describe("host adapter migration", () => {
 
 	for (const boundary of ["adapter", "finalizer"])
 		for (const accepted of [true, false])
-			it(`ordinary ${boundary} transcript failure preserves Stage3 payload and ${accepted ? "nonblocking close" : "rejected-send manual retention"}`, async () =>
+			it(`ordinary ${boundary} transcript failure preserves Stage3 payload and ${accepted ? "nonblocking close" : "rejected-send manual retention"}${boundary === "adapter" && accepted ? " without file wakes" : ""}`, async () =>
 				withAdapterHost(async (f) => {
+					const missedWake = boundary === "adapter" && accepted;
+					if (missedWake) {
+						// Directory notifications are best-effort. Keep the real watch and
+						// coordinator, but drop its notification to exercise reconciliation.
+						const register = f.wake.register.bind(f.wake);
+						f.patch(
+							f.wake,
+							"register",
+							(file: string, _wake: () => void, fallback: () => void) =>
+								register(file, () => {}, fallback),
+						);
+					}
 					writeAgentFile(
 						f.projectAgentsDir,
 						"error-role",
@@ -1051,6 +1066,12 @@ describe("host adapter migration", () => {
 						await close(id);
 					});
 					try {
+						if (missedWake)
+							await until(
+								f,
+								() => f.wake.retainedWaits > 0,
+								"parked completion waiter",
+							);
 						if (boundary === "adapter") mkdirSync(child.sessionFile);
 						else
 							writeFileSync(
@@ -1069,11 +1090,11 @@ describe("host adapter migration", () => {
 								errorMessage: "real provider evidence",
 							}),
 						);
-						const deadline = Date.now() + 3000;
-						while (session.getTask(controlTaskId)) {
-							assert.ok(Date.now() < deadline);
-							await f.turn();
-						}
+						await until(
+							f,
+							() => !session.getTask(controlTaskId),
+							"ordinary transcript-failure retirement",
+						);
 						await f.turn();
 						assert.equal(completions.length, boundary === "finalizer" ? 1 : 0);
 						if (boundary === "finalizer") {
@@ -1106,7 +1127,9 @@ describe("host adapter migration", () => {
 						});
 						assert.ok(Number.isInteger(message.details.elapsed));
 						assert.ok(
-							message.details.elapsed >= 12 && message.details.elapsed <= 14,
+							message.details.elapsed >= 12 &&
+								message.details.elapsed <=
+									Math.floor((Date.now() - child.startTime) / 1000),
 						);
 						// Stage3 watchSubagent catch -> fallback wrapper -> ordinary .then:
 						// no result runtimePlan/session/errorMessage; details retain the live plan.
@@ -2343,11 +2366,11 @@ describe("host adapter migration", () => {
 					};
 					if (boundary === "adapter") corrupt();
 					writeFileSync(`${path}.exit`, JSON.stringify({ type: "done" }));
-					const deadline = Date.now() + 3000;
-					while (session.getTask(control)) {
-						assert.ok(Date.now() < deadline);
-						await f.turn();
-					}
+					await until(
+						f,
+						() => !session.getTask(control),
+						"resumed transcript-failure retirement",
+					);
 					assert.equal(
 						owner.entries.size,
 						0,
@@ -2493,11 +2516,11 @@ describe("host adapter migration", () => {
 										: { type: "done" },
 							),
 						);
-					const deadline = Date.now() + 3000;
-					while (session.getTask(control)) {
-						assert.ok(Date.now() < deadline);
-						await f.turn();
-					}
+					await until(
+						f,
+						() => !session.getTask(control),
+						"resumed result retirement",
+					);
 					assert.equal(
 						owner.entries.size,
 						0,
@@ -2777,7 +2800,7 @@ describe("subagent_cancel public tool", { timeout: 20_000 }, () => {
 			assert.equal(response.details.id, child.id);
 			assert.match(
 				response.content[0].text,
-				/pane was closed and Herdr confirmed it is gone\. No model fallback, retry, or recovery will start\./,
+				/owned process exit is confirmed\. No model fallback, retry, or recovery will start\./,
 			);
 			await until(f, () => results(f).length === 1, "the cancelled result");
 			const [delivered] = results(f);
@@ -12073,6 +12096,40 @@ describe("tool registration", () => {
 				);
 			}
 		}
+	});
+
+	it("keeps Core capability limits while shortening launch and control snippets", () => {
+		const { api, registeredTools } = createMockExtensionApi();
+		subagentsModule.default(api);
+		const launch = registeredTools.find((tool) => tool.name === "subagent");
+		const resume = registeredTools.find(
+			(tool) => tool.name === "subagent_resume",
+		);
+		const cancel = registeredTools.find(
+			(tool) => tool.name === "subagent_cancel",
+		);
+		for (const tool of [launch, resume, cancel]) {
+			assert.ok(tool);
+			assert.ok(tool.promptSnippet.length < 100, tool.promptSnippet);
+			assert.doesNotMatch(tool.promptSnippet, /\n/);
+			assert.match(tool.description, /Do not poll/i);
+		}
+		for (const tool of [launch, resume])
+			assert.match(
+				tool.description,
+				/legacy Herdr pane or local Core terminal/,
+			);
+		assert.match(launch.description, /Managed worktrees require legacy Herdr/);
+		assert.match(
+			launch.description,
+			/without Desktop Agents tabs or sidebar integration/,
+		);
+		assert.match(
+			launch.parameters.properties.worktree.description,
+			/legacy Herdr only, not Core/,
+		);
+		assert.match(resume.description, /does not reattach a retained worktree/);
+		assert.match(cancel.description, /Core confirms.*exit.*after delivery/);
 	});
 
 	it("keeps the complete review policy in the schema when custom prompts omit guidelines", () => {

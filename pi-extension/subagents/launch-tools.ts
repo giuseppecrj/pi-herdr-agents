@@ -125,14 +125,15 @@ export function registerSubagentTool(
 			exposure: ROUTINE_TOOL_EXPOSURE,
 			label: "Subagent",
 			description:
-				"Launch a Pi subagent in a terminal pane, or in a new managed Git worktree when `worktree` is set. " +
-				"Use a plain pane for read-only work and for a single writer, and worktrees only for parallel writers. " +
+				"Launch a Pi subagent in a legacy Herdr pane or local Core terminal. " +
+				"Managed worktrees require legacy Herdr; Core runs in the background without Desktop Agents tabs or sidebar integration. " +
+				"Use an ordinary child for read-only work and a single writer, and worktrees only for parallel writers. " +
 				"A worktree starts from the committed HEAD, without uncommitted parent changes, and is retained after the run for parent review. " +
-				"To inspect one, use a plain pane with cwd set to its path. " +
+				"To inspect one, use an ordinary child with cwd set to its path. " +
 				"The call returns at once and the result arrives later as a new message. " +
 				"Do not poll or guess the result; end the turn or do other independent work.",
 			promptSnippet:
-				"Launch a Pi subagent in a pane or managed Git worktree; its result arrives later as a new message",
+				"Launch a Pi subagent in Herdr or Core; its result arrives later as a new message",
 			promptGuidelines: subagentRoutingGuidelines,
 			parameters: SubagentParams,
 
@@ -427,18 +428,20 @@ export function registerResumeTool(
 			exposure: ROUTINE_TOOL_EXPOSURE,
 			label: "Resume Subagent",
 			description:
-				"Resume a saved subagent session in a new terminal pane, to continue a cancelled run or send follow-up work. " +
+				"Resume a saved subagent session in a new legacy Herdr pane or local Core terminal. " +
+				"Use it to continue a cancelled run or send follow-up work. " +
 				"It does not reattach a retained worktree; continue that work in the existing workspace. " +
 				"The call returns at once and the result arrives later as a message. Do not poll for it.",
 			promptSnippet:
-				"Resume a saved subagent session in a new pane; its result arrives later as a new message",
+				"Resume a saved subagent in Herdr or Core; its result arrives later as a new message",
 			parameters: Type.Object({
 				sessionPath: Type.String({
 					description: "Path to the session .jsonl file to resume",
 				}),
 				name: Type.Optional(
 					Type.String({
-						description: "Display name for the terminal tab. Default: 'Resume'",
+						description:
+							"Display name for the run (and legacy Herdr tab). Default: 'Resume'",
 					}),
 				),
 				message: Type.Optional(

@@ -32,6 +32,11 @@ import {
 	inspectNoProgressSessionTail,
 	type AttributedSummary,
 } from "../adapters/pi/session.ts";
+import { createHerdrProvider, resolveHerdrBinding } from "./herdr-backend.ts";
+import {
+	assertSameHerdrBinding,
+	type HerdrBinding,
+} from "../core/config/herdr-config.ts";
 import { createPiScriptShellResolver } from "../adapters/pi/script-shell.ts";
 import { HerdrSurfaceProvider } from "../surfaces/herdr/herdr-surface-provider.ts";
 import { readSubagentActivityFile } from "../adapters/pi/activity-file.ts";
@@ -125,6 +130,7 @@ interface PiEntry {
 const OWNER = Symbol.for("pi-herdr-agents/PiRunSession-owner");
 // pi-herdr-agents extension
 interface PiSessionOwner {
+	binding: HerdrBinding;
 	options: DefaultRunSessionOptions;
 	roles: Role[];
 	// Only acquisitions currently in flight; control reservation is kernel-owned.
@@ -150,6 +156,10 @@ function temporarySurfaceRelease(
 	surface: string,
 ): () => Promise<void> {
 	return async () => {
+		// Suppression may release before a watcher observes native exit. Like a
+		// legacy pane close, stop the owned program, but remove its record only
+		// after independent exit confirmation and delivery/suppression gating.
+		await provider.nativeExecution?.terminate(surface);
 		await provider.closeSurface(surface);
 	};
 }
@@ -234,6 +244,26 @@ export function createDefaultRunSession(
 		throw new Error(
 			"Previous PiRunSession does not carry its owning composition.",
 		);
+	if (
+		options.infrastructure &&
+		options.infrastructure.launchOperations.nativeExecution !==
+			options.infrastructure.surfaceProvider.nativeExecution
+	)
+		throw new Error(
+			"Pi owning provider and launch operations must use the same native execution binding",
+		);
+	// Injected infrastructure is a closed world: never inspect ambient Core sockets.
+	const binding: HerdrBinding = options.infrastructure
+		? { backend: "legacy" }
+		: resolveHerdrBinding(options.configDir, options.configExamplePath);
+	if (adopted) {
+		assertSameHerdrBinding(adopted.binding, binding);
+		const previousNative =
+			adopted.infrastructure.surfaceProvider.nativeExecution;
+		const nextNative = options.infrastructure?.surfaceProvider.nativeExecution;
+		if (options.infrastructure && previousNative !== nextNative)
+			throw new Error("Injected native execution binding changed; restart Pi");
+	}
 	let state: PiSessionOwner;
 	let resumePi: (input: PiResumeInput) => Promise<AgentHandle>;
 	if (adopted) {
@@ -258,17 +288,18 @@ export function createDefaultRunSession(
 		// this explicitly injected registry. Injected infrastructure already owns one.
 		const provider =
 			options.infrastructure?.surfaceProvider ??
-			new HerdrSurfaceProvider({
-				paneConfig: loadPaneConfig(
+			createHerdrProvider(
+				binding,
+				loadPaneConfig(
 					join(options.configDir, "herdr-agents"),
 					options.configExamplePath,
 				),
 				// No launch context here, so project settings are untrusted.
-				resolveScriptShell: createPiScriptShellResolver({
+				createPiScriptShellResolver({
 					cwd: process.cwd(),
 					projectTrusted: false,
 				}),
-			});
+			);
 		const wake = options.infrastructure ? undefined : new FileWakeRegistry();
 		const supervision =
 			options.infrastructure?.supervision ??
@@ -461,6 +492,7 @@ export function createDefaultRunSession(
 			}
 		};
 		state = {
+			binding,
 			options,
 			kernel,
 			entries,
@@ -478,7 +510,11 @@ export function createDefaultRunSession(
 	// reads this shared current binding, not the old facade's options.
 	if (adopted) resumePi = state.resumePi;
 	// Live markers and their sequence survive a reload with their runs.
-	state.markers ??= createDelegatedMarkers(options.infrastructure);
+	if (
+		state.binding.backend === "legacy" &&
+		!state.infrastructure.surfaceProvider.nativeExecution
+	)
+		state.markers ??= createDelegatedMarkers(options.infrastructure);
 	const acceptChecks = (state.acceptChecks ??= {
 		label: "parent run session",
 	});
@@ -530,7 +566,9 @@ export function createDefaultRunSession(
 		return {
 			...(state.options.infrastructure?.launchOperations ??
 				launchOperationsFromSurface(
-					createLaunchSurfaceProvider(snapshot),
+					state.binding.backend === "core"
+						? state.infrastructure.surfaceProvider
+						: createLaunchSurfaceProvider(snapshot),
 					snapshot.paneConfig,
 				)),
 			worktree: state.worktreeOperations,
@@ -942,11 +980,16 @@ export function createDefaultRunSession(
 			);
 			return { record: result.running, focusError: result.focusError };
 		},
-		createWorktreeCleanupOperations: (input) =>
-			createWorktreeCleanupOperations(
+		createWorktreeCleanupOperations: (input) => {
+			if (state.infrastructure.surfaceProvider.nativeExecution)
+				throw new Error(
+					"Managed worktree cleanup is not supported by Herdr Core",
+				);
+			return createWorktreeCleanupOperations(
 				state.infrastructure.surfaceProvider,
 				input,
-			),
+			);
+		},
 		async spawnPi(input) {
 			try {
 				return await state.kernel.spawn(input.task, prepare(input));

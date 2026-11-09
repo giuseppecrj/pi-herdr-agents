@@ -61,7 +61,7 @@ const ThinkingLevelSchema = Type.Union(
 
 export const SubagentParams = Type.Object({
 	name: Type.String({
-		description: "Short label shown in the widget and pane title.",
+		description: "Short label shown in the widget and legacy pane title.",
 	}),
 	task: Type.String({ description: "Task/prompt for the sub-agent" }),
 	agent: Type.Optional(
@@ -118,7 +118,7 @@ export const SubagentParams = Type.Object({
 			],
 			{
 				description:
-					"Run in a new managed Git worktree. Omit or pass null for a plain pane in cwd.",
+					"New managed Git worktree (legacy Herdr only, not Core). Omit or pass null for an ordinary child in cwd.",
 			},
 		),
 	),

@@ -5,6 +5,7 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -66,7 +67,7 @@ test("Git environment drops only repository overrides and copies its input", () 
 });
 
 test("host Git ignores poisoned repository while preserving linked checkout, includes and hooks", async () => {
-	const root = mkdtempSync(join(tmpdir(), "audit-git-env-"));
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "audit-git-env-")));
 	const saved = { ...process.env };
 	const run = (cwd: string, ...args: string[]) =>
 		execFileSync("git", args, {

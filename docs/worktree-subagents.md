@@ -2,6 +2,12 @@
 
 This guide is the operational reference for running writing agents in isolated Git worktrees with `pi-herdr-agents`. For installation and everyday use, see the [README](../README.md). For the complete tool API and status model, see the [tools and lifecycle reference](tools.md). For the product and open-source research behind these choices, see the [research report](research/worktree-subagent-orchestration.md).
 
+Managed worktrees currently require **legacy Herdr**. The Core execution backend
+rejects worktree launch, handoff, inventory and removal before acquisition; it
+does not reinterpret terminal IDs as workspace IDs. Ordinary Core children can
+still work in an already-existing checkout via `cwd`. See
+[backend limits](configuration.md#herdr-backend).
+
 ## Quick start
 
 Run Pi inside Herdr from a Git checkout, then give each independent writing task a unique branch. The examples name `worker`, `scout`, and `reviewer` roles; `pi-herdr-agents` ships no roles, so those names must come from an installed role pack or a project/global definition. Omit `agent` for a bare child.

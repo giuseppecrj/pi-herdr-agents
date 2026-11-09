@@ -293,7 +293,6 @@ export default function subagentsExtension(
 		infrastructure?: PiRunSessionInfrastructure;
 	} = {},
 ) {
-	runtime.pi = pi;
 	runtime.session = createDefaultRunSession(
 		{
 			configDir: getAgentConfigDir(),
@@ -377,6 +376,7 @@ export default function subagentsExtension(
 		},
 		runtime.session,
 	);
+	runtime.pi = pi;
 	const parentSession = !process.env.PI_SUBAGENT_ID;
 	// Report accepted no-op role settings once per parent extension load, not on
 	// every session transition, listing, or child launch.

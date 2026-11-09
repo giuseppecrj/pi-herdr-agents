@@ -18,13 +18,13 @@
 		{
 			"name": "subagent",
 			"scopes": ["parent", "child"],
-			"description": "Launch a Pi subagent in a terminal pane, or in a new managed Git worktree when `worktree` is set. Use a plain pane for read-only work and for a single writer, and worktrees only for parallel writers. A worktree starts from the committed HEAD, without uncommitted parent changes, and is retained after the run for parent review. To inspect one, use a plain pane with cwd set to its path. The call returns at once and the result arrives later as a new message. Do not poll or guess the result; end the turn or do other independent work.",
+			"description": "Launch a Pi subagent in a legacy Herdr pane or local Core terminal. Managed worktrees require legacy Herdr; Core runs in the background without Desktop Agents tabs or sidebar integration. Use an ordinary child for read-only work and a single writer, and worktrees only for parallel writers. A worktree starts from the committed HEAD, without uncommitted parent changes, and is retained after the run for parent review. To inspect one, use an ordinary child with cwd set to its path. The call returns at once and the result arrives later as a new message. Do not poll or guess the result; end the turn or do other independent work.",
 			"parameters": {
 				"type": "object",
 				"required": ["name", "task"],
 				"properties": {
 					"name": {
-						"description": "Short label shown in the widget and pane title.",
+						"description": "Short label shown in the widget and legacy pane title.",
 						"type": "string"
 					},
 					"task": {
@@ -68,7 +68,7 @@
 						"type": "string"
 					},
 					"worktree": {
-						"description": "Run in a new managed Git worktree. Omit or pass null for a plain pane in cwd.",
+						"description": "New managed Git worktree (legacy Herdr only, not Core). Omit or pass null for an ordinary child in cwd.",
 						"anyOf": [
 							{
 								"type": "object",
@@ -135,7 +135,7 @@
 		{
 			"name": "subagent_cancel",
 			"scopes": ["parent", "child"],
-			"description": "Cancel a running non-persistent subagent, including an interrupted one. The host stops its process and delivers exactly one cancelled result, with no model fallback, retry, or recovery. Do not poll for it. A plain pane closes. A worktree child keeps the workspace, checkout, commits, and manifest. Returns confirmed, requested (launch still in flight), unconfirmed (still running; call again), or already-terminal. Persistent specialists are rejected; use subagent_stop.",
+			"description": "Cancel a running non-persistent subagent, including an interrupted one. The host stops its process and delivers exactly one cancelled result, with no model fallback, retry, or recovery. Do not poll for it. A legacy pane closes; Core confirms exit and removes its terminal record after delivery. A worktree child keeps the workspace, checkout, commits, and manifest. Returns confirmed, requested (launch still in flight), unconfirmed (still running; call again), or already-terminal. Persistent specialists are rejected; use subagent_stop.",
 			"parameters": {
 				"type": "object",
 				"properties": {
@@ -177,7 +177,7 @@
 		{
 			"name": "subagent_resume",
 			"scopes": ["parent", "child"],
-			"description": "Resume a saved subagent session in a new terminal pane, to continue a cancelled run or send follow-up work. It does not reattach a retained worktree; continue that work in the existing workspace. The call returns at once and the result arrives later as a message. Do not poll for it.",
+			"description": "Resume a saved subagent session in a new legacy Herdr pane or local Core terminal. Use it to continue a cancelled run or send follow-up work. It does not reattach a retained worktree; continue that work in the existing workspace. The call returns at once and the result arrives later as a message. Do not poll for it.",
 			"parameters": {
 				"type": "object",
 				"required": ["sessionPath"],
@@ -187,7 +187,7 @@
 						"type": "string"
 					},
 					"name": {
-						"description": "Display name for the terminal tab. Default: 'Resume'",
+						"description": "Display name for the run (and legacy Herdr tab). Default: 'Resume'",
 						"type": "string"
 					},
 					"message": {

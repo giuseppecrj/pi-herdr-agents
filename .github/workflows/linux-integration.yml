@@ -1,0 +1,93 @@
+name: Linux integration
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-integration-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  integration:
+    name: Legacy Herdr and Core
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 26.12.1
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install pinned Herdr binaries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fd-find
+          bin="$RUNNER_TEMP/piha-bin"
+          mkdir -p "$bin"
+          curl --fail --location --retry 3 --max-time 120 \
+            https://github.com/herdrdev/herdr/releases/download/v0.9.5/herdr-linux-x86_64 \
+            -o "$bin/herdr"
+          echo "14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d  $bin/herdr" | sha256sum --check
+          chmod +x "$bin/herdr"
+          curl --fail --location --retry 3 --max-time 120 \
+            https://releases.herdr.dev/core/0.1.17/herdr-core-linux-x86_64.tar.gz \
+            -o "$RUNNER_TEMP/core.tar.gz"
+          echo "82ec44043f6894bfdb716b979b87cda43fd7fa46b0104e7b7bd93e64d1a9b877  $RUNNER_TEMP/core.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/core.tar.gz" -C "$bin" herdr-core
+          ln -s "$(realpath node_modules/.bin/pi)" "$bin/pi"
+          ln -s /usr/bin/fdfind "$bin/fd"
+          "$bin/herdr" --version
+          "$bin/herdr-core" --version
+          "$bin/pi" --version
+          mkdir -m 700 "$RUNNER_TEMP/piha-evidence"
+          echo "$bin" >> "$GITHUB_PATH"
+          {
+            echo "HERDR_BIN=$bin/herdr"
+            echo "HERDR_CORE_BIN=$bin/herdr-core"
+            echo "PI_BIN=$bin/pi"
+            echo "PI_TEST_LIVE=0"
+            echo "VERIFY_EVIDENCE_ROOT=$RUNNER_TEMP/piha-evidence"
+          } >> "$GITHUB_ENV"
+
+      - name: Run isolated parent smoke and integration suite
+        run: |
+          node --experimental-strip-types scripts/run-linux-integration.ts 2>&1 \
+            | tee "$VERIFY_EVIDENCE_ROOT/integration.tap"
+
+      - name: Shut down the owned legacy lab
+        if: always()
+        run: |
+          if [[ -n "${VERIFY_EVIDENCE_ROOT:-}" && -f "$VERIFY_EVIDENCE_ROOT/current" ]]; then
+            node --experimental-strip-types .pi/skills/verify-pi-herdr-agents/scripts/lab.ts down
+          fi
+
+      - name: Upload deterministic test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-integration-evidence
+          path: |
+            ${{ runner.temp }}/piha-evidence
+            /tmp/piha-core-evidence-*
+          include-hidden-files: true
+          retention-days: 7

@@ -92,13 +92,15 @@ export async function launchResumedPiSubagent(
 		);
 	}
 	request.acquisitionSignal?.throwIfAborted();
-	const surface = await operations.createPane(request.name, cwd, {
-		signal: request.acquisitionSignal,
-	});
+	const surface = operations.nativeExecution
+		? undefined
+		: await operations.createPane(request.name, cwd, {
+				signal: request.acquisitionSignal,
+			});
 	let running: PiRunningChild | undefined;
 	try {
 		request.acquisitionSignal?.throwIfAborted();
-		await operations.waitForShellReady(surface);
+		if (surface) await operations.waitForShellReady(surface);
 		request.acquisitionSignal?.throwIfAborted();
 		const activityFile = getSubagentActivityFile(artifactDir, id);
 		mkdirSync(dirname(activityFile), { recursive: true });
@@ -154,11 +156,10 @@ export async function launchResumedPiSubagent(
 			"subagent-scripts",
 			`${safeName(request.name) || "resume"}-resume-${Date.now()}.sh`,
 		);
-		const initialized: PiRunningChild = {
+		const initialized: Omit<PiRunningChild, "surface"> = {
 			id,
 			name: request.name,
 			task: request.message ?? "resumed session",
-			surface,
 			ownsSurface: true,
 			startTime,
 			sessionFile: request.sessionFile,
@@ -170,6 +171,32 @@ export async function launchResumedPiSubagent(
 			lifecycle: createLifecycle(startTime),
 		};
 		request.acquisitionSignal?.throwIfAborted();
+		if (operations.nativeExecution) {
+			try {
+				const nativeSurface = await operations.nativeExecution.start({
+					cwd,
+					command: `${command}; piha_exit=$?; echo "__SUBAGENT_DONE_\${piha_exit}__"; exit "$piha_exit"`,
+					scriptPath: launchScriptFile,
+					scriptPreamble: shellComment(
+						`Subagent resume script for ${request.name}`,
+					),
+					signal: request.acquisitionSignal,
+				});
+				return { ...initialized, surface: nativeSurface };
+			} catch (error) {
+				if (
+					isAcquisitionUncertainError(error) &&
+					error.uncertainty.kind === "execution-start" &&
+					error.uncertainty.acquiredSurfaceId
+				)
+					throw new AcquiredPiLaunchError(
+						{ ...initialized, surface: error.uncertainty.acquiredSurfaceId },
+						error,
+					);
+				throw error;
+			}
+		}
+		if (!surface) throw new Error("Resume requires an acquired shell surface");
 		try {
 			initialized.launchScriptFile = await operations.runScript(
 				surface,
@@ -192,12 +219,13 @@ export async function launchResumedPiSubagent(
 				isAcquisitionUncertainError(error) &&
 				error.uncertainty.kind === "command-dispatch"
 			)
-				running = initialized;
+				running = { ...initialized, surface };
 			throw error;
 		}
-		running = initialized;
+		running = { ...initialized, surface };
 		return running;
 	} catch (error) {
+		if (operations.nativeExecution || !surface) throw error;
 		try {
 			await operations.closePane(surface);
 		} catch (rollback) {

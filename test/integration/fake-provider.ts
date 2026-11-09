@@ -101,6 +101,7 @@ export function resetProviderRequests(): void {
 	resumeRestrictionStates.clear();
 	persistentSpecialistStates.clear();
 	cancelScenarioStates.clear();
+	coreControlStates.clear();
 }
 
 async function readJson(request: IncomingMessage): Promise<ChatRequest> {
@@ -483,6 +484,45 @@ const cancelScenarioStates = new Map<
 	string,
 	{ cancelSent: boolean; secondSent: boolean }
 >();
+const coreControlStates = new Map<string, "interrupted" | "cancelled">();
+
+/** One-shot public controls, gated by the test's independent native inspection. */
+async function coreControlResponse(
+	request: ChatRequest,
+): Promise<ResponsePlan | null> {
+	const source = requestText(request);
+	const id = source.match(/INTEGRATION_CORE_CONTROL:([A-Za-z0-9_-]+)/)?.[1];
+	if (!id || !toolNames(request).has("subagent")) return null;
+	const field = (key: string) =>
+		source.match(new RegExp(`CORE_${key}:\\s*(\\S+)`))?.[1] ?? "";
+	const name = `Control-${id}`;
+	if (!source.includes(`Sub-agent "${name}" launched and is now running`))
+		return {
+			toolCalls: [
+				{
+					name: "subagent",
+					arguments: {
+						name,
+						agent: "test-interactive",
+						model: TEST_MODEL,
+						task: `Run this bash command: echo 'START_${id}' > '${field("START")}'; sleep 30; echo 'DONE_${id}' > '${field("START")}.done'`,
+					},
+				},
+			],
+		};
+	const state = coreControlStates.get(id);
+	if (!state) {
+		await waitForQaFile(field("INTERRUPT_GATE"));
+		coreControlStates.set(id, "interrupted");
+		return { toolCalls: [{ name: "subagent_interrupt", arguments: { name } }] };
+	}
+	if (state === "interrupted") {
+		await waitForQaFile(field("CANCEL_GATE"));
+		coreControlStates.set(id, "cancelled");
+		return { toolCalls: [{ name: "subagent_cancel", arguments: { name } }] };
+	}
+	return { text: `CORE_CONTROL_FINISHED_${id}` };
+}
 
 async function waitForQaFile(path: string, ms = 110_000): Promise<void> {
 	const deadline = Date.now() + ms;
@@ -611,6 +651,9 @@ async function planResponse(request: ChatRequest): Promise<ResponsePlan> {
 	const source = requestText(request);
 	const user = lastUserText(request);
 	const lastRole = request.messages?.at(-1)?.role;
+
+	const coreControl = await coreControlResponse(request);
+	if (coreControl) return coreControl;
 
 	const cancelScenario = await cancelScenarioResponse(request);
 	if (cancelScenario) return cancelScenario;

@@ -59,7 +59,7 @@ const ROUTINE: readonly string[] = [
 const WRITER = "subagents_write_task_models";
 const COORDINATOR_RULE = "Act as the coordinator.";
 const NAMING_RULE = "choose a short task slug";
-const LOAD_SUBAGENT = "Launch a Pi subagent in a terminal pane";
+const LOAD_SUBAGENT = "launch subagent model thinking";
 
 type SearchMode = "native" | "inline" | "impostor" | "none";
 
