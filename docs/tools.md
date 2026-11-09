@@ -480,7 +480,7 @@ is no other parent/child protocol.
 
 The destination workspace is focused only after Pi startup is confirmed. Every fresh launch, including the handoff, sets `PI_HERDR_AGENTS_SESSION` to its session file; confirmation requires a Pi process in the root pane with the worktree cwd whose launch-time environment carries that value. Pi rewrites its process title, so command-line text is never evidence. Nothing inside Pi reads the variable, and it is not a child-context hint. Confirmation reads Linux `/proc`; see [Worktree subagents](worktree-subagents.md).
 
-On Windows there is no `/proc` and Pi's command line is not rewritten, so an ordinary launch confirms Pi differently: the pane's process must report `--session <this session file>` in its command line and the launch cwd, compared case-insensitively and ignoring separator style and a trailing `\`. Herdr reports Pi's process as `node.exe`, so its name proves nothing. The worktree process-identity capture above stays Linux-only.
+On Windows there is no `/proc` and Pi's command line is not rewritten, so the handoff confirms Pi from its command line instead: the pane's process must report `--session <the forked session file>` and the worktree cwd, compared case-insensitively and ignoring separator style and a trailing `\`. Herdr reports Pi's process as `node.exe`, so its name proves nothing. Only the `/worktree` handoff waits for this confirmation; an ordinary `subagent` launch does not. The worktree process-identity capture that cancel relies on stays Linux-only.
 
 ### Explicit worktree cleanup
 
