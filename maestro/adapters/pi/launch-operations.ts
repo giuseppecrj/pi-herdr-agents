@@ -1,3 +1,4 @@
+import { win32 } from "node:path";
 import type { PaneConfig } from "../../core/config/pane-config.ts";
 import type {
 	SurfaceProvider,
@@ -111,16 +112,51 @@ export function isExpectedPiProcess(
 		pid: number;
 		name?: string;
 		argv0?: string;
+		argv?: string[];
 		cwd?: string;
 	},
 	sessionFile: string,
 	cwd: string,
 	readEnvironment: ProcessEnvironmentReader = readLinuxProcessEnvironment,
+	platform: NodeJS.Platform = globalThis.process.platform,
 ): boolean {
+	if (platform === "win32")
+		return isExpectedWindowsPiProcess(process, sessionFile, cwd);
 	return (
 		(process.name === "pi" || process.argv0?.split("/").pop() === "pi") &&
 		process.cwd === cwd &&
 		readEnvironment(process.pid)?.get(PI_LAUNCH_SESSION_ENV) === sessionFile
+	);
+}
+
+/** A Windows path in one comparable form: separators, `.`/`..`, case, trailing `\`. */
+function comparableWindowsPath(path: string): string {
+	const normal = win32.normalize(path).toLowerCase();
+	return win32.parse(normal).root === normal
+		? normal
+		: normal.replace(/[\\/]+$/, "");
+}
+
+/**
+ * On Windows there is no `/proc/<pid>/environ` to read, and no process-title
+ * rewrite either: the pane's process reports the command line it really was
+ * started with. So the launched session is proved by `--session <file>` in
+ * that argv. Herdr names Pi's process `node.exe` (or `pi.exe`), so the process
+ * name proves nothing, and its cwd arrives with a trailing `\`.
+ */
+function isExpectedWindowsPiProcess(
+	process: { argv?: string[]; cwd?: string },
+	sessionFile: string,
+	cwd: string,
+): boolean {
+	const { argv, cwd: processCwd } = process;
+	if (!argv || processCwd === undefined) return false;
+	const flag = argv.indexOf("--session");
+	const value = flag === -1 ? undefined : argv[flag + 1];
+	return (
+		value !== undefined &&
+		comparableWindowsPath(value) === comparableWindowsPath(sessionFile) &&
+		comparableWindowsPath(processCwd) === comparableWindowsPath(cwd)
 	);
 }
 

@@ -489,7 +489,13 @@ describe("Pi launch", () => {
 		]);
 		const read = (pid: number) => environments.get(pid);
 		assert.equal(
-			isExpectedPiProcess(herdrReported, "/tmp/child.jsonl", "/repo", read),
+			isExpectedPiProcess(
+				herdrReported,
+				"/tmp/child.jsonl",
+				"/repo",
+				read,
+				"linux",
+			),
 			true,
 		);
 		for (const process of [
@@ -505,7 +511,13 @@ describe("Pi launch", () => {
 			{ ...herdrReported, name: "node" },
 		]) {
 			assert.equal(
-				isExpectedPiProcess(process, "/tmp/child.jsonl", "/repo", read),
+				isExpectedPiProcess(
+					process,
+					"/tmp/child.jsonl",
+					"/repo",
+					read,
+					"linux",
+				),
 				false,
 				JSON.stringify(process),
 			);

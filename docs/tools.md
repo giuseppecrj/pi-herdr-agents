@@ -480,6 +480,8 @@ is no other parent/child protocol.
 
 The destination workspace is focused only after Pi startup is confirmed. Every fresh launch, including the handoff, sets `PI_HERDR_AGENTS_SESSION` to its session file; confirmation requires a Pi process in the root pane with the worktree cwd whose launch-time environment carries that value. Pi rewrites its process title, so command-line text is never evidence. Nothing inside Pi reads the variable, and it is not a child-context hint. Confirmation reads Linux `/proc`; see [Worktree subagents](worktree-subagents.md).
 
+On Windows there is no `/proc` and Pi's command line is not rewritten, so an ordinary launch confirms Pi differently: the pane's process must report `--session <this session file>` in its command line and the launch cwd, compared case-insensitively and ignoring separator style and a trailing `\`. Herdr reports Pi's process as `node.exe`, so its name proves nothing. The worktree process-identity capture above stays Linux-only.
+
 ### Explicit worktree cleanup
 
 Parent sessions can call `worktree_remove({ target: "<path|branch|workspace-id>", preserve: true })` or `/worktree remove <target> [--preserve]`. Preservation is optional and never implied: dirty work is blocked unless explicitly committed first or preserved as a WIP commit. The result reports its SHA even if removal later fails or is refused. A failed preservation commit restores the pre-preservation index and never proceeds to removal. Inventory and removal reports disclose exact ignored-file counts: enumeration is streamed rather than buffered as one listing. Ignored files do not block cleanup and are not captured by preservation; failed counting still blocks removal.
