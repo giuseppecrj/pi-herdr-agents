@@ -53,7 +53,9 @@ configuration directory.
    its check process groups (`maestro/adapters/pi/accept-groups.ts`). The
    child's `session_shutdown` and the parent's quit terminate their own
    checks: SIGTERM, then SIGKILL after 1 second, awaited. A synchronous
-   `exit` hook SIGKILLs any group still tracked.
+   `exit` hook SIGKILLs any group still tracked. Windows has no process groups
+   or signals, so `maestro/adapters/pi/process-tree.ts` ends the check's tree
+   with `taskkill /T /F`; every stop there is immediate.
 6. A rejected verdict is a completed negative result: it starts no model
    fallback and changes neither the sidebar status nor the worktree manifest
    state. The verdict appears in the delivery, its details, and the ledger.

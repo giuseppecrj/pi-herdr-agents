@@ -13,6 +13,7 @@
  * module (an extension reload loads another) shares one set and one hook.
  */
 import { ACCEPT_SHUTDOWN_GRACE_MS } from "../../core/accept.ts";
+import { killProcessTree } from "./process-tree.ts";
 
 /** Extra wait, after the shutdown grace, for runners to report their exit. */
 const SETTLE_MARGIN_MS = 250;
@@ -51,11 +52,7 @@ function registry(): Registry {
 }
 
 function killGroup(pgid: number): void {
-	try {
-		process.kill(-pgid, "SIGKILL");
-	} catch {
-		/* already gone */
-	}
+	killProcessTree(pgid, "SIGKILL");
 }
 
 /** Synchronous, for the `exit` hook: SIGKILL every group still tracked. */

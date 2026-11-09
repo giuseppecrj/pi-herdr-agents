@@ -8,6 +8,7 @@ import {
 	type AcceptSpec,
 } from "../../core/accept.ts";
 import { trackAcceptCheck, type AcceptCheckOwner } from "./accept-groups.ts";
+import { killProcessTree } from "./process-tree.ts";
 
 export interface AcceptCommandOptions {
 	run: string;
@@ -44,15 +45,13 @@ export function acceptCheckEnv(
 
 function signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
 	if (child.pid === undefined) return;
+	// Detached: the shell leads its own process group (POSIX), or its tree is
+	// ended by `taskkill /T` (Windows). Fall back to the shell alone.
+	if (killProcessTree(child.pid, signal)) return;
 	try {
-		// Detached: the shell leads its own process group.
-		process.kill(-child.pid, signal);
+		child.kill(signal);
 	} catch {
-		try {
-			child.kill(signal);
-		} catch {
-			/* already gone */
-		}
+		/* already gone */
 	}
 }
 
@@ -84,6 +83,8 @@ export const runAcceptCommand: AcceptRunner = (options) =>
 				cwd: options.cwd,
 				env: options.env ?? acceptCheckEnv(),
 				detached: true,
+				// Detached on Windows opens a console window unless it is hidden.
+				windowsHide: true,
 				stdio: ["ignore", "pipe", "pipe"],
 			});
 		} catch (error) {
