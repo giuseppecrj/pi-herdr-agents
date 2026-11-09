@@ -3,7 +3,10 @@
  * - Shows agent identity + available tools as a compact styled widget above the editor
  * - Provides a `subagent_done` tool for interactive agents to self-terminate
  */
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { writeFileSync } from "node:fs";
@@ -238,7 +241,9 @@ export default function (pi: ExtensionAPI) {
 	let agentStarted = false;
 	let latestAgentMessages: any[] | undefined;
 	let completionFinalized = false;
-	let sessionContext: { shutdown(): void } | undefined;
+	let sessionContext:
+		| Pick<ExtensionContext, "isIdle" | "abort" | "shutdown">
+		| undefined;
 	// A child without auto-exit closes only through subagent_done, so one that
 	// forgets it is asked once whether its task is complete.
 	const doneNudge =
@@ -455,6 +460,7 @@ export default function (pi: ExtensionAPI) {
 					generation,
 					message: params.message,
 				});
+				currentTask = "";
 				return {
 					content: [
 						{
@@ -505,12 +511,16 @@ export default function (pi: ExtensionAPI) {
 					}
 					completionFinalized = true;
 					recorder.subagentDone();
+					// The run that asked for help belongs to no task, and shutdown waits for idle.
+					if (sessionContext && !sessionContext.isIdle())
+						sessionContext.abort();
 					sessionContext?.shutdown();
 					return;
 				}
 				currentTask = inbox.task;
 				recorder.taskStart();
-				pi.sendUserMessage(inbox.message);
+				// After caller_ping the run that asked for help may still be streaming.
+				pi.sendUserMessage(inbox.message, { deliverAs: "followUp" });
 			} catch {
 				// A malformed or transiently unavailable inbox must not kill the poller.
 			}
@@ -530,7 +540,18 @@ export default function (pi: ExtensionAPI) {
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
 			const sessionFile = process.env.PI_SUBAGENT_SESSION;
 			recorder.subagentDone();
-			if (persistent && sessionFile && currentTask) {
+			if (persistent) {
+				if (!sessionFile || !currentTask) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: "No current task. Staying available for subagent_send.",
+							},
+						],
+						details: {},
+					};
+				}
 				appendPersistentTaskEvent(
 					sessionFile,
 					buildPersistentTaskEvent(currentTask, generation),

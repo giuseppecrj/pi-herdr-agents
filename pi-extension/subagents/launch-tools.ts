@@ -34,6 +34,7 @@ import {
 	HOST_PATH_CHARS,
 } from "../../maestro/core/host-text.ts";
 import type { PersistentControls } from "./persistent.ts";
+import { ROUTINE_TOOL_EXPOSURE } from "./deferred-tools.ts";
 import type { LaunchPlanner } from "./launch.ts";
 import type { SpawningConfig } from "../../maestro/core/config/spawning-config.ts";
 import {
@@ -121,6 +122,7 @@ export function registerSubagentTool(
 	if (shouldRegister("subagent"))
 		pi.registerTool({
 			name: "subagent",
+			exposure: ROUTINE_TOOL_EXPOSURE,
 			label: "Subagent",
 			description:
 				"Launch a Pi subagent in a legacy Herdr pane or local Core terminal. " +
@@ -423,6 +425,7 @@ export function registerResumeTool(
 	if (shouldRegister("subagent_resume"))
 		pi.registerTool({
 			name: "subagent_resume",
+			exposure: ROUTINE_TOOL_EXPOSURE,
 			label: "Resume Subagent",
 			description:
 				"Resume a saved subagent session in a new legacy Herdr pane or local Core terminal. " +

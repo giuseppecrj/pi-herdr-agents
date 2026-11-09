@@ -19,6 +19,11 @@ Fakes are for conformance tests only.
   envelope.
 - `pi-extension/subagents/tool-boundary.ts` — the one registration boundary
   that encodes errors thrown by any host tool or command.
+- `pi-extension/subagents/deferred-tools.ts` — `deferred` exposure for the
+  routine host tools. It records which tools this load registered, recognizes
+  Pi's built-in `tool_search` by its reported source, and at `session_start`
+  activates that search or, without it, the routine tools Pi kept. See
+  [Tool loading](tools.md#tool-loading).
 - `pi-extension/subagents/observation.ts`, `widgets.ts`, `controls.ts`,
   `persistent.ts`, `delivery.ts`, `launch.ts` — per-load controllers
   (`create*`) for activity observation, the widget and status refresh,

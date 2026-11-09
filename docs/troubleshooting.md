@@ -36,6 +36,21 @@ Smoke-test delivery with an autonomous subagent instructed to return one exact m
 
 Legacy subagent tabs, panes, and worktree workspaces are created without stealing keyboard focus. Launch commands target child panes by explicit ID, so focus and command delivery are independent. If a fresh or resumed launch fails, the extension attempts confirmed rollback of the ordinary pane it created and preserves the original launch error. Unconfirmed rollback retains ownership instead of claiming cleanup succeeded. It does not close a caller-supplied surface, and managed worktree workspaces remain retained on failure. Note: the `interactive` option controls parent status notifications, not terminal focus.
 
+## The model has no `subagent` tool
+
+The routine host tools load on demand. Ask the model to call `tool_search` with
+the tool name or the task, such as `subagent`, `worktree`, or `persistent
+specialist`. If `tool_search` is missing too, Pi's tool search is unavailable,
+and the host should have activated the routine tools at session start:
+
+1. Check that the extension loaded: `/subagent list` must answer.
+2. Check the session's tool policy. A `--tools` allowlist that does not name the
+   tool, `--exclude-tools`, or a role's `deny-tools` or `spawning: false`
+   removes it. That is intended; the host never adds a tool the policy removed.
+3. Run `/reload` after changing the policy or the `extensions` setting.
+
+See [Tool loading](tools.md#tool-loading) for the full rules.
+
 ## An acquisition or dispatch is uncertain
 
 Do not repeat the launch immediately. A timed-out Herdr client does not establish

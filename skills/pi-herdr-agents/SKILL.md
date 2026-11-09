@@ -13,6 +13,18 @@ authoritative; this guide is a summary. Check the installed version and which
 source from another branch or release. Resolve this guide's relative links
 from its directory, not the user's working directory.
 
+## Loading the host tools
+
+The routine host tools load on demand. When a tool this guide names is not in
+your tool list, call `tool_search` with its name or the job, for example
+`subagent`, `worktree`, or `persistent specialist`; the matches are declared
+from your next call and stay declared. The `subagent` routing guidelines and
+model catalog arrive with `subagent`, so load it before choosing a model. When
+neither the tool nor `tool_search` is available, the session's tool policy
+removed it: report that to the user. `subagents_write_task_models` is never
+searchable; `/subagents-init` activates it. See
+[Tool loading](../../docs/tools.md#tool-loading).
+
 ## What the host is
 
 A Pi extension that runs asynchronous Pi child agents in legacy Herdr panes or

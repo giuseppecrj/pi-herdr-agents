@@ -155,6 +155,8 @@ The parent session gets these tools:
 | `worktree_remove` | Remove one managed worktree on explicit request. |
 | `subagents_write_task_models` | Internal writer for `models.tasks` preferences. Inactive until `/subagents-init` needs it. |
 
+The routine tools above load on demand. Their schemas and the `subagent` guidelines stay out of the prompt until the model loads them with Pi's built-in `tool_search`, which the host activates at session start. Without Pi's tool search, for example under `--no-extensions` or with `"-tool_search"` in the `defaultTools` setting, they are active from the start. A `--tools` allowlist, `--exclude-tools`, and a role's `deny-tools` still decide which of them exist. See [Tool loading](docs/tools.md#tool-loading).
+
 Children get `caller_ping` to ask the parent for help. Interactive children also get `subagent_done` to mark themselves complete, and are asked whether they are done when a run ends without it.
 
 | Command | Use |
@@ -198,7 +200,7 @@ Three tools end or pause work, and each does something different:
 
 `subagent_cancel` rejects persistent specialists. If termination cannot be confirmed, cancel reports `unconfirmed`, and the run stays live and supervised. Call it again to retry. Do not poll after a cancel or stop. The result arrives as a message.
 
-A child that needs help calls `caller_ping`. An ordinary child exits, and you continue it with `subagent_resume({ sessionPath, message })`. A persistent specialist stays alive, and you answer with `subagent_send`. `subagent_resume` restores the child's launch tool policy and rejects managed-worktree sessions. Continue a worktree child in its retained workspace instead.
+A child that needs help calls `caller_ping`. An ordinary child exits, and you continue it with `subagent_resume({ sessionPath, message })`. A persistent specialist stays alive. Its help request ends the current task, and your `subagent_send` answer starts the next one. `subagent_resume` restores the child's launch tool policy and rejects managed-worktree sessions. Continue a worktree child in its retained workspace instead.
 
 Set `persistent: true` to keep one specialist session for sequential tasks. It accepts one task at a time and rejects sends while busy. `persistent.maxAgents` caps how many stay open (default `3`). Persistent sessions cannot be resumed.
 

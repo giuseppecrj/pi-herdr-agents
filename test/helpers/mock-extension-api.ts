@@ -8,10 +8,17 @@ export function createMockExtensionApi(extensionEvents = createEventBus()) {
 	const eventHandlers = new Map<string, Array<Function>>();
 	const sentUserMessages: string[] = [];
 	const sentMessages: Array<any> = [];
-	// Pi activates a registered tool unless it sets `defaultActive: false`.
-	// setActiveTools() overrides that per tool. Tests may push straight into
-	// registeredTools, so the active set is derived from it on each read.
+	// Like Pi, registering a `direct` or `model-only` tool (the default is
+	// `direct`) activates it unless it sets `defaultActive: false`; other
+	// exposures start inactive. setActiveTools() overrides that per tool and
+	// ignores `hidden` tools. Tests may push straight into registeredTools, so
+	// the active set is derived from it on each read. A pushed tool may carry
+	// `sourceInfo`, as Pi's built-in tool_search does.
 	const activeOverride = new Map<string, boolean>();
+	const exposureOf = (tool: any) => tool.exposure ?? "direct";
+	const activeOnRegistration = (tool: any) =>
+		(exposureOf(tool) === "direct" || exposureOf(tool) === "model-only") &&
+		tool.defaultActive !== false;
 	let stale = false;
 	// Mirrors Pi's assertActive(): a replaced extension API throws on every action.
 	const assertActive = () => {
@@ -43,7 +50,11 @@ export function createMockExtensionApi(extensionEvents = createEventBus()) {
 				eventHandlers.set(event, handlers);
 			},
 			registerTool(tool: any) {
-				registeredTools.push(tool);
+				const index = registeredTools.findIndex(
+					(entry) => entry.name === tool.name,
+				);
+				if (index < 0) registeredTools.push(tool);
+				else registeredTools[index] = tool;
 			},
 			registerCommand(name: string, command: any) {
 				registeredCommands.push({ name, ...command });
@@ -63,17 +74,33 @@ export function createMockExtensionApi(extensionEvents = createEventBus()) {
 				sentMessages.push({ message, options });
 			},
 			getAllTools() {
-				return [];
+				return registeredTools.map((tool) => ({
+					name: tool.name,
+					description: tool.description,
+					parameters: tool.parameters,
+					promptGuidelines: tool.promptGuidelines,
+					exposure: exposureOf(tool),
+					sourceInfo: tool.sourceInfo ?? {
+						path: "<mock>",
+						source: "mock",
+						scope: "temporary",
+						origin: "top-level",
+					},
+				}));
+			},
+			getSettings() {
+				return {};
 			},
 			getActiveTools() {
 				return registeredTools
 					.filter(
 						(tool) =>
-							activeOverride.get(tool.name) ?? tool.defaultActive !== false,
+							exposureOf(tool) !== "hidden" &&
+							(activeOverride.get(tool.name) ?? activeOnRegistration(tool)),
 					)
 					.map((tool) => tool.name);
 			},
-			// Like Pi, unknown names are ignored.
+			// Like Pi, unknown and hidden names are ignored.
 			setActiveTools(names: string[]) {
 				const wanted = new Set(names);
 				for (const tool of registeredTools)
