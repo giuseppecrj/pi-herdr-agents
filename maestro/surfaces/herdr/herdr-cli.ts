@@ -1,6 +1,6 @@
 import { spawn, execFileSync } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { isString } from "../../core/config/type-guards.ts";
 import { Deadline } from "../../core/deadline.ts";
 import { gitEnvironment } from "../../core/git-environment.ts";
@@ -33,23 +33,26 @@ export function isHerdrAvailable(
 ): boolean {
 	if (env.HERDR_ENV !== "1") return false;
 	const names = herdrExecutableNames(platform);
-	return pathValue(env, platform)
-		.split(delimiter)
-		.map((directory) =>
-			platform === "win32" ? directory.replace(/^"(.*)"$/, "$1") : directory,
-		)
-		.filter(Boolean)
-		.some((directory) =>
-			names.some((name) => {
-				try {
-					const path = join(directory, name);
-					accessSync(path, constants.X_OK);
-					return statSync(path).isFile();
-				} catch {
-					return false;
-				}
-			}),
-		);
+	const windows = platform === "win32";
+	// An empty POSIX entry means the current directory and spawn honours it, so
+	// only Windows drops empty entries (and strips the quotes it allows).
+	const entries = pathValue(env, platform).split(
+		windows ? win32.delimiter : posix.delimiter,
+	);
+	const directories = windows
+		? entries.map((entry) => entry.replace(/^"(.*)"$/, "$1")).filter(Boolean)
+		: entries;
+	return directories.some((directory) =>
+		names.some((name) => {
+			try {
+				const path = join(directory, name);
+				accessSync(path, constants.X_OK);
+				return statSync(path).isFile();
+			} catch {
+				return false;
+			}
+		}),
+	);
 }
 
 export function parseHerdrJson(value: string) {
