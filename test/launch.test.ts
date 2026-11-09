@@ -801,6 +801,47 @@ describe("Pi launch", () => {
 		});
 	});
 
+	it("keeps Windows absolute cwd values absolute instead of joining them", async () => {
+		await withFixture(async ({ request, project }) => {
+			const windowsAbsolutes = [
+				"C:/Users/me/repo",
+				"C:\\Users\\me\\repo",
+				"\\\\server\\share\\repo",
+			];
+			for (const cwd of windowsAbsolutes) {
+				let placedCwd: string | undefined;
+				const running = await launchPiSubagent(
+					{ ...request, id: `win-cwd-${cwd.length}`, cwd },
+					{
+						createPane(_name, paneCwd) {
+							placedCwd = paneCwd;
+							return `pane-${cwd.length}`;
+						},
+						createWorktree() {
+							throw new Error("unexpected worktree creation");
+						},
+						async waitForShellReady() {},
+						runScript(_surface, _value, options) {
+							return options.scriptPath;
+						},
+						closePane() {},
+					},
+				);
+				assert.equal(
+					placedCwd,
+					cwd,
+					`Windows absolute cwd must stay absolute: ${cwd}`,
+				);
+				assert.equal(running.cwd, cwd);
+				assert.notEqual(
+					placedCwd,
+					join(project, cwd),
+					"must not join a Windows absolute cwd onto the parent cwd",
+				);
+			}
+		});
+	});
+
 	it("treats an explicit null worktree as an ordinary pane", async () => {
 		await withFixture(async ({ request, project }) => {
 			let worktreeCreationAttempts = 0;
