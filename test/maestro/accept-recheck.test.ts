@@ -507,7 +507,7 @@ test("a confirmed cancel while the check's pipes drain wins: skipped, cancelled 
 		const started = join(f.dir, "shell-started");
 		// The shell exits 0 at once; its background job keeps the pipes open.
 		const input = f.input({
-			run: `echo $ > ${shellPath(started)}; sleep 10 & exit 0`,
+			run: `echo $$ > ${shellPath(started)}; sleep 10 & exit 0`,
 		});
 		input.task.worktree = { branch: "checked" };
 		try {
@@ -554,7 +554,7 @@ test(
 		fixture(async (f) => {
 			const started = join(f.dir, "check.pid");
 			const input = f.input({
-				run: `trap '' TERM; echo $ > ${shellPath(started)}; sleep 30`,
+				run: `trap '' TERM; echo $$ > ${shellPath(started)}; sleep 30`,
 			});
 			const handle = await f.session.spawnPi(input);
 			const record = f.session.getRecord(input.task.id)!;
