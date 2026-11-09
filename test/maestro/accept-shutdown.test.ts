@@ -43,7 +43,11 @@ function readPid(file: string): number {
 	return existsSync(file) ? Number(readFileSync(file, "utf8").trim()) : 0;
 }
 
-describe("accept check shutdown ownership", () => {
+describe("accept check shutdown ownership", {
+	skip:
+		process.platform === "win32" &&
+		"asserts on POSIX process groups; test/maestro/process-tree.test.ts covers the Windows tree kill",
+}, () => {
 	let dir = "";
 	let pidFile = "";
 	// The check ignores SIGTERM, and so does its sleep.

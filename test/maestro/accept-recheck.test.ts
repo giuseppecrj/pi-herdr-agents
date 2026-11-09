@@ -31,6 +31,10 @@ import {
 } from "../../maestro/core/accept.ts";
 import { FileWakeRegistry } from "../../maestro/core/wake.ts";
 import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
+import { fileURLToPath } from "node:url";
+
+/** A path as the check's `sh` reads it: quoted, with forward slashes (a Windows `\` would be eaten). */
+const shellPath = (path: string) => `'${path.replaceAll("\\", "/")}'`;
 
 /** The `.exit` sidecar shapes a child writes. */
 type Sidecar =
@@ -88,8 +92,9 @@ async function fixture(
 	const { runner, ...rest } = extra;
 	const options: DefaultRunSessionOptions = {
 		configDir: dir,
-		configExamplePath: new URL("../../config.json.example", import.meta.url)
-			.pathname,
+		configExamplePath: fileURLToPath(
+			new URL("../../config.json.example", import.meta.url),
+		),
 		infrastructure: {
 			surfaceProvider: provider,
 			launchOperations: operations,
@@ -304,7 +309,7 @@ test("a re-check timeout is verdict error, not rejected", () =>
 test("a cancel during the parent re-check stops it and delivers a cancelled, skipped result", () =>
 	fixture(async (f) => {
 		const started = join(f.dir, "check-started");
-		const input = f.input({ run: `touch ${started}; sleep 30` });
+		const input = f.input({ run: `touch ${shellPath(started)}; sleep 30` });
 		const handle = await f.session.spawnPi(input);
 		const record = f.session.getRecord(input.task.id)!;
 		const wait = f.session.supervise(handle, f.session.getTask(input.task.id)!);
@@ -501,7 +506,9 @@ test("a confirmed cancel while the check's pipes drain wins: skipped, cancelled 
 		delete f.options.infrastructure!.launchOperations.captureProcessIdentity;
 		const started = join(f.dir, "shell-started");
 		// The shell exits 0 at once; its background job keeps the pipes open.
-		const input = f.input({ run: `echo $$ > ${started}; sleep 10 & exit 0` });
+		const input = f.input({
+			run: `echo $ > ${shellPath(started)}; sleep 10 & exit 0`,
+		});
 		input.task.worktree = { branch: "checked" };
 		try {
 			const handle = await session.spawnPi(input);
@@ -536,37 +543,48 @@ test("a confirmed cancel while the check's pipes drain wins: skipped, cancelled 
 		}
 	}));
 
-test("parent shutdown terminates a TERM-ignoring re-check within the bound", () =>
-	fixture(async (f) => {
-		const started = join(f.dir, "check.pid");
-		const input = f.input({
-			run: `trap '' TERM; echo $$ > ${started}; sleep 30`,
-		});
-		const handle = await f.session.spawnPi(input);
-		const record = f.session.getRecord(input.task.id)!;
-		const wait = f.session.supervise(handle, f.session.getTask(input.task.id)!);
-		f.complete(record);
-		await until(
-			() => existsSync(started) && readPid(started) > 0,
-			"the parent re-check never started",
-		);
-		const pgid = readPid(started);
-		const began = Date.now();
-		try {
-			await f.session.shutdown("quit");
-			// SIGTERM grace plus settle margin, with slack for reaping.
-			await until(
-				() => groupGone(pgid),
-				"the re-check's group outlived parent shutdown",
-				Math.max(0, 2_500 - (Date.now() - began)),
+test(
+	"parent shutdown terminates a TERM-ignoring re-check within the bound",
+	{
+		skip:
+			process.platform === "win32" &&
+			"asserts on POSIX process groups; test/maestro/process-tree.test.ts covers the Windows tree kill",
+	},
+	() =>
+		fixture(async (f) => {
+			const started = join(f.dir, "check.pid");
+			const input = f.input({
+				run: `trap '' TERM; echo $ > ${shellPath(started)}; sleep 30`,
+			});
+			const handle = await f.session.spawnPi(input);
+			const record = f.session.getRecord(input.task.id)!;
+			const wait = f.session.supervise(
+				handle,
+				f.session.getTask(input.task.id)!,
 			);
-			await wait;
-			assert.deepEqual(f.settled, [], "a suppressed run delivers nothing");
-		} finally {
+			f.complete(record);
+			await until(
+				() => existsSync(started) && readPid(started) > 0,
+				"the parent re-check never started",
+			);
+			const pgid = readPid(started);
+			const began = Date.now();
 			try {
-				process.kill(-pgid, "SIGKILL");
-			} catch {
-				/* already gone */
+				await f.session.shutdown("quit");
+				// SIGTERM grace plus settle margin, with slack for reaping.
+				await until(
+					() => groupGone(pgid),
+					"the re-check's group outlived parent shutdown",
+					Math.max(0, 2_500 - (Date.now() - began)),
+				);
+				await wait;
+				assert.deepEqual(f.settled, [], "a suppressed run delivers nothing");
+			} finally {
+				try {
+					process.kill(-pgid, "SIGKILL");
+				} catch {
+					/* already gone */
+				}
 			}
-		}
-	}));
+		}),
+);
