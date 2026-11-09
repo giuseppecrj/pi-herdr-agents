@@ -19,7 +19,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
 	isBoolean,
 	isPlainObject,
@@ -521,7 +521,7 @@ export function consumePersistentTaskInbox(
 	sessionFile: string,
 ): PersistentTaskInboxEntry | null {
 	const directory = dirname(sessionFile);
-	const prefix = `${sessionFile.split("/").pop()}.task-inbox.`;
+	const prefix = `${basename(sessionFile)}.task-inbox.`;
 	for (const name of readdirSync(directory)) {
 		if (!name.startsWith(prefix) || !name.endsWith(".json.consuming")) continue;
 		const claimed = join(directory, name);
