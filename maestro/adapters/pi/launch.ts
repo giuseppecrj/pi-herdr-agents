@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, win32 } from "node:path";
 import { homedir } from "node:os";
 import { getSubagentActivityFile } from "./activity-file.ts";
 import {
@@ -414,7 +414,7 @@ function resolveLaunchRequest(request: FreshPiLaunchRequest): ResolvedLaunch {
 			? agentDir
 			: (request.parent.invocationCwd ?? request.parent.cwd);
 	const sourceCwd = rawCwd
-		? rawCwd.startsWith("/")
+		? isAbsolute(rawCwd) || win32.isAbsolute(rawCwd)
 			? rawCwd
 			: join(cwdBase, rawCwd)
 		: request.parent.cwd;
