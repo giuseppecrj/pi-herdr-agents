@@ -76,6 +76,9 @@ describe("accept parameter", () => {
 			{ run: "x", timeoutSec: 0 },
 			{ run: "x", timeoutSec: 3601 },
 			{ run: "x", paths: ["/etc/passwd"] },
+			{ run: "x", paths: ["C:/repo/test.ts"] },
+			{ run: "x", paths: ["C:\\repo\\test.ts"] },
+			{ run: "x", paths: ["\\\\server\\share\\test.ts"] },
 			{ run: "x", paths: ["../outside"] },
 			{ run: "x", paths: [""] },
 		])

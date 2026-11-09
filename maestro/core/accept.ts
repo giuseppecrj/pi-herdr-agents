@@ -8,7 +8,7 @@
  * description, and the outcome-ledger line. Running a command lives in
  * `adapters/pi/accept-runner.ts`.
  */
-import { posix } from "node:path";
+import { posix, win32 } from "node:path";
 import { createHash } from "node:crypto";
 import { isFiniteNumber, isRecord, isString } from "./config/type-guards.ts";
 
@@ -125,7 +125,11 @@ function boundedInteger(
 function normalizeCheckPath(path: string): string {
 	if (!isString(path) || !path.trim()) invalid("paths must be non-empty");
 	const raw = path.trim();
-	if (raw.startsWith("/") || raw.split("/").some((segment) => segment === ".."))
+	if (
+		posix.isAbsolute(raw) ||
+		win32.isAbsolute(raw) ||
+		raw.split("/").some((segment) => segment === "..")
+	)
 		invalid(`paths must be repo-relative without "..": ${path}`);
 	// "." and "./" select the whole checkout.
 	return posix.normalize(raw).replace(/\/+$/, "") || ".";
