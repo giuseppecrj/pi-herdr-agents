@@ -1,9 +1,10 @@
 import "../clean-host-env.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
+import { cleanupTestProcess } from "../helpers/process-cleanup.ts";
 import {
 	herdrExecAsync,
 	HerdrClientError,
@@ -11,20 +12,49 @@ import {
 	HERDR_OUTPUT_BYTES,
 } from "../../maestro/surfaces/herdr/herdr-cli.ts";
 
+// The client under test may kill its process group, but fixture ownership must
+// not depend on that behavior. Only signal PIDs recorded by these fixtures.
+async function cleanupRecordedProcess(file: string) {
+	let value: string;
+	try {
+		value = readFileSync(file, "utf8");
+	} catch (error) {
+		if (error instanceof Error && "code" in error && error.code === "ENOENT")
+			return;
+		throw error;
+	}
+	await cleanupTestProcess(Number(value));
+}
+
 async function client(script: string | undefined, run: () => Promise<void>) {
 	const dir = mkdtempSync(join(tmpdir(), "async-herdr-client-"));
 	const path = process.env.PATH;
+	const pidFile = join(dir, "client.pid");
 	if (script)
-		writeFileSync(join(dir, "herdr"), `#!${process.execPath}\n${script}\n`, {
-			mode: 0o755,
-		});
+		writeFileSync(
+			join(dir, "herdr"),
+			`#!${process.execPath}
+require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+const descendantPidFile = ${JSON.stringify(join(dir, "descendant.pid"))};
+${script}
+`,
+			{ mode: 0o755 },
+		);
 	process.env.PATH = dir;
 	try {
 		await run();
 	} finally {
 		if (path === undefined) delete process.env.PATH;
 		else process.env.PATH = path;
-		rmSync(dir, { recursive: true, force: true });
+		try {
+			try {
+				await cleanupRecordedProcess(pidFile);
+			} finally {
+				await cleanupRecordedProcess(join(dir, "descendant.pid"));
+			}
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	}
 }
 
@@ -91,7 +121,10 @@ test("not-spawned, post-spawn exit, and bounded output overflow remain distinct"
 
 test("a descendant holding inherited stdout cannot extend the client's deadline", async () => {
 	await client(
-		`require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {stdio:['ignore',1,2]}).unref();`,
+		`
+const child = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {stdio:['ignore',1,2]});
+require('node:fs').writeFileSync(descendantPidFile, String(child.pid));
+child.unref();`,
 		async () => {
 			const started = performance.now();
 			await assert.rejects(
