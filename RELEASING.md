@@ -23,7 +23,10 @@ The **CI** workflow (`.github/workflows/ci.yml`) runs on pushes and pull
 requests to `main`, and supports manual dispatch. Its **Checks** job runs the
 checks below plus `git diff --check`, with read-only repository permissions,
 no publishing, and cancellation of superseded CI runs. It uses the same pinned
-Node.js version as **Release**. The separate **Linux integration** workflow runs
+Node.js version as **Release**. CI also has a **Unit tests (Windows, non-blocking)**
+job on `windows-latest` that, after dependency installation, runs only `npm test`.
+It is allowed to fail and must not be cited as passing verification evidence
+while that policy remains in place. The separate **Linux integration** workflow runs
 credential-free legacy Herdr and Core tests on pushes to `main` or manual
 dispatch, with pinned binaries and retained evidence. It never publishes and
 does not establish Desktop GUI acceptance. See [Development](docs/development.md).

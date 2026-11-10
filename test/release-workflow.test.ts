@@ -252,7 +252,9 @@ test("CI checks pushes and pull requests without release authority", async () =>
 });
 
 test("CI runs the local gates with the release workflow's pinned tools", async () => {
-	const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+	const workflow = (await readFile(".github/workflows/ci.yml", "utf8")).split(
+		"\n  windows-unit:",
+	)[0];
 	const release = await readFile(".github/workflows/publish.yml", "utf8");
 	const actions = [...workflow.matchAll(/uses: (\S+)/g)].map(
 		(match) => match[1],
@@ -279,6 +281,31 @@ test("CI runs the local gates with the release workflow's pinned tools", async (
 			"npm pack --dry-run",
 			"git diff --check",
 		],
+	);
+});
+
+test("CI runs only unit tests on Windows without blocking", async () => {
+	const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+	const [checks, windows] = workflow.split("\n  windows-unit:");
+
+	assert.ok(windows, "missing Windows unit job");
+	assert.match(windows, /name: Unit tests \(Windows, non-blocking\)/);
+	assert.match(windows, /^    runs-on: windows-latest$/m);
+	assert.match(windows, /^    continue-on-error: true$/m);
+	assert.match(windows, /^    timeout-minutes: 20$/m);
+	assert.match(windows, /persist-credentials: false/);
+	assert.match(windows, /package-manager-cache: false/);
+	assert.deepEqual(
+		[...windows.matchAll(/uses: (\S+)/g)].map((match) => match[1]),
+		[...checks.matchAll(/uses: (\S+)/g)].map((match) => match[1]),
+	);
+	assert.equal(
+		windows.match(/node-version: (\S+)/)?.[1],
+		checks.match(/node-version: (\S+)/)?.[1],
+	);
+	assert.deepEqual(
+		[...windows.matchAll(/^\s+run: (.+)$/gm)].map((match) => match[1]),
+		["npm ci", "npm test"],
 	);
 });
 
