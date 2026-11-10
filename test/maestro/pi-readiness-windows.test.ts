@@ -1,3 +1,4 @@
+import "../clean-host-env.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isExpectedPiProcess } from "../../maestro/adapters/pi/launch-operations.ts";
