@@ -118,7 +118,7 @@ manually from GitHub Actions. Its **Unit tests (Windows, non-blocking)** job run
 on `windows-latest` and, after dependency installation, runs only `npm test`.
 It is allowed to fail and must not be cited as passing verification evidence
 while that policy remains in place. The separate **Linux integration** workflow runs on
-pushes to `main` or manual dispatch. It pins legacy Herdr 0.9.5 and Core 0.1.17
+pushes to `main` or manual dispatch. It pins legacy Herdr 0.9.5 and Core 0.1.20
 with SHA-256 checks, uses the lockfile's Pi, and runs on Ubuntu 24.04 without
 provider credentials or a GUI. `scripts/run-linux-integration.ts` reuses the
 private verification lab for a real-parent delegation, then runs the complete
@@ -170,8 +170,10 @@ Core session and socket, and identity-checked shutdown without PID signalling.
 `core-parent.ts` loads this checkout in real parent/child Pi processes against
 the local deterministic provider. npm puts `node_modules/.bin` first on PATH,
 so set `PI_BIN` explicitly to verify an installed Pi rather than the repository's
-pinned version. Core 0.1.16 has been exercised with Pi 1.1.0 and 1.4.0;
-Core 0.1.17 has also passed with Pi 1.4.0. The tests exercise public tools, not `__test__`,
+pinned version. `PI_BIN` must be an executable named `pi`: the lab builds child
+terminals' PATH from its directory and children start a bare `pi`, so a path to
+the bundle's `cli.js` makes children exit 127. Core 0.1.16 has been exercised with Pi 1.1.0 and 1.4.0;
+Core 0.1.17 has also passed with Pi 1.4.0, and Core 0.1.17 and 0.1.20 with Pi 1.1.0. The tests exercise public tools, not `__test__`,
 and save sessions, provider requests and native inventory/screens under the
 reported `/tmp/piha-core-evidence-*` directories before removing lab resources.
 Unknown startup/shutdown ownership retains the lab and fails the test. No daily

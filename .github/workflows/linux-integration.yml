@@ -50,9 +50,9 @@ jobs:
           echo "14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d  $bin/herdr" | sha256sum --check
           chmod +x "$bin/herdr"
           curl --fail --location --retry 3 --max-time 120 \
-            https://releases.herdr.dev/core/0.1.17/herdr-core-linux-x86_64.tar.gz \
+            https://releases.herdr.dev/core/0.1.20/herdr-core-linux-x86_64.tar.gz \
             -o "$RUNNER_TEMP/core.tar.gz"
-          echo "82ec44043f6894bfdb716b979b87cda43fd7fa46b0104e7b7bd93e64d1a9b877  $RUNNER_TEMP/core.tar.gz" | sha256sum --check
+          echo "ac6b86890c451a37584620aaa438b71bc0d0bd430a2e7c1d7e095f052c414e74  $RUNNER_TEMP/core.tar.gz" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/core.tar.gz" -C "$bin" herdr-core
           ln -s "$(realpath node_modules/.bin/pi)" "$bin/pi"
           ln -s /usr/bin/fdfind "$bin/fd"

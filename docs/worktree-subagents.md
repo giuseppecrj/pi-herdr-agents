@@ -15,7 +15,8 @@ with `worktree`, every `/worktree` form, `worktree_list` and `worktree_remove`
 refuse before any manifest, Herdr or Git effect: cleanup decides ownership by
 POSIX uid and finds checkout holders through Linux `/proc` or macOS `lsof`, so a
 Windows worktree could be created but never safely removed. Ordinary
-subagents still run there on legacy Herdr. See
+subagents on legacy Herdr are the intended Windows scope; that support is
+experimental and still in progress. See
 [troubleshooting](troubleshooting.md#windows-refuses-worktrees-or-herdr-core).
 
 ## Quick start
