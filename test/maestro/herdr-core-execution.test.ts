@@ -57,6 +57,7 @@ import type {
 } from "../../maestro/runtime/pi-run-session-types.ts";
 import { FileWakeRegistry } from "../../maestro/core/wake.ts";
 import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
+import { socketPath as fixtureSocketPath } from "../socket-path.ts";
 
 const panes = {
 	mode: "tab" as const,
@@ -95,7 +96,7 @@ async function fixture(
 }
 async function makeFixture() {
 	const dir = realpathSync(mkdtempSync(join(tmpdir(), "hc-unit-")));
-	const socketPath = join(dir, "rpc.sock");
+	const socketPath = fixtureSocketPath(dir, "rpc.sock");
 	const calls: Request[] = [];
 	const sockets = new Set<Socket>();
 	const terminals = new Map<string, CoreTerminal>();
