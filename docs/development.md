@@ -112,7 +112,10 @@ See [ADR-0012](adr/0012-adopt-maestro-seams-in-repo.md),
 
 The **CI** workflow runs formatting, generated tool-doc checks, lint, type-check,
 unit tests, and the package preview on pushes and pull requests to `main`, or
-manually from GitHub Actions. The separate **Linux integration** workflow runs on
+manually from GitHub Actions. Its **Unit tests (Windows, non-blocking)** job runs
+on `windows-latest` and, after dependency installation, runs only `npm test`.
+It is allowed to fail and must not be cited as passing verification evidence
+while that policy remains in place. The separate **Linux integration** workflow runs on
 pushes to `main` or manual dispatch. It pins legacy Herdr 0.9.5 and Core 0.1.17
 with SHA-256 checks, uses the lockfile's Pi, and runs on Ubuntu 24.04 without
 provider credentials or a GUI. `scripts/run-linux-integration.ts` reuses the

@@ -126,6 +126,11 @@ git diff --check
 
 `npm run typecheck` type-checks production sources (`pi-extension/`, `maestro/`, `scripts/`), the TypeScript tests (`test/**/*.ts`), and the verification lab scripts (`.pi/skills/**/*.ts`) under `strict`. Tests run with type stripping, so a type error never fails `npm test`; fix it for the typecheck gate. JavaScript tests (`*.js`, `*.mjs`) are not covered.
 
+The **CI** workflow also has a non-blocking **Unit tests (Windows, non-blocking)**
+job on `windows-latest`. After dependency installation, it runs only `npm test`.
+It is allowed to fail and must not be cited as passing verification evidence
+while that policy remains in place.
+
 For Herdr or lifecycle changes, run the deterministic suite from inside Herdr. Run only one integration suite at a time on a Herdr instance; concurrent suites compete for terminal focus and process capacity and can cause false timeouts or leaked test resources.
 
 When a test reports that a `pi-integ-*` worktree path already exists, first check whether the same test already created that worktree and the deterministic provider dispatched the tool twice after asynchronous completion. Deterministic providers must make each requested tool call one-shot after its started result appears. Remove only verified test-owned residue after confirming that no workspace or process owns it.
