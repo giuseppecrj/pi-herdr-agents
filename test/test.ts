@@ -1,3 +1,4 @@
+import "./clean-host-env.ts";
 import {
 	captureWorktreeHandoff,
 	writeWorktreeManifest,

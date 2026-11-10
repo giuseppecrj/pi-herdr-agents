@@ -2,6 +2,7 @@
  * Smoke tests for the systemPromptMode feature.
  * Tests: frontmatter parsing, identity routing, CLI flag generation.
  */
+import "./clean-host-env.ts";
 import {
 	mkdtempSync,
 	writeFileSync,

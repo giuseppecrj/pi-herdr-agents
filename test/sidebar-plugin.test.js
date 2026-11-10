@@ -1,3 +1,4 @@
+import "./clean-host-env.ts";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
