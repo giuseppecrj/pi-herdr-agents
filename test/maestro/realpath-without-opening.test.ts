@@ -27,7 +27,9 @@ test("an absolute path below a root keeps that root and resolves `..` lexically"
 });
 
 test("a directory link resolves to its target (junction on Windows)", (t) => {
-	const dir = mkdtempSync(join(tmpdir(), "realpath-link-"));
+	const dir = mkdtempSync(
+		join(realpathSync.native(tmpdir()), "realpath-link-"),
+	);
 	t.after(() => rmSync(dir, { recursive: true, force: true }));
 	mkdirSync(join(dir, "target"));
 	try {

@@ -101,7 +101,11 @@ function watches() {
 	return { registry, created };
 }
 
-test("reload migrates live registrations and waits, retaining the owner across the gap", async (t) => {
+test("reload migrates live registrations and waits, retaining the owner across the gap", {
+	skip:
+		process.platform === "win32" &&
+		"Windows supervision bypasses file watches and uses polling",
+}, async (t) => {
 	t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
 	const { registry, created } = watches();
 	const timers = new Set<ReturnType<typeof setTimeout>>();
@@ -133,6 +137,8 @@ test("reload migrates live registrations and waits, retaining the owner across t
 			},
 		},
 	);
+	// Close the shared reconcile interval even if fixture setup fails.
+	t.after(() => coordinator.close());
 	let session = createDefaultRunSession(options(coordinator));
 	const controller = new AbortController();
 	const signal = controller.signal;
@@ -279,7 +285,11 @@ for (const complete of [false, true]) {
 	});
 }
 
-test("switching off forced polling falls back honestly when watches cannot open", async (t) => {
+test("switching off forced polling falls back honestly when watches cannot open", {
+	skip:
+		process.platform === "win32" &&
+		"Windows bypasses watch setup, so no watch-failure reconcile is queued",
+}, async (t) => {
 	t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
 	const registry = new FileWakeRegistry(() => {
 		throw new Error("watch unavailable");
@@ -321,7 +331,12 @@ test("switching off forced polling falls back honestly when watches cannot open"
 });
 
 for (const forced of [false, true]) {
-	test(`pre-upgrade owner allows unchanged mode but rejects a change from ${forced}`, async () => {
+	test(`pre-upgrade owner allows unchanged mode but rejects a change from ${forced}`, {
+		skip:
+			process.platform === "win32" &&
+			!forced &&
+			"Windows supervision bypasses file watches and uses polling",
+	}, async () => {
 		const { registry, created } = watches();
 		const coordinator = new SupervisionCoordinator(
 			async () => ({ complete: true, panes: [] }),

@@ -375,7 +375,12 @@ describe("herdr lab start", () => {
 			},
 		},
 	])
-		it(`rejects a ${name} herdr binary without an uncaught error and frees the root`, async (t) => {
+		it(`rejects a ${name} herdr binary without an uncaught error and frees the root`, {
+			skip:
+				process.platform === "win32" &&
+				name === "non-executable" &&
+				"Windows has no POSIX execute bit, so spawning a mode-0644 file does not report EACCES",
+		}, async (t) => {
 			const tmp = mkdtempSync(join(tmpdir(), "piha-herdr-lab-test-"));
 			t.after(() => rmSync(tmp, { recursive: true, force: true }));
 			const path = bin(tmp);
