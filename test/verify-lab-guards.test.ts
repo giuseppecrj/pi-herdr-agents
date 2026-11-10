@@ -7,8 +7,8 @@ import {
 	symlinkSync,
 	chmodSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
 import {
 	assertMarkerId,
@@ -36,7 +36,7 @@ function fakeHost(
 ): GuardHost {
 	return {
 		uid: 1000,
-		tmpdir: "/tmp",
+		tmpdir: resolve("/tmp"),
 		lstat(path) {
 			const st = stats[path];
 			if (!st)
@@ -44,14 +44,9 @@ function fakeHost(
 			return st;
 		},
 		realpath(path) {
-			// Resolve `..` lexically and apply the link table.
-			const parts: string[] = [];
-			for (const part of path.split("/").filter(Boolean)) {
-				if (part === "..") parts.pop();
-				else parts.push(part);
-			}
-			const joined = `/${parts.join("/")}`;
-			return links[joined] ?? joined;
+			// Resolve `..` lexically in the host's path dialect, then apply links.
+			const canonical = resolve(path);
+			return links[canonical] ?? canonical;
 		},
 	};
 }
@@ -104,7 +99,11 @@ describe("assertPrivateDir", () => {
 		assert.throws(() => assertPrivateDir("/s", fakeHost({})), /not accessible/);
 	});
 
-	it("refuses a real symlink and a loosened directory on the real filesystem", () => {
+	it("refuses a real symlink and a loosened directory on the real filesystem", {
+		skip:
+			process.platform === "win32" &&
+			"verification lab ownership and mode guards require POSIX uid and permissions",
+	}, () => {
 		const base = mkdtempSync(join(tmpdir(), "guard-test-"));
 		try {
 			const real = join(base, "real");
@@ -122,7 +121,7 @@ describe("assertPrivateDir", () => {
 });
 
 describe("assertRemovableLabRoot", () => {
-	const root = "/tmp/piha-herdr-lab-Ab12Cd";
+	const root = resolve("/tmp/piha-herdr-lab-Ab12Cd");
 	const ok = fakeHost({ [root]: dirStat() });
 
 	it("accepts a recorded, owned lab root directly below the temp dir", () => {
@@ -184,8 +183,11 @@ describe("assertRemovableLabRoot", () => {
 	});
 
 	it("refuses when the parent is a symlink that leaves the temp dir", () => {
-		const viaLink = "/tmp/link/piha-herdr-lab-Ab12Cd";
-		const host = fakeHost({ [viaLink]: dirStat() }, { "/tmp/link": "/home/g" });
+		const viaLink = resolve("/tmp/link/piha-herdr-lab-Ab12Cd");
+		const host = fakeHost(
+			{ [viaLink]: dirStat() },
+			{ [resolve("/tmp/link")]: resolve("/home/g") },
+		);
 		assert.throws(
 			() => assertRemovableLabRoot(viaLink, viaLink, host),
 			/not directly below/,
@@ -217,8 +219,8 @@ describe("assertRemovableLabRoot", () => {
 });
 
 describe("assertRunDir", () => {
-	const evidence = "/s/verify";
-	const run = "/s/verify/20261030-041853-ab12";
+	const evidence = resolve("/s/verify");
+	const run = join(evidence, "20261030-041853-ab12");
 
 	it("accepts a run dir directly inside the evidence root", () => {
 		assertRunDir(run, evidence, fakeHost({ [run]: dirStat() }));
@@ -263,13 +265,14 @@ describe("assertMarkerId", () => {
 
 describe("defaultEvidenceRoot", () => {
 	it("uses an absolute XDG_STATE_HOME and ignores a relative one", () => {
+		const state = resolve("/x/state");
 		assert.equal(
-			defaultEvidenceRoot({ XDG_STATE_HOME: "/x/state" }),
-			"/x/state/pi-herdr-agents/verify",
+			defaultEvidenceRoot({ XDG_STATE_HOME: state }),
+			join(state, "pi-herdr-agents", "verify"),
 		);
-		assert.match(
+		assert.equal(
 			defaultEvidenceRoot({ XDG_STATE_HOME: "rel" }),
-			/\.local\/state\/pi-herdr-agents\/verify$/,
+			join(homedir(), ".local", "state", "pi-herdr-agents", "verify"),
 		);
 		assert.ok(!defaultEvidenceRoot({}).startsWith("/tmp/"));
 	});

@@ -20,7 +20,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, normalize } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
 	acquireCanary,
@@ -383,7 +383,8 @@ function fakeHerdr(root: string) {
 			.trim()
 			.split("\n\n")
 			.map((block, index) => {
-				const path = /^worktree (.*)$/m.exec(block)?.[1] ?? "";
+				// Git emits forward slashes on Windows; the fake uses native paths.
+				const path = normalize(/^worktree (.*)$/m.exec(block)?.[1] ?? "");
 				const branch = /^branch refs\/heads\/(.*)$/m.exec(block)?.[1];
 				const row: Row = { branch, path, is_linked_worktree: index > 0 };
 				const workspace = worktrees.get(path)?.workspace;
@@ -494,7 +495,9 @@ describe("sidebar fixture foreign canary", () => {
 			repos: () => string[];
 		}) => Promise<void>,
 	): Promise<void> {
-		const tmp = realpathSync(mkdtempSync(join(tmpdir(), "pi-sidebar-canary-")));
+		const tmp = realpathSync.native(
+			mkdtempSync(join(tmpdir(), "pi-sidebar-canary-")),
+		);
 		const { fake, commands } = fakeHerdr(tmp);
 		try {
 			await run({
