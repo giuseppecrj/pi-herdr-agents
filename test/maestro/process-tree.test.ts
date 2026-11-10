@@ -4,8 +4,19 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { runAcceptCommand } from "../../maestro/adapters/pi/accept-runner.ts";
-import { killProcessTree } from "../../maestro/adapters/pi/process-tree.ts";
+import {
+	createAcceptRunner,
+	runAcceptCommand,
+} from "../../maestro/adapters/pi/accept-runner.ts";
+import {
+	terminateAcceptChecks,
+	trackAcceptCheck,
+} from "../../maestro/adapters/pi/accept-groups.ts";
+import {
+	killProcessTree,
+	signalProcessTree,
+	type ProcessTreeOptions,
+} from "../../maestro/adapters/pi/process-tree.ts";
 
 function alive(pid: number): boolean {
 	try {
@@ -98,6 +109,132 @@ test("killProcessTree reports a process that is already gone", () => {
 	// 2 ** 31 - 1 is above every platform's pid_max (Linux caps at 2 ** 22), so
 	// no live process or group can own it and the call can hit nothing real.
 	assert.equal(killProcessTree(2 ** 31 - 1, "SIGKILL"), false);
+});
+
+/** A `taskkill` stand-in that records its calls and succeeds. */
+function recordingTaskkill(result = true) {
+	const calls: { command: string; args: string[] }[] = [];
+	const options: ProcessTreeOptions = {
+		platform: "win32",
+		env: { SystemRoot: String.raw`C:\Windows` },
+		run: (command, args) => {
+			calls.push({ command, args });
+			return result;
+		},
+		runAsync: async (command, args) => {
+			calls.push({ command, args });
+			return result;
+		},
+	};
+	return { calls, options };
+}
+
+test("on Windows killProcessTree runs taskkill /T /F from System32", () => {
+	const { calls, options } = recordingTaskkill();
+	assert.equal(killProcessTree(4242, "SIGKILL", options), true);
+	assert.deepEqual(calls, [
+		{
+			command: String.raw`C:\Windows\System32\taskkill.exe`,
+			args: ["/PID", "4242", "/T", "/F"],
+		},
+	]);
+});
+
+test("on Windows killProcessTree reports a taskkill that finds nothing", () => {
+	const { options } = recordingTaskkill(false);
+	assert.equal(killProcessTree(4242, "SIGKILL", options), false);
+});
+
+test("on Windows killProcessTree never calls taskkill once the shell has exited", () => {
+	// The pid may already belong to an unrelated process; taskkill /T would end
+	// that process's tree.
+	const { calls, options } = recordingTaskkill();
+	assert.equal(
+		killProcessTree(4242, "SIGKILL", { ...options, alive: () => false }),
+		false,
+	);
+	assert.deepEqual(calls, []);
+});
+
+test("signalProcessTree on Windows runs taskkill off the main thread while the shell lives", async () => {
+	const { calls, options } = recordingTaskkill();
+	let missed = 0;
+	signalProcessTree(4242, "SIGTERM", () => missed++, {
+		...options,
+		alive: () => true,
+	});
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(calls.length, 1);
+	assert.deepEqual(calls[0]!.args, ["/PID", "4242", "/T", "/F"]);
+	assert.equal(missed, 0);
+});
+
+test("signalProcessTree falls back when taskkill fails, and skips taskkill after exit", async () => {
+	const failing = recordingTaskkill(false);
+	let missed = 0;
+	signalProcessTree(4242, "SIGTERM", () => missed++, failing.options);
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(missed, 1);
+
+	const exited = recordingTaskkill();
+	signalProcessTree(4242, "SIGKILL", () => missed++, {
+		...exited.options,
+		alive: () => false,
+	});
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.deepEqual(exited.calls, []);
+});
+
+test("signalProcessTree on POSIX signals the group at once and falls back for a missing one", () => {
+	let missed = 0;
+	signalProcessTree(2 ** 31 - 1, "SIGKILL", () => missed++, {
+		platform: "linux",
+	});
+	assert.equal(missed, 1);
+});
+
+test("a finished accept check never gets a taskkill, even though its pid may be reused", async () => {
+	const { calls, options } = recordingTaskkill();
+	const run = createAcceptRunner(options);
+	const dir = mkdtempSync(join(tmpdir(), "accept-win32-"));
+	try {
+		const result = await run({
+			run: "exit 0",
+			cwd: dir,
+			timeoutMs: 10_000,
+		});
+		assert.equal(result.kind, "exit");
+		assert.deepEqual(calls, []);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("the shutdown sweep skips taskkill for a check whose shell has exited", async () => {
+	const owner = { label: "test" };
+	const exited = recordingTaskkill();
+	const running = recordingTaskkill();
+	const track = (options: ProcessTreeOptions, pgid: number) =>
+		trackAcceptCheck({
+			pgid,
+			owner,
+			terminate: () => {},
+			finished: new Promise<void>(() => {}),
+			processTree: options,
+		});
+	const untrackExited = track({ ...exited.options, alive: () => false }, 111);
+	const untrackRunning = track({ ...running.options, alive: () => true }, 222);
+	try {
+		await terminateAcceptChecks(owner, 10);
+	} finally {
+		untrackExited();
+		untrackRunning();
+	}
+	assert.deepEqual(exited.calls, []);
+	assert.deepEqual(
+		running.calls.map((call) => call.args[1]),
+		["222"],
+	);
 });
 
 test("a timed-out accept check leaves nothing it started running", async (t) => {
