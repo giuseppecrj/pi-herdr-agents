@@ -1,5 +1,5 @@
 import { lstatSync, readlinkSync, statSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { join, parse, resolve, sep } from "node:path";
 
 /**
  * Resolve symbolic links with lstat, stat, and readlink only, matching Node's
@@ -9,9 +9,19 @@ import { join, resolve, sep } from "node:path";
  * freezing the whole process.
  */
 export function realpathWithoutOpening(path: string): string {
-	const parts = (from: string) => resolve(from).split(sep).filter(Boolean);
-	let pending = parts(path);
-	let resolved: string = sep;
+	// A root is `/` on POSIX but `C:\` or `\\host\share\` on Windows, and a link
+	// target may name another one, so each absolute path carries its own root.
+	const split = (from: string) => {
+		const absolute = resolve(from);
+		const { root } = parse(absolute);
+		return {
+			root,
+			parts: absolute.slice(root.length).split(sep).filter(Boolean),
+		};
+	};
+	const start = split(path);
+	let pending = start.parts;
+	let resolved: string = start.root;
 	let links = 0;
 	while (pending.length) {
 		const next = join(resolved, pending.shift() ?? "");
@@ -27,8 +37,9 @@ export function realpathWithoutOpening(path: string): string {
 			throw Object.assign(new Error(`Too many symbolic links: ${path}`), {
 				code: "ELOOP",
 			});
-		pending = [...parts(resolve(resolved, readlinkSync(next))), ...pending];
-		resolved = sep;
+		const target = split(resolve(resolved, readlinkSync(next)));
+		pending = [...target.parts, ...pending];
+		resolved = target.root;
 	}
 	return resolved;
 }
