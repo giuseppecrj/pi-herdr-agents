@@ -58,6 +58,7 @@ import type {
 import { FileWakeRegistry } from "../../maestro/core/wake.ts";
 import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
 import { socketPath as fixtureSocketPath } from "../socket-path.ts";
+import { skipCoreOnWindows } from "../helpers/windows-scope.ts";
 
 const panes = {
 	mode: "tab" as const,
@@ -468,26 +469,40 @@ test("Core config is closed, strict, defaults auto, and rejects malformed files"
 		assert.equal(f.calls.length, 0);
 	}));
 test("Core auto selection requires native terminal context and prefers terminal endpoint", () => {
+	// Selection where Core is supported; Windows refuses Core itself
+	// (windows-support-scope.test.ts).
+	const linux = "linux";
 	assert.deepEqual(
-		selectHerdrBinding("auto", { HC_SOCKET: "/socket", HERDR_ENV: "1" }),
+		selectHerdrBinding("auto", { HC_SOCKET: "/socket", HERDR_ENV: "1" }, linux),
 		{ backend: "legacy" },
 	);
-	assert.deepEqual(selectHerdrBinding("legacy", { HC_TERMINAL_ID: "t1" }), {
-		backend: "legacy",
-	});
 	assert.deepEqual(
-		selectHerdrBinding("auto", {
-			HC_TERMINAL_ID: "t1",
-			HC_TERMINAL_SOCKET: "/preferred",
-			HC_SOCKET: "/fallback",
-		}),
+		selectHerdrBinding("legacy", { HC_TERMINAL_ID: "t1" }, linux),
+		{
+			backend: "legacy",
+		},
+	);
+	assert.deepEqual(
+		selectHerdrBinding(
+			"auto",
+			{
+				HC_TERMINAL_ID: "t1",
+				HC_TERMINAL_SOCKET: "/preferred",
+				HC_SOCKET: "/fallback",
+			},
+			linux,
+		),
 		{ backend: "core", socket: "/preferred", parentTerminal: "t1" },
 	);
 	assert.deepEqual(
-		selectHerdrBinding("core", {
-			HC_TERMINAL_ID: "t1",
-			HC_SOCKET: "/fallback",
-		}),
+		selectHerdrBinding(
+			"core",
+			{
+				HC_TERMINAL_ID: "t1",
+				HC_SOCKET: "/fallback",
+			},
+			linux,
+		),
 		{ backend: "core", socket: "/fallback", parentTerminal: "t1" },
 	);
 	for (const env of [
@@ -498,11 +513,11 @@ test("Core auto selection requires native terminal context and prefers terminal 
 		{ HC_TERMINAL_ID: "t1" },
 	])
 		assert.throws(
-			() => selectHerdrBinding("core", env),
+			() => selectHerdrBinding("core", env, linux),
 			/native HC_TERMINAL_ID/,
 		);
 	assert.throws(
-		() => selectHerdrBinding("auto", { HC_TERMINAL_ID: "t1" }),
+		() => selectHerdrBinding("auto", { HC_TERMINAL_ID: "t1" }, linux),
 		/native HC_TERMINAL_ID/,
 	);
 	assertSameHerdrBinding({ backend: "legacy" }, { backend: "legacy" });
@@ -580,8 +595,9 @@ test("Core missing or finished parent refuses launch", () =>
 		assert.equal(f.calls.filter((c) => c.method === "terminal.run").length, 0);
 	}));
 
-test("Core child environment is scrubbed even when daemon inherited stale protocol values; parent is untouched", () =>
+test("Core child environment is scrubbed even when daemon inherited stale protocol values; parent is untouched", (t) =>
 	fixture(async (f) => {
+		if (skipCoreOnWindows(t)) return;
 		const env = {
 			...process.env,
 			PI_SUBAGENT_STALE: "ancestor",
@@ -1395,8 +1411,9 @@ test("Core session delivery precedes record removal; cancellation confirms nativ
 		assert.equal(f.calls.filter((c) => c.method === "terminal.rm").length, 2);
 	}));
 
-test("Core session rejects unsupported cleanup and native worktree spawn without effects", () =>
+test("Core session rejects unsupported cleanup and native worktree spawn without effects", (t) =>
 	fixture(async (f) => {
+		if (skipCoreOnWindows(t)) return;
 		const session = createDefaultRunSession(sessionOptions(f));
 		f.sessions.push(session);
 		assert.throws(
@@ -1431,8 +1448,9 @@ test("Core session no-ID uncertainty blocks model fallback and leaves no fabrica
 		assert.equal(f.calls.filter((c) => c.method === "terminal.run").length, 1);
 	}));
 
-test("Core native binding survives reload; changed endpoint/backend fails before owner mutation", () =>
+test("Core native binding survives reload; changed endpoint/backend fails before owner mutation", (t) =>
 	fixture(async (f) => {
+		if (skipCoreOnWindows(t)) return;
 		mkdirSync(join(f.dir, "herdr-agents"));
 		const config = join(f.dir, "herdr-agents", "config.json");
 		writeFileSync(
@@ -1500,8 +1518,9 @@ test("Core native binding survives reload; changed endpoint/backend fails before
 	}));
 
 for (const resumed of [false, true])
-	test(`Core ${resumed ? "resume" : "fresh"} generated script preserves Pi nonzero exit status`, () =>
+	test(`Core ${resumed ? "resume" : "fresh"} generated script preserves Pi nonzero exit status`, (t) =>
 		fixture(async (f) => {
+			if (skipCoreOnWindows(t)) return;
 			const bin = join(f.dir, "bin");
 			mkdirSync(bin);
 			writeFileSync(join(bin, "pi"), "#!/bin/bash\nexit 7\n", { mode: 0o700 });

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isPlainObject } from "./type-guards.ts";
+import { HERDR_CORE_UNSUPPORTED_ON_WINDOWS } from "../platform-support.ts";
 
 export type HerdrBackend = "auto" | "legacy" | "core";
 
@@ -55,9 +56,13 @@ export type HerdrBinding =
 export function selectHerdrBinding(
 	backend: HerdrBackend,
 	env: NodeJS.ProcessEnv,
+	platform: NodeJS.Platform = process.platform,
 ): HerdrBinding {
 	if (backend === "legacy" || (backend === "auto" && !env.HC_TERMINAL_ID))
 		return { backend: "legacy" };
+	// Core would be selected. Like a malformed Core endpoint, auto in a Core
+	// terminal fails rather than falling back to legacy.
+	if (platform === "win32") throw new Error(HERDR_CORE_UNSUPPORTED_ON_WINDOWS);
 	const parentTerminal = env.HC_TERMINAL_ID;
 	const socket = env.HC_TERMINAL_SOCKET || env.HC_SOCKET;
 	if (

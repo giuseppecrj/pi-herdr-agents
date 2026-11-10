@@ -31,6 +31,7 @@ import {
 } from "../../maestro/core/accept.ts";
 import { FileWakeRegistry } from "../../maestro/core/wake.ts";
 import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
+import { skipWorktreesOnWindows } from "../helpers/windows-scope.ts";
 
 /** The `.exit` sidecar shapes a child writes. */
 type Sidecar =
@@ -451,8 +452,9 @@ function readPid(file: string): number {
 	return Number(readFileSync(file, "utf8").trim());
 }
 
-test("worktree re-check runs in the worktree, reports changed check files and leaves the manifest state", () =>
+test("worktree re-check runs in the worktree, reports changed check files and leaves the manifest state", (t) =>
 	fixture(async (f) => {
+		if (skipWorktreesOnWindows(t)) return;
 		const { session, tree, states } = worktreeSession(f);
 		const input = f.input({ run: "pwd; exit 4", paths: ["test"] });
 		input.task.worktree = { branch: "checked" };

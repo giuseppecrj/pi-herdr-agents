@@ -42,6 +42,10 @@ manifest or terminal acquisition effects until their ownership and cleanup
 semantics are implemented. Running an ordinary child in an already-existing
 checkout is a different operation and remains allowed.
 
+Core is unsupported on Windows: backend selection refuses it there, explicit or
+auto, before any effect, and does not widen the absolute-socket check to named
+pipes.
+
 Desktop Agents tabs and sidebar parity are a separate presentation milestone.
 A native parent/child tree is not equivalent to legacy grouped placement or the
 legacy Focus/All sidebar. Do not apply the legacy pane-marker protocol to Core

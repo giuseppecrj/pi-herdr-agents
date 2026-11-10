@@ -50,6 +50,7 @@ import {
 	isAcquisitionUncertainError,
 } from "../../maestro/core/surface-provider.ts";
 import { runScriptInPane } from "../../maestro/surfaces/herdr/terminal.ts";
+import { skipWorktreesOnWindows } from "../helpers/windows-scope.ts";
 
 for (const resumed of [false, true])
 	test(`uncertain ${resumed ? "resume" : "dispatch"} with failed rollback transfers the real owner until cancel confirms exit`, () =>
@@ -636,8 +637,9 @@ function initializeWorktreeFixture(dir: string) {
 }
 
 for (const mode of ["success", "focus-warning", "readiness-failure"] as const) {
-	test(`runtime handoff executes the unobserved transaction: ${mode}`, () =>
+	test(`runtime handoff executes the unobserved transaction: ${mode}`, (t) =>
 		fixture(async (f) => {
+			if (skipWorktreesOnWindows(t)) return;
 			const git = initializeWorktreeFixture(f.dir);
 			const snapshot = f.options.getLaunchSnapshot();
 			const source = snapshot.parent.sessionFile;
@@ -757,8 +759,9 @@ for (const mode of ["success", "focus-warning", "readiness-failure"] as const) {
 		}));
 }
 
-test("injected worktree finalization precedes delivery and preserves inspection/manifest failures", () =>
+test("injected worktree finalization precedes delivery and preserves inspection/manifest failures", (t) =>
 	fixture(async (f) => {
+		if (skipWorktreesOnWindows(t)) return;
 		initializeWorktreeFixture(f.dir);
 		const calls: string[] = [];
 		const worktreeOps = createWorktreeOperations();
@@ -1289,8 +1292,9 @@ test("local evidence drains persistent events without activity hydration while p
 		assert.equal((await wait).outcome, "completed");
 	}));
 
-test("worktree candidate validation precedes stripping and launch preparation", () =>
+test("worktree candidate validation precedes stripping and launch preparation", (t) =>
 	fixture(async (f) => {
+		if (skipWorktreesOnWindows(t)) return;
 		const input = f.input();
 		input.task.worktree = { branch: "never-created" };
 		input.plans = [

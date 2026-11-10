@@ -291,6 +291,8 @@ export default function subagentsExtension(
 	options: {
 		cleanupOperations?: (ctx: ExtensionContext) => WorktreeCleanupOperations;
 		infrastructure?: PiRunSessionInfrastructure;
+		/** Host platform for the Windows support scope; tests inject win32. */
+		platform?: NodeJS.Platform;
 	} = {},
 ) {
 	runtime.session = createDefaultRunSession(
@@ -301,6 +303,7 @@ export default function subagentsExtension(
 			forcePolling: supervisionConfig.forcePolling,
 			outcomeLedger: outcomeLedgerConfig.enabled,
 			infrastructure: options.infrastructure,
+			platform: options.platform,
 			getLaunchSnapshot() {
 				const ctx = runtime.latestCtx;
 				if (!ctx) throw new Error("No parent launch context");
@@ -381,25 +384,30 @@ export default function subagentsExtension(
 	// Report accepted no-op role settings once per parent extension load, not on
 	// every session transition, listing, or child launch.
 	let roleConfigDeprecationsReported = !parentSession;
-	const cleanupInput = (ctx: ExtensionContext) => ({
-		cwd: ctx.cwd,
-		operations:
-			options.cleanupOperations?.(ctx) ??
-			runtime.session!.createWorktreeCleanupOperations({
-				manifestDir: join(
-					ctx.sessionManager.getSessionDir(),
-					"artifacts",
-					ctx.sessionManager.getSessionId(),
-					"worktree-runs",
-				),
-				liveHolders: () =>
-					[...runningSubagents.values()].flatMap((child) =>
-						child.worktree
-							? [{ path: child.worktree.path, persistent: child.persistent }]
-							: [],
+	const cleanupInput = (ctx: ExtensionContext) => {
+		// Refuse before injected or default cleanup operations can run.
+		const refusal = runtime.session!.managedWorktreeRefusal();
+		if (refusal) throw new Error(refusal);
+		return {
+			cwd: ctx.cwd,
+			operations:
+				options.cleanupOperations?.(ctx) ??
+				runtime.session!.createWorktreeCleanupOperations({
+					manifestDir: join(
+						ctx.sessionManager.getSessionDir(),
+						"artifacts",
+						ctx.sessionManager.getSessionId(),
+						"worktree-runs",
 					),
-			}),
-	});
+					liveHolders: () =>
+						[...runningSubagents.values()].flatMap((child) =>
+							child.worktree
+								? [{ path: child.worktree.path, persistent: child.persistent }]
+								: [],
+						),
+				}),
+		};
+	};
 	// Routine tools are deferred: their schemas and guidelines reach the model
 	// only after Pi's tool_search loads them.
 	const deferredTools = trackDeferredTools(pi);

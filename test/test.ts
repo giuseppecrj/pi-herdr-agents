@@ -29,6 +29,10 @@ import { buildSubagentToolAllowlist } from "../maestro/adapters/pi/launch-comman
 import "./isolated-agent-dir.ts";
 import { createMockExtensionApi } from "./helpers/mock-extension-api.ts";
 import {
+	skipWorktreesOnWindows,
+	worktreesUnsupportedOnWindows,
+} from "./helpers/windows-scope.ts";
+import {
 	ENCODED_TOOL_ERRORS,
 	withEncodedToolErrors,
 } from "../pi-extension/subagents/tool-boundary.ts";
@@ -1995,8 +1999,9 @@ describe("host adapter migration", () => {
 				assert.equal(f.surface.listSurfaces().length, 0);
 				assert.equal(f.runtime.runningSubagents.size, 0);
 			}));
-	it("/worktree refuses to hand off an out-of-scope parent model before creating resources", async () =>
+	it("/worktree refuses to hand off an out-of-scope parent model before creating resources", async (t) =>
 		withAdapterHost(async (f) => {
+			if (skipWorktreesOnWindows(t)) return;
 			const worktree = f.mock.registeredCommands.find(
 				(command: any) => command.name === "worktree",
 			);
@@ -2177,8 +2182,9 @@ describe("host adapter migration", () => {
 				assert.equal(f.surface.listSurfaces().length, accepted ? 0 : 1);
 			}));
 	for (const warning of [false, true])
-		it(`finalizes the retained worktree manifest before delivery without closing its root pane${warning ? " and preserves manifest warnings" : ""}`, async () =>
+		it(`finalizes the retained worktree manifest before delivery without closing its root pane${warning ? " and preserves manifest warnings" : ""}`, async (t) =>
 			withAdapterHost(async (f) => {
+				if (skipWorktreesOnWindows(t)) return;
 				execFileSync("git", ["init", "-q"], { cwd: f.projectDir });
 				writeFileSync(join(f.projectDir, "tracked"), "base");
 				execFileSync("git", ["add", "tracked"], { cwd: f.projectDir });
@@ -2960,8 +2966,9 @@ describe("subagent_cancel public tool", { timeout: 20_000 }, () => {
 			assert.equal(f.runtime.runningSubagents.get(child.id), child);
 		}));
 
-	it("cancels a worktree child: stops only its process, retains workspace, commits, and handoff", async () =>
+	it("cancels a worktree child: stops only its process, retains workspace, commits, and handoff", async (t) =>
 		withAdapterHost(async (f) => {
+			if (skipWorktreesOnWindows(t)) return;
 			const { retained, git } = await worktreeHost(f);
 			// The launch-verified identity of the child's Pi, and the kernel's view.
 			const kernel = identityKernel(f);
@@ -3019,8 +3026,9 @@ describe("subagent_cancel public tool", { timeout: 20_000 }, () => {
 			);
 		}));
 
-	it("a worktree child without a captured process identity stays unconfirmed; shutdown never records cancelled", async () =>
+	it("a worktree child without a captured process identity stays unconfirmed; shutdown never records cancelled", async (t) =>
 		withAdapterHost(async (f) => {
+			if (skipWorktreesOnWindows(t)) return;
 			const { retained } = await worktreeHost(f);
 			// Herdr's idle shell is never exit evidence: only the identity is.
 			const kernel = identityKernel(f);
@@ -10365,7 +10373,9 @@ describe("commands", () => {
 		);
 	});
 
-	it("registers /worktree with list and explicit remove usage", async () => {
+	it("registers /worktree with list and explicit remove usage", {
+		skip: worktreesUnsupportedOnWindows,
+	}, async () => {
 		const { api, registeredCommands } = createMockExtensionApi();
 		subagentsModule.default(api);
 
@@ -11501,7 +11511,9 @@ describe("worktree cleanup public surface", () => {
 			assert.equal(scan.mock.callCount(), 0);
 		}
 	});
-	it("delivers process warnings through tool inventory, successful results, and Pi error messages", async () => {
+	it("delivers process warnings through tool inventory, successful results, and Pi error messages", {
+		skip: worktreesUnsupportedOnWindows,
+	}, async () => {
 		for (const status of ["removed", "blocked", "failed"] as const) {
 			const f = cleanupFixture();
 			const warnings = [
@@ -11538,7 +11550,9 @@ describe("worktree cleanup public surface", () => {
 			}
 		}
 	});
-	it("keeps worktree inventory out of session startup", async (t) => {
+	it("keeps worktree inventory out of session startup", {
+		skip: worktreesUnsupportedOnWindows,
+	}, async (t) => {
 		const previousHerdr = process.env.HERDR_ENV;
 		process.env.HERDR_ENV = "1";
 		t.mock.method(childProcess, "execSync", () => "/fixture/herdr\n");
@@ -11579,7 +11593,9 @@ describe("worktree cleanup public surface", () => {
 		assert.match(notices.at(-1)!, /Removed/);
 		assert.deepEqual(f.calls, ["git:/repo:/managed/repo/task", "prune:/repo"]);
 	});
-	it("dispatches preserve explicitly from the tool and command", async () => {
+	it("dispatches preserve explicitly from the tool and command", {
+		skip: worktreesUnsupportedOnWindows,
+	}, async () => {
 		for (const surface of ["tool", "command"]) {
 			const f = cleanupFixture();
 			f.state.dirtyFiles = 1;
@@ -11604,7 +11620,9 @@ describe("worktree cleanup public surface", () => {
 			assert.equal(f.calls[0], "preserve");
 		}
 	});
-	it("keeps child Herdr list formatting, handoff dispatch, and silent startup", async () => {
+	it("keeps child Herdr list formatting, handoff dispatch, and silent startup", {
+		skip: worktreesUnsupportedOnWindows,
+	}, async () => {
 		const dir = createTestDir();
 		const previousId = process.env.PI_SUBAGENT_ID;
 		const previousHerdr = process.env.HERDR_ENV;
@@ -11748,7 +11766,9 @@ describe("worktree cleanup public surface", () => {
 			rmSync(dir, { recursive: true, force: true });
 		}
 	});
-	it("keeps the child worktree command but rejects removal and hides cleanup tools", async () => {
+	it("keeps the child worktree command but rejects removal and hides cleanup tools", {
+		skip: worktreesUnsupportedOnWindows,
+	}, async () => {
 		process.env.PI_SUBAGENT_ID = "child";
 		try {
 			const { api, registeredTools, registeredCommands } =
@@ -17019,7 +17039,10 @@ describe("parent messages are structured, not cut", () => {
 				(commands[name] = command),
 		};
 		const commandRuntime: any = {
-			session: { availability: () => ({ available: true }) },
+			session: {
+				availability: () => ({ available: true }),
+				managedWorktreeRefusal: () => undefined,
+			},
 		};
 		const paneConfig: any = {};
 		const host = withEncodedToolErrors(api);
@@ -17394,8 +17417,9 @@ describe("tool error boundary", () => {
 });
 
 describe("public launch errors and executable commands", () => {
-	it("encodes a malformed .git worktree failure thrown by the public subagent tool", async () =>
+	it("encodes a malformed .git worktree failure thrown by the public subagent tool", async (t) =>
 		withAdapterHost(async (f) => {
+			if (skipWorktreesOnWindows(t)) return;
 			const checkout = join(f.projectDir, "malformed");
 			mkdirSync(checkout);
 			writeFileSync(

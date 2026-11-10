@@ -10,6 +10,7 @@ import {
 	resolveWorktreeProvisionCwd,
 } from "../../maestro/runtime/worktree-operations.ts";
 import type { WorktreeLaunch } from "../../maestro/core/worktree.ts";
+import { worktreesUnsupportedOnWindows } from "../helpers/windows-scope.ts";
 
 const sha = "a".repeat(40);
 async function gitFixture(
@@ -58,7 +59,9 @@ function unknown(handoff: Awaited<ReturnType<typeof captureWorktreeHandoff>>) {
 	assert.ok(handoff.gitError);
 }
 
-test("one handoff deadline covers the sequence and launches no probes after expiry while the parent stays responsive", async () => {
+test("one handoff deadline covers the sequence and launches no probes after expiry while the parent stays responsive", {
+	skip: worktreesUnsupportedOnWindows,
+}, async () => {
 	await gitFixture(
 		`${valid} if(args[0]==='status') setTimeout(() => {}, 5000);`,
 		async (worktree, log) => {
@@ -104,7 +107,9 @@ for (const bad of ["sha", "count", "overflow", "exit", "nul"] as const)
 		);
 	});
 
-test("async base/source preflight is awaited and NUL-delimited paths stay lossless", async () => {
+test("async base/source preflight is awaited and NUL-delimited paths stay lossless", {
+	skip: worktreesUnsupportedOnWindows,
+}, async () => {
 	const names = ["line\nbreak", 'tab\tquote"', "leading space "];
 	await gitFixture(
 		`if(args[0]==='rev-parse' && args.includes('--path-format=absolute')) console.log('/repo/.git'); else { ${valid} } if(args[0]==='ls-files') process.stdout.write(${JSON.stringify(names.join("\0") + "\0")});`,

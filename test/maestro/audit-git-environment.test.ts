@@ -21,6 +21,7 @@ import {
 	resolveWorktreeProvisionCwd,
 } from "../../maestro/runtime/worktree-operations.ts";
 import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
+import { worktreesUnsupportedOnWindows } from "../helpers/windows-scope.ts";
 
 test("Git environment drops only repository overrides and copies its input", () => {
 	const removed = [
@@ -67,7 +68,9 @@ test("Git environment drops only repository overrides and copies its input", () 
 	assert.deepEqual(env, Object.fromEntries(kept.map((key) => [key, "value"])));
 });
 
-test("host Git ignores poisoned repository while preserving linked checkout, includes and hooks", async () => {
+test("host Git ignores poisoned repository while preserving linked checkout, includes and hooks", {
+	skip: worktreesUnsupportedOnWindows,
+}, async () => {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "audit-git-env-")));
 	const saved = { ...process.env };
 	const run = (cwd: string, ...args: string[]) =>

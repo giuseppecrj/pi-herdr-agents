@@ -98,6 +98,12 @@ export function registerWorktreeCommand(
 			? "Fork into a worktree, list retained worktrees, or explicitly remove one"
 			: "Fork this session into a worktree; use /worktree list to inspect them",
 		handler: async (args, ctx) => {
+			// Every /worktree form operates on managed worktrees.
+			const platformRefusal = runtime.session!.managedWorktreeRefusal();
+			if (platformRefusal) {
+				ctx.ui.notify(platformRefusal, "error");
+				return;
+			}
 			const trimmed = args.trim();
 			const parts = trimmed.split(/\s+/).filter(Boolean);
 			if (trimmed === "list") {

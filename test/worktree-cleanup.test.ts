@@ -39,6 +39,7 @@ const createWorktreeCleanupOperations = (
 	input: Parameters<typeof buildCleanupOperations>[1],
 ) => buildCleanupOperations(provider, input);
 import { cleanupFixture } from "./worktree-cleanup-fixture.ts";
+import { worktreesUnsupportedOnWindows } from "./helpers/windows-scope.ts";
 
 describe("cleanup process visibility policy", () => {
 	it("scans the real Linux host without mutation and retains known child and lease blockers", {
@@ -95,7 +96,9 @@ describe("cleanup process visibility policy", () => {
 	});
 	for (const deniedDetail of ["cwd", "comm", "status", "identity"] as const) {
 		for (const withHolder of [false, true]) {
-			it(`warns for unreadable ${deniedDetail} and continues scanning (holder: ${withHolder})`, async (t) => {
+			it(`warns for unreadable ${deniedDetail} and continues scanning (holder: ${withHolder})`, {
+				skip: worktreesUnsupportedOnWindows,
+			}, async (t) => {
 				const dir = fs.realpathSync(
 					mkdtempSync(join(tmpdir(), "cleanup-protected-")),
 				);
@@ -175,7 +178,9 @@ describe("cleanup process visibility policy", () => {
 			});
 		}
 	}
-	it("does not lose a holder when its own command name is unreadable", (t) => {
+	it("does not lose a holder when its own command name is unreadable", {
+		skip: worktreesUnsupportedOnWindows,
+	}, (t) => {
 		const dir = mkdtempSync(join(tmpdir(), "cleanup-hidden-command-"));
 		mkdirSync(join(dir, "101"));
 		symlinkSync(dir, join(dir, "101", "cwd"));
@@ -202,7 +207,11 @@ describe("cleanup process visibility policy", () => {
 		}
 	});
 	for (const kind of ["enumeration", "platform"] as const) {
-		it(`blocks ${kind} failure rather than warning`, async () => {
+		// Only the platform case calls the uid-based inspection that Windows
+		// lacks; the enumeration case stays covered there.
+		it(`blocks ${kind} failure rather than warning`, {
+			skip: kind === "platform" && worktreesUnsupportedOnWindows,
+		}, async () => {
 			const f = cleanupFixture();
 			f.operations.holders = async () =>
 				__worktreeCleanupTest__.processHolders(
@@ -220,7 +229,9 @@ describe("cleanup process visibility policy", () => {
 			assert.deepEqual(f.calls, []);
 		});
 	}
-	it("keeps disappeared and zombie processes harmless and only exempts observed idle shells", () => {
+	it("keeps disappeared and zombie processes harmless and only exempts observed idle shells", {
+		skip: worktreesUnsupportedOnWindows,
+	}, () => {
 		const dir = mkdtempSync(join(tmpdir(), "cleanup-idle-shell-"));
 		try {
 			mkdirSync(join(dir, "101"));
@@ -309,7 +320,9 @@ describe("cleanup process visibility policy", () => {
 			assert.match(result.message, /Warning:.*protected process/);
 		});
 	}
-	it("resolves Darwin cwd records without opening them", (t) => {
+	it("resolves Darwin cwd records without opening them", {
+		skip: worktreesUnsupportedOnWindows,
+	}, (t) => {
 		// Bun's realpathSync opens the path; open() can block forever on a
 		// protected macOS directory, such as another app's sandbox container.
 		const dir = mkdtempSync(join(tmpdir(), "cleanup-darwin-open-"));
@@ -484,7 +497,9 @@ n${link}
 			rmSync(dir, { recursive: true });
 		}
 	});
-	it("continues past unreadable Darwin cwd records but blocks a failed global lsof", async (t) => {
+	it("continues past unreadable Darwin cwd records but blocks a failed global lsof", {
+		skip: worktreesUnsupportedOnWindows,
+	}, async (t) => {
 		const dir = mkdtempSync(join(tmpdir(), "cleanup-darwin-"));
 		const mocked = t.mock.method(
 			childProcess,
@@ -530,7 +545,9 @@ n${link}
 });
 
 describe("cleanup operating-system probes", () => {
-	it("counts every ignored file when the real Git listing exceeds 1 MiB", async (t) => {
+	it("counts every ignored file when the real Git listing exceeds 1 MiB", {
+		skip: worktreesUnsupportedOnWindows,
+	}, async (t) => {
 		const dir = mkdtempSync(join(tmpdir(), "cleanup-large-ignored-"));
 		const git = (args: string[]) =>
 			execFileSync("git", args, { cwd: dir, stdio: "pipe" });
@@ -617,7 +634,9 @@ describe("cleanup operating-system probes", () => {
 			rmSync(dir, { recursive: true });
 		}
 	});
-	it("inspects a clean Git sibling beside a detached entry from captured Herdr output", async () => {
+	it("inspects a clean Git sibling beside a detached entry from captured Herdr output", {
+		skip: worktreesUnsupportedOnWindows,
+	}, async () => {
 		const dir = mkdtempSync(join(tmpdir(), "cleanup-detached-sibling-"));
 		const source = join(dir, "source");
 		const managed = join(dir, "managed");
@@ -1502,7 +1521,9 @@ describe("explicit worktree cleanup", () => {
 	});
 });
 
-describe("submodule source repositories", () => {
+describe("submodule source repositories", {
+	skip: worktreesUnsupportedOnWindows,
+}, () => {
 	const gitIn = (cwd: string, args: string[]) =>
 		execFileSync("git", args, { cwd, encoding: "utf8", stdio: "pipe" });
 	const initRepository = (cwd: string) => {

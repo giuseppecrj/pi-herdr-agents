@@ -52,6 +52,8 @@ Fakes are for conformance tests only.
 - `maestro/core/git-environment.ts` removes inherited repository-selection and
   command-local Git configuration overrides from host-managed Git subprocesses.
   It retains user configuration, identity, and hooks.
+- `maestro/core/platform-support.ts` — the Windows support scope: the shared
+  refusal predicate and messages for managed worktrees and Herdr Core on win32.
 - `maestro/core/deadline.ts` defines finite monotonic operation budgets.
   `maestro/surfaces/herdr/herdr-cli.ts` owns bounded asynchronous Herdr clients.
   `maestro/runtime/worktree-operations.ts` owns asynchronous Git preflight and
