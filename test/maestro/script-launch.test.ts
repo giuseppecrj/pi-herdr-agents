@@ -33,13 +33,13 @@ import { writeSubagentSessionPolicy } from "../../maestro/adapters/pi/session.ts
 import type { PiLaunchSnapshot } from "../../maestro/runtime/index.ts";
 import { createLaunchPlanner } from "../../pi-extension/subagents/launch.ts";
 import { __herdrTest__ } from "../../maestro/surfaces/herdr/herdr.ts";
+import { HerdrSurfaceProvider } from "../../maestro/surfaces/herdr/herdr-surface-provider.ts";
+import { runScriptInPane } from "../../maestro/surfaces/herdr/terminal.ts";
+import { fileURLToPath } from "node:url";
 
 /** A path is literal text in an expected pattern: `\` and `.` must not be syntax. */
 const escapeRegExp = (value: string) =>
 	value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-import { HerdrSurfaceProvider } from "../../maestro/surfaces/herdr/herdr-surface-provider.ts";
-import { runScriptInPane } from "../../maestro/surfaces/herdr/terminal.ts";
-import { fileURLToPath } from "node:url";
 
 const GIT_BASH = "C:\\Program Files\\Git\\bin\\bash.exe";
 const CJK_BASH = "D:\\工具 箱\\王小明's Git\\bin\\bash.exe";

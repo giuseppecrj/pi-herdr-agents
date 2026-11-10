@@ -33,8 +33,12 @@ import { FileWakeRegistry } from "../../maestro/core/wake.ts";
 import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
 import { fileURLToPath } from "node:url";
 
-/** A path as the check's `sh` reads it: quoted, with forward slashes (a Windows `\` would be eaten). */
-const shellPath = (path: string) => `'${path.replaceAll("\\", "/")}'`;
+/**
+ * A path as the check's `sh` reads it: single-quoted, with forward slashes (a
+ * Windows `\` would be eaten) and any `'` closed, escaped and reopened.
+ */
+const shellPath = (path: string) =>
+	`'${path.replaceAll("\\", "/").replaceAll("'", "'\\''")}'`;
 
 /** The `.exit` sidecar shapes a child writes. */
 type Sidecar =
