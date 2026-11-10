@@ -29,8 +29,8 @@ npm run test:integration:core
 ```
 
 Requires `herdr-core`, `pi` and Node on PATH, or absolute `HERDR_CORE_BIN` and
-`PI_BIN`. `PI_BIN` must be an executable named `pi`, such as
-`node_modules/.bin/pi`: the lab builds child terminals' PATH from its directory
+`PI_BIN`. `PI_BIN` must be an absolute path to an executable named `pi`, such
+as `$PWD/node_modules/.bin/pi`: the lab builds child terminals' PATH from its directory
 and children start a bare `pi`. Pointing it at the bundle's `cli.js` makes
 children exit 127. It does not require `HERDR_ENV` or an existing Core/Desktop session.
 The fixture creates private HOME/XDG directories, Core session/socket and Pi
