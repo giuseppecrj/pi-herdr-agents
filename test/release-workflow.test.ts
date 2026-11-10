@@ -12,6 +12,7 @@ import {
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 function extractStepRun(workflow: string, stepName: string): string {
 	const lines = workflow.split("\n");
@@ -210,7 +211,7 @@ globalThis.fetch = async (_url, options) => {
 					...process.env,
 					GITHUB_OUTPUT: output,
 					GITHUB_SHA: "a".repeat(40),
-					NODE_OPTIONS: `--import=${fetchStub}`,
+					NODE_OPTIONS: `--import=${pathToFileURL(fetchStub).href}`,
 					PACKAGE_NAME: "pi-herdr-agents",
 					REGISTRY_SCENARIO: scenario,
 					REGISTRY_URL: "https://registry.test/",
