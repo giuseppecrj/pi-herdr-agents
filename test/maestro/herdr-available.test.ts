@@ -6,8 +6,12 @@ import { test } from "node:test";
 import { isHerdrAvailable } from "../../maestro/surfaces/herdr/herdr-cli.ts";
 
 /** A temp directory holding empty executables, removed afterwards. */
-function withBinDir(files: string[], run: (dir: string) => void): void {
-	const dir = mkdtempSync(join(tmpdir(), "herdr-available-"));
+function withBinDir(
+	files: string[],
+	run: (dir: string) => void,
+	prefix = "herdr-available-",
+): void {
+	const dir = mkdtempSync(join(tmpdir(), prefix));
 	try {
 		for (const name of files)
 			writeFileSync(join(dir, name), "", { mode: 0o755 });
@@ -52,14 +56,34 @@ test("Windows ignores an extensionless herdr script that spawn cannot start", ()
 
 test("Windows splits PATH on ';' whatever the host, reads Path in any case and strips quotes", () => {
 	withBinDir(["herdr.exe"], (dir) => {
+		// String.raw: a plain template would turn \n into a newline.
+		const path = [String.raw`C:\nowhere`, `"${dir}"`].join(win32.delimiter);
 		assert.equal(
-			isHerdrAvailable(
-				{ HERDR_ENV: "1", Path: `C:\nowhere${win32.delimiter};"${dir}"` },
-				"win32",
-			),
+			isHerdrAvailable({ HERDR_ENV: "1", Path: path }, "win32"),
 			true,
 		);
 	});
+});
+
+test("Windows keeps a ';' that sits inside a quoted PATH entry", () => {
+	withBinDir(
+		["herdr.exe"],
+		(dir) => {
+			assert.ok(dir.includes(";"), "the fixture directory must contain ';'");
+			for (const path of [`"${dir}"`, `C:\\nowhere;"${dir}";C:\\other`])
+				assert.equal(
+					isHerdrAvailable({ HERDR_ENV: "1", PATH: path }, "win32"),
+					true,
+					path,
+				);
+			// Unquoted, the same directory is two broken entries.
+			assert.equal(
+				isHerdrAvailable({ HERDR_ENV: "1", PATH: dir }, "win32"),
+				false,
+			);
+		},
+		"herdr;available-",
+	);
 });
 
 test("Windows skips empty PATH entries", () => {

@@ -27,6 +27,28 @@ function pathValue(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string {
 	return (key && env[key]) || "";
 }
 
+/**
+ * Windows PATH entries, split the way the loader reads them: `;` separates
+ * entries except inside a double-quoted span, the quotes themselves are not
+ * part of the directory, and empty entries are dropped. Only double quotes are
+ * handled. A single quote is not treated as one, which is the safe side: it
+ * can hide an entry, never invent one.
+ */
+function windowsPathEntries(value: string): string[] {
+	const entries: string[] = [];
+	let current = "";
+	let quoted = false;
+	for (const char of value) {
+		if (char === '"') quoted = !quoted;
+		else if (char === win32.delimiter && !quoted) {
+			entries.push(current);
+			current = "";
+		} else current += char;
+	}
+	entries.push(current);
+	return entries.filter(Boolean);
+}
+
 export function isHerdrAvailable(
 	env: NodeJS.ProcessEnv = process.env,
 	platform: NodeJS.Platform = process.platform,
@@ -35,13 +57,11 @@ export function isHerdrAvailable(
 	const names = herdrExecutableNames(platform);
 	const windows = platform === "win32";
 	// An empty POSIX entry means the current directory and spawn honours it, so
-	// only Windows drops empty entries (and strips the quotes it allows).
-	const entries = pathValue(env, platform).split(
-		windows ? win32.delimiter : posix.delimiter,
-	);
+	// only Windows drops empty entries (and reads the quotes it allows).
+	const value = pathValue(env, platform);
 	const directories = windows
-		? entries.map((entry) => entry.replace(/^"(.*)"$/, "$1")).filter(Boolean)
-		: entries;
+		? windowsPathEntries(value)
+		: value.split(posix.delimiter);
 	return directories.some((directory) =>
 		names.some((name) => {
 			try {
