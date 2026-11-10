@@ -44,7 +44,7 @@ execution, not managed worktrees or Desktop Agents tabs/sidebar parity.**
 Desktop is a Core client, not a third backend. See [backend selection and
 limits](docs/configuration.md#herdr-backend).
 
-On Windows, only ordinary subagents on legacy Herdr are supported; managed worktrees and Herdr Core are refused before any effect ([troubleshooting](docs/troubleshooting.md#windows-refuses-worktrees-or-herdr-core)).
+Windows support is experimental and still in progress: ordinary subagents on legacy Herdr are the intended scope, and some Windows fixes have not landed yet. Managed worktrees and Herdr Core are refused on Windows before any effect ([troubleshooting](docs/troubleshooting.md#windows-refuses-worktrees-or-herdr-core)).
 
 Other terminal multiplexers are not supported. Session startup skips worktree inventory to avoid blocking Pi initialization. Use `/worktree list` or `worktree_list` to inspect managed worktrees. Outside Herdr, explicit inventory tools report unavailable inspection as unknown. Worktrees isolate Git checkouts, not processes or permissions. Child agents and installed Pi packages run with your user account's access.
 

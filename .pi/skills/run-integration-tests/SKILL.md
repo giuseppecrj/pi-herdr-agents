@@ -13,7 +13,7 @@ not a substitute for legacy coverage.
 
 The **Linux integration** workflow runs on pushes to `main` or manual dispatch,
 with read-only permissions and no publishing. It installs checksum-pinned legacy
-Herdr 0.9.5 and Core 0.1.17, uses the lockfile's Pi, and runs
+Herdr 0.9.5 and Core 0.1.20, uses the lockfile's Pi, and runs
 `scripts/run-linux-integration.ts` on Ubuntu 24.04. That driver proves a real
 parent delegation in the existing private verification lab before running the
 complete deterministic suite sequentially. Always-run cleanup stops only the
@@ -29,7 +29,10 @@ npm run test:integration:core
 ```
 
 Requires `herdr-core`, `pi` and Node on PATH, or absolute `HERDR_CORE_BIN` and
-`PI_BIN`. It does not require `HERDR_ENV` or an existing Core/Desktop session.
+`PI_BIN`. `PI_BIN` must be an executable named `pi`, such as
+`node_modules/.bin/pi`: the lab builds child terminals' PATH from its directory
+and children start a bare `pi`. Pointing it at the bundle's `cli.js` makes
+children exit 127. It does not require `HERDR_ENV` or an existing Core/Desktop session.
 The fixture creates private HOME/XDG directories, Core session/socket and Pi
 configuration, and uses the local deterministic provider. Real parent Pi calls
 the public tools; do not replace that path with direct extension internals.
