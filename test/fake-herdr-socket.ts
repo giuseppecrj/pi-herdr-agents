@@ -1,4 +1,4 @@
-/** A real Unix socket that answers like Herdr, scripted per request. */
+/** A real Unix socket (named pipe on Windows) that answers like Herdr, scripted per request. */
 import { createServer, type Server, type Socket } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,6 +9,7 @@ import {
 	isString,
 	type JsonObject,
 } from "../maestro/core/config/type-guards.ts";
+import { socketPath as fixtureSocketPath } from "./socket-path.ts";
 
 export interface ReceivedRequest {
 	/** The exact line the client wrote, without its newline. */
@@ -40,7 +41,7 @@ export async function withFakeHerdrSocket(
 	run: (socketPath: string, requests: ReceivedRequest[]) => Promise<void>,
 ): Promise<void> {
 	const dir = mkdtempSync(join(tmpdir(), "fake-herdr-"));
-	const socketPath = join(dir, "herdr.sock");
+	const socketPath = fixtureSocketPath(dir, "herdr.sock");
 	const requests: ReceivedRequest[] = [];
 	const sockets = new Set<Socket>();
 	let connections = 0;
