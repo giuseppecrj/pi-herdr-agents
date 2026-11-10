@@ -41,6 +41,7 @@ import {
 	type SubagentRuntime,
 } from "../../pi-extension/subagents/state.ts";
 import { createMockExtensionApi } from "../helpers/mock-extension-api.ts";
+import { fileURLToPath } from "node:url";
 
 const STOP_WAIT = 10;
 const turn = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -121,8 +122,9 @@ async function finalizingSession(t: TestContext) {
 	const parent = createMockExtensionApi();
 	const options: DefaultRunSessionOptions = {
 		configDir: dir,
-		configExamplePath: new URL("../../config.json.example", import.meta.url)
-			.pathname,
+		configExamplePath: fileURLToPath(
+			new URL("../../config.json.example", import.meta.url),
+		),
 		forcePolling: true,
 		roles: [],
 		infrastructure: {

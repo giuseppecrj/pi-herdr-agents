@@ -38,6 +38,10 @@ import {
 } from "../../maestro/adapters/pi/session.ts";
 import type { SpawnOptions } from "../../maestro/core/harness-adapter.ts";
 
+/** A path is literal text in an expected pattern: `\` and `.` must not be syntax. */
+const escapeRegExp = (value: string) =>
+	value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const paneConfig = {
 	mode: "grouped",
 	direction: "right",
@@ -364,11 +368,15 @@ describe("PiHarnessAdapter", () => {
 			);
 			assert.match(
 				commands[1],
-				new RegExp(`PI_CODING_AGENT_DIR='${join(f.root, ".pi", "agent")}'`),
+				new RegExp(
+					`PI_CODING_AGENT_DIR='${escapeRegExp(join(f.root, ".pi", "agent"))}'`,
+				),
 			);
 			assert.match(
 				commands[2],
-				new RegExp(`PI_CODING_AGENT_DIR='${join(roleCwd, ".pi", "agent")}'`),
+				new RegExp(
+					`PI_CODING_AGENT_DIR='${escapeRegExp(join(roleCwd, ".pi", "agent"))}'`,
+				),
 			);
 		}));
 	it("launches the relocated protocol and maps the session handle", async () =>

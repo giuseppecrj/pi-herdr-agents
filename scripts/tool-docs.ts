@@ -247,8 +247,16 @@ export function renderToolDocs(
 /** Formatted with the repository formatter so `npm run format:check` stays green. */
 export function renderSnapshotJson(snapshot: ToolSchemaSnapshot): string {
 	return execFileSync(
-		fileURLToPath(new URL("../node_modules/.bin/biome", import.meta.url)),
-		["format", "--stdin-file-path=current.json"],
+		process.execPath,
+		[
+			// A Node script, so it runs on Windows too, where `.bin/biome` is a
+			// shim that execFileSync cannot start.
+			fileURLToPath(
+				new URL("../node_modules/@biomejs/biome/bin/biome", import.meta.url),
+			),
+			"format",
+			"--stdin-file-path=current.json",
+		],
 		{ input: JSON.stringify(snapshot), encoding: "utf8" },
 	);
 }

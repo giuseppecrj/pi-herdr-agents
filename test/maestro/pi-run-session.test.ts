@@ -50,6 +50,7 @@ import {
 	isAcquisitionUncertainError,
 } from "../../maestro/core/surface-provider.ts";
 import { runScriptInPane } from "../../maestro/surfaces/herdr/terminal.ts";
+import { fileURLToPath } from "node:url";
 
 for (const resumed of [false, true])
 	test(`uncertain ${resumed ? "resume" : "dispatch"} with failed rollback transfers the real owner until cancel confirms exit`, () =>
@@ -440,8 +441,9 @@ async function makeFixture() {
 	let latest: PiRunRecord | undefined;
 	const options: DefaultRunSessionOptions = {
 		configDir: dir,
-		configExamplePath: new URL("../../config.json.example", import.meta.url)
-			.pathname,
+		configExamplePath: fileURLToPath(
+			new URL("../../config.json.example", import.meta.url),
+		),
 		infrastructure: {
 			surfaceProvider: provider,
 			launchOperations: operations,
