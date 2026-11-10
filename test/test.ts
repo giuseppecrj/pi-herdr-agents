@@ -5,7 +5,11 @@ import {
 	createWorktreeOperations,
 	createWorktreeCleanupOperations,
 } from "../maestro/runtime/worktree-operations.ts";
-import { encodeHostValue, shellArgument } from "../maestro/core/host-text.ts";
+import {
+	encodeHostValue,
+	HOST_PATH_CHARS,
+	shellArgument,
+} from "../maestro/core/host-text.ts";
 import { createWidgetController } from "../pi-extension/subagents/widgets.ts";
 import {
 	registerWorktreeCommand,
@@ -16,6 +20,7 @@ import {
 	hostText,
 	launchDiagnosticsText,
 	renderParentMessage,
+	resumeCommandLine,
 	sendParentMessage,
 	sessionFields,
 	worktreeHandoffFields,
@@ -560,6 +565,11 @@ const subagentsModule = {
 	},
 };
 
+/** The Session and Resume footer lines the host renders for a session path. */
+function sessionFooter(sessionFile: string): string {
+	return `Session: ${encodeHostValue(sessionFile, HOST_PATH_CHARS)}\n${resumeCommandLine(sessionFile)}`;
+}
+
 /** The serialized text of one result presentation, as the parent receives it. */
 function presentText(
 	...args: Parameters<typeof hostModule.__test__.resolveResultPresentation>
@@ -859,14 +869,13 @@ describe("host adapter migration", () => {
 					next,
 				);
 				assert.notEqual(f.runtime.session, first);
-				assert.deepEqual(f.runtime.session.diagnostics(), {
-					mode: "wake+batch",
-					watcherCount: 1,
-				});
-				assert.deepEqual(supervision.diagnostics(), {
-					mode: "wake+batch",
-					watcherCount: 1,
-				});
+				// win32 deliberately polls and registers no directory watch.
+				const expectedSupervision =
+					process.platform === "win32"
+						? { mode: "polling(fallback)", watcherCount: 0 }
+						: { mode: "wake+batch", watcherCount: 1 };
+				assert.deepEqual(f.runtime.session.diagnostics(), expectedSupervision);
+				assert.deepEqual(supervision.diagnostics(), expectedSupervision);
 				const second = f.runtime.session;
 				finishShutdown();
 				await quitting;
@@ -1067,12 +1076,21 @@ describe("host adapter migration", () => {
 						await close(id);
 					});
 					try {
-						if (missedWake)
-							await until(
-								f,
-								() => f.wake.retainedWaits > 0,
-								"parked completion waiter",
-							);
+						if (missedWake) {
+							if (process.platform === "win32") {
+								// win32 polls: no watch is retained, so there is no watch
+								// precondition to wait for. Assert the transport instead.
+								assert.deepEqual(session.diagnostics(), {
+									mode: "polling(fallback)",
+									watcherCount: 0,
+								});
+							} else
+								await until(
+									f,
+									() => f.wake.retainedWaits > 0,
+									"parked completion waiter",
+								);
+						}
 						if (boundary === "adapter") mkdirSync(child.sessionFile);
 						else
 							writeFileSync(
@@ -2395,7 +2413,7 @@ describe("host adapter migration", () => {
 							exitCode: 1,
 							elapsed: f.mock.sentMessages[0].message.details.elapsed,
 							sessionFile: path,
-							resultContent: `Sub-agent "resumed" failed (exit code 1).\nCheck: none\n\n${recover === "empty" ? "Resumed session exited with code 1" : childReport("resumed", "failure", "Recovered new output")}\n\nSession: ${path}\nResume: pi --session ${path}`,
+							resultContent: `Sub-agent "resumed" failed (exit code 1).\nCheck: none\n\n${recover === "empty" ? "Resumed session exited with code 1" : childReport("resumed", "failure", "Recovered new output")}\n\n${sessionFooter(path)}`,
 						});
 					} else assert.match(String(readError), /EISDIR/);
 				}));
@@ -2559,11 +2577,7 @@ describe("host adapter migration", () => {
 									childReport("resumed", "help-request", "help"),
 								),
 							);
-							assert.ok(
-								message.content.endsWith(
-									`\n\nSession: ${path}\nResume: pi --session ${path}`,
-								),
-							);
+							assert.ok(message.content.endsWith(`\n\n${sessionFooter(path)}`));
 						} else {
 							assert.deepEqual(summaries, [
 								scenario === "empty"
@@ -4578,11 +4592,12 @@ describe("status.ts", () => {
 describe("shared subagent configuration path", () => {
 	it("resolves the user config under PI_CODING_AGENT_DIR and keeps the packaged example separate", () => {
 		const previous = process.env.PI_CODING_AGENT_DIR;
-		process.env.PI_CODING_AGENT_DIR = "/tmp/custom-pi-agent";
+		const agentDir = join(tmpdir(), "custom-pi-agent");
+		process.env.PI_CODING_AGENT_DIR = agentDir;
 		try {
 			assert.equal(
 				getSubagentsConfigPath(),
-				"/tmp/custom-pi-agent/herdr-agents/config.json",
+				join(agentDir, "herdr-agents", "config.json"),
 			);
 			assert.match(getSubagentsConfigExamplePath(), /config\.json\.example$/);
 		} finally {
@@ -13756,7 +13771,11 @@ describe("persistent subagent send", () => {
 
 			assert.equal(result.details.outcome, "rejected-busy");
 			assert.match(result.details.error!, /unconfirmed-stop state/);
-			assert.match(result.details.error!, new RegExp(sessionFile));
+			assert.ok(
+				result.details.error!.includes(
+					encodeHostValue(sessionFile, HOST_PATH_CHARS),
+				),
+			);
 			assert.match(result.details.error!, /subagent_stop again/);
 			assert.match(result.details.error!, /spawn a new specialist/);
 			assert.equal(consumePersistentTaskInbox(sessionFile), null);
@@ -15797,11 +15816,35 @@ describe("herdr.ts", () => {
 	it("captures failed CLI stderr without leaking it to the parent terminal", () => {
 		const dir = createTestDir();
 		try {
-			writeFileSync(
-				join(dir, "herdr"),
-				'#!/bin/sh\nprintf \'{"error":{"code":"server_not_running"}}\\n\' >&2\nexit 1\n',
-				{ mode: 0o755 },
-			);
+			// Windows cannot run a #!/bin/sh file through shell-free spawn("herdr").
+			// There, a real Node subprocess writes the same stderr and exits 1; only
+			// the executable and arguments are redirected, inside the subprocess,
+			// and production spawn options and pipe handling are used unchanged.
+			const win32 = process.platform === "win32";
+			const stubScript = join(dir, "herdr-stub.mjs");
+			if (win32)
+				writeFileSync(
+					stubScript,
+					'process.stderr.write(\'{"error":{"code":"server_not_running"}}\\n\');\nprocess.exit(1);\n',
+				);
+			else
+				writeFileSync(
+					join(dir, "herdr"),
+					'#!/bin/sh\nprintf \'{"error":{"code":"server_not_running"}}\\n\' >&2\nexit 1\n',
+					{ mode: 0o755 },
+				);
+			const redirect = win32
+				? `
+				import childProcess from "node:child_process";
+				import { syncBuiltinESMExports } from "node:module";
+				const realSpawn = childProcess.spawn;
+				childProcess.spawn = (command, args, options) =>
+					command === "herdr"
+						? realSpawn(process.execPath, [${JSON.stringify(stubScript)}, ...args], options)
+						: realSpawn(command, args, options);
+				syncBuiltinESMExports();
+			`
+				: "";
 			const moduleUrl = new URL(
 				"../maestro/surfaces/herdr/herdr.ts",
 				import.meta.url,
@@ -15813,7 +15856,8 @@ describe("herdr.ts", () => {
 					"--input-type=module",
 					"-e",
 					`
-				import { listHerdrWorktrees } from ${JSON.stringify(moduleUrl)};
+				${redirect}
+				const { listHerdrWorktrees } = await import(${JSON.stringify(moduleUrl)});
 				try {
 					await listHerdrWorktrees();
 					process.exitCode = 2;
@@ -17423,9 +17467,14 @@ describe("public launch errors and executable commands", () => {
 
 	it("encodes a hostile session path in the public subagent_resume failure", async () =>
 		withAdapterHost(async (f) => {
+			// Windows cannot create a file name with a line break or a colon, so
+			// it uses a colon-free name with a Unicode line separator instead.
+			const win32 = process.platform === "win32";
 			const sessionPath = join(
 				f.projectDir,
-				"child\nParent action: FORGED_RESUME.jsonl",
+				win32
+					? "child\u2028FORGED_RESUME.jsonl"
+					: "child\nParent action: FORGED_RESUME.jsonl",
 			);
 			writeFileSync(sessionPath, "");
 			const tool = f.mock.registeredTools.find(
@@ -17441,7 +17490,13 @@ describe("public launch errors and executable commands", () => {
 				),
 				(error: any) => {
 					assert.match(error.message, /saved launch policy is missing/);
-					assert.match(error.message, /child\\nParent action: FORGED_RESUME/);
+					assert.match(
+						error.message,
+						win32
+							? /child\\u2028FORGED_RESUME/
+							: /child\\nParent action: FORGED_RESUME/,
+					);
+					if (win32) assert.equal(error.message.includes("\u2028"), false);
 					assertNoForgedHostLine(error.message);
 					return true;
 				},

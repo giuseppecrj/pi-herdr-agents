@@ -10,7 +10,13 @@ import { FileWakeRegistry } from "../../maestro/core/wake.ts";
 
 const never = () => new AbortController().signal;
 
-test("parked wake wait observes a sidecar written after the registration reconcile", async () => {
+const WIN32_SKIP =
+	process.platform === "win32" &&
+	"supervision registers no directory watch on win32 (supervision.ts configureEntry); it polls";
+
+test("parked wake wait observes a sidecar written after the registration reconcile", {
+	skip: WIN32_SKIP,
+}, async () => {
 	const dir = mkdtempSync(join(tmpdir(), "wake-parked-"));
 	const supervisor = new SupervisionCoordinator(
 		async () => ({
@@ -104,7 +110,9 @@ function coordinator(registry: FileWakeRegistry) {
 }
 
 describe("wake retain accounting before close", () => {
-	test("a settled and an aborted wait each release the watch reference", async () => {
+	test("a settled and an aborted wait each release the watch reference", {
+		skip: WIN32_SKIP,
+	}, async () => {
 		const { registry, watchers } = fakeWatches();
 		const supervisor = coordinator(registry);
 		try {
@@ -135,7 +143,9 @@ describe("wake retain accounting before close", () => {
 		}
 	});
 
-	test("a watch created while a wait is parked is referenced, then released", async () => {
+	test("a watch created while a wait is parked is referenced, then released", {
+		skip: WIN32_SKIP,
+	}, async () => {
 		const { registry, watchers } = fakeWatches();
 		const supervisor = coordinator(registry);
 		try {
@@ -160,7 +170,9 @@ describe("wake retain accounting before close", () => {
 		}
 	});
 
-	test("a wait parked at unregister settles and returns its retain", async () => {
+	test("a wait parked at unregister settles and returns its retain", {
+		skip: WIN32_SKIP,
+	}, async () => {
 		const { registry, watchers } = fakeWatches();
 		const supervisor = coordinator(registry);
 		try {
@@ -191,7 +203,9 @@ describe("wake retain accounting before close", () => {
 		}
 	});
 
-	test("a second concurrent wait is rejected and cannot strand the first", async () => {
+	test("a second concurrent wait is rejected and cannot strand the first", {
+		skip: WIN32_SKIP,
+	}, async () => {
 		const { registry, watchers } = fakeWatches();
 		const supervisor = coordinator(registry);
 		try {
@@ -218,7 +232,9 @@ describe("wake retain accounting before close", () => {
 		}
 	});
 
-	test("a settled wait removes its abort listener from a long-lived signal", async () => {
+	test("a settled wait removes its abort listener from a long-lived signal", {
+		skip: WIN32_SKIP,
+	}, async () => {
 		const { registry, watchers } = fakeWatches();
 		const supervisor = coordinator(registry);
 		const signal = new AbortController().signal;
