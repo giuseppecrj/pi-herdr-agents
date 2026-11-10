@@ -9,9 +9,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { describe, it, type TestContext } from "node:test";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { cleanupTestProcess } from "../helpers/process-cleanup.ts";
 import { PiHarnessAdapter } from "../../maestro/adapters/pi/pi-harness-adapter.ts";
 import {
 	captureSurfacePiProcessIdentity,
@@ -1311,10 +1312,16 @@ describe("PiHarnessAdapter retained worktree kill", () => {
 });
 
 describe("PiHarnessAdapter retained worktree kill with real processes", () => {
-	async function realChild(f: ReturnType<typeof fixture>, mode: string) {
+	async function realChild(
+		f: ReturnType<typeof fixture>,
+		mode: string,
+		t: TestContext,
+	) {
 		const sessionFile = join(f.root, `real-${mode}.jsonl`);
 		const file = `${sessionFile}.process.json`;
 		const proc = spawnIdentityChild(file, "real-run", sessionFile, mode);
+		// Own cleanup before readiness or any setup assertion can fail.
+		t.after(() => cleanupTestProcess(proc.pid));
 		await childReady(proc);
 		// Pi's `process.title` rewrite has removed the session from argv.
 		assert.doesNotMatch(
@@ -1364,10 +1371,10 @@ describe("PiHarnessAdapter retained worktree kill with real processes", () => {
 		child.processIdentity = captured;
 		return { proc, adapter, h };
 	}
-	it("a title-rewritten Pi that survives SIGTERM is unconfirmed until THAT process exits", async () =>
+	it("a title-rewritten Pi that survives SIGTERM is unconfirmed until THAT process exits", async (t) =>
 		usingFixture(async (f) => {
 			if (process.platform !== "linux") return;
-			const r = await realChild(f, "ignore-term");
+			const r = await realChild(f, "ignore-term", t);
 			try {
 				await assert.rejects(r.adapter.kill(r.h), /is still alive/);
 				const exited = once(r.proc, "exit");
@@ -1378,10 +1385,10 @@ describe("PiHarnessAdapter retained worktree kill with real processes", () => {
 				r.proc.kill("SIGKILL");
 			}
 		}));
-	it("a suspended title-rewritten Pi is unconfirmed; resumed, SIGTERM ends it and confirms", async () =>
+	it("a suspended title-rewritten Pi is unconfirmed; resumed, SIGTERM ends it and confirms", async (t) =>
 		usingFixture(async (f) => {
 			if (process.platform !== "linux") return;
-			const r = await realChild(f, "default");
+			const r = await realChild(f, "default", t);
 			try {
 				process.kill(r.proc.pid!, "SIGSTOP");
 				await assert.rejects(r.adapter.kill(r.h), /is still alive/);
