@@ -13,10 +13,12 @@ import { HerdrCoreSurfaceProvider } from "../surfaces/herdr/herdr-core-surface-p
 export function resolveHerdrBinding(
 	configDir: string,
 	examplePath: string,
+	platform: NodeJS.Platform = process.platform,
 ): HerdrBinding {
 	return selectHerdrBinding(
 		loadHerdrConfig(join(configDir, "herdr-agents"), examplePath),
 		process.env,
+		platform,
 	);
 }
 export function createHerdrProvider(

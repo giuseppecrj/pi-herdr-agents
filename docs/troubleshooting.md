@@ -15,6 +15,13 @@ remote terminals and managed worktrees are not implemented. The legacy Node
 sidebar plugin cannot be installed as a Desktop mod. Do not work around those
 limits by altering the daily layout or reusing unrelated terminal IDs.
 
+## Windows refuses worktrees or Herdr Core
+
+On Windows the host supports ordinary subagents on legacy Herdr only.
+
+- `Managed worktrees are not supported on Windows: cleanup cannot verify worktree ownership or open checkouts there. Launch an ordinary subagent without worktree instead.` comes from `subagent` with `worktree`, `worktree_list`, `worktree_remove` or any `/worktree` form. Nothing was created: no manifest, Herdr workspace or Git command. Omit `worktree`, or run the task from Linux or macOS. See [platform support](worktree-subagents.md#platform-support).
+- `Herdr Core is not supported on Windows. Restart Pi in a legacy Herdr pane with herdr.backend "legacy" or "auto".` comes at extension load when [`herdr.backend`](configuration.md#herdr-backend) is `"core"`, or is `"auto"` inside a Core terminal (`HC_TERMINAL_ID` set). As on other platforms, auto does not fall back to legacy when Core context is present.
+
 ## Troubleshooting completion delivery
 
 If a child finishes but the parent returns an empty or unrelated response, first verify that the result reached the parent session:

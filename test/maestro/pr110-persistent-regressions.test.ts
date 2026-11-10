@@ -125,6 +125,9 @@ async function finalizingSession(t: TestContext) {
 			.pathname,
 		forcePolling: true,
 		roles: [],
+		// The worktree only pauses finalization; the persistent behavior under
+		// test is supported on Windows, so pin the platform the refusal reads.
+		platform: "linux",
 		infrastructure: {
 			surfaceProvider: provider,
 			launchOperations: operations,

@@ -314,6 +314,8 @@ export interface DefaultRunSessionOptions {
 	forcePolling: boolean;
 	/** Append one outcome-ledger line per model attempt. Default true. */
 	outcomeLedger?: boolean;
+	/** Host platform for the Windows support scope; tests inject win32. */
+	platform?: NodeJS.Platform;
 }
 // pi-herdr-agents extension
 export interface PiWorktreeHandoffInput {
@@ -336,6 +338,8 @@ export interface PiRunSession extends RunSession {
 		managedRoot?: string;
 	}): WorktreeCleanupOperations;
 	spawnPi(input: PiLaunchInput): Promise<AgentHandle>;
+	/** Why this host refuses every managed-worktree operation, if it does. */
+	managedWorktreeRefusal(): string | undefined;
 	resumePi(input: PiResumeInput): Promise<AgentHandle>;
 	/** Live-run metadata queries; all undefined after terminal retirement. */
 	getRecord(taskId: string): PiRunRecord | undefined;

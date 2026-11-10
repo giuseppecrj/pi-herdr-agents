@@ -8,6 +8,16 @@ does not reinterpret terminal IDs as workspace IDs. Ordinary Core children can
 still work in an already-existing checkout via `cwd`. See
 [backend limits](configuration.md#herdr-backend).
 
+## Platform support
+
+Managed worktrees are supported on Linux and macOS only. On Windows, `subagent`
+with `worktree`, every `/worktree` form, `worktree_list` and `worktree_remove`
+refuse before any manifest, Herdr or Git effect: cleanup decides ownership by
+POSIX uid and finds checkout holders through Linux `/proc` or macOS `lsof`, so a
+Windows worktree could be created but never safely removed. Ordinary
+subagents still run there on legacy Herdr. See
+[troubleshooting](troubleshooting.md#windows-refuses-worktrees-or-herdr-core).
+
 ## Quick start
 
 Run Pi inside Herdr from a Git checkout, then give each independent writing task a unique branch. The examples name `worker`, `scout`, and `reviewer` roles; `pi-herdr-agents` ships no roles, so those names must come from an installed role pack or a project/global definition. Omit `agent` for a bare child.

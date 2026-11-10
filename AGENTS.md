@@ -39,6 +39,7 @@ Former bundled roles, `/plan`, its plan skill, and `/skill:orchestrate` now belo
 - `maestro/core/worktree.ts`, `worktree-cleanup.ts` — manifest schema/state, handoff types, and cleanup eligibility/formatting
 - `maestro/core/realpath-without-opening.ts` — lstat/stat/readlink realpath used by cleanup and Herdr checkout comparisons so Bun never `open()`s a path that can freeze Pi
 - `maestro/core/git-environment.ts` owns repository-local environment isolation for host-managed Git commands while preserving user configuration, identity, and hooks.
+- `maestro/core/platform-support.ts` — the Windows support scope: the shared refusal predicate and messages for managed worktrees and Herdr Core on win32
 - `maestro/core/deadline.ts` owns finite monotonic budgets for asynchronous launch, readiness, and handoff effects. Herdr subprocesses stay in `surfaces/herdr/herdr-cli.ts`; Git handoff subprocesses stay in `runtime/worktree-operations.ts`.
 - `maestro/core/host-text.ts` — the one encoding for variable values in parent-facing host lines, lossless command-argument serializers, and display normalization for child text
 - `maestro/adapters/pi/` — `PiHarnessAdapter`, launch transactions, completion evidence, session I/O, activity files, SDK model glue, and task-model registry projection; `launch.ts` is the fresh launch transaction, `launch-resume.ts` the resumed one, `launch-command.ts` the child command-line pieces both share, and `launch-operations.ts` the `PiLaunchOperations` seam with its surface-backed readiness and process-identity capture
