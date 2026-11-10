@@ -5,6 +5,7 @@
  * server, so nothing here starts or signals a real process. A binary that
  * cannot run is spawned for real, in a fresh process: no server can start.
  */
+import "../clean-host-env.ts";
 import { describe, it, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";

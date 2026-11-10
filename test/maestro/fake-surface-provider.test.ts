@@ -1,3 +1,4 @@
+import "../clean-host-env.ts";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

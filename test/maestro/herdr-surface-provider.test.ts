@@ -1,3 +1,4 @@
+import "../clean-host-env.ts";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { OPENED_PRIMARY_SNAPSHOT_TIMEOUT_MS } from "../../maestro/surfaces/herdr/herdr.ts";

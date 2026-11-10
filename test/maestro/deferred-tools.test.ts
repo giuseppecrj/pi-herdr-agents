@@ -1,7 +1,9 @@
+import "../clean-host-env.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { after, describe, it } from "node:test";
 import {
 	type AgentSession,
@@ -44,6 +46,11 @@ after(() => {
 	else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
 	rmSync(root, { recursive: true, force: true });
 });
+
+const PACKAGE_ROOT = fileURLToPath(new URL("../..", import.meta.url)).replace(
+	/\/$/,
+	"",
+);
 
 const ROUTINE: readonly string[] = [
 	"subagent",
@@ -271,7 +278,9 @@ describe("routine host tools are deferred to Pi's native tool_search", () => {
 			assert.ok(first.tools.includes("tool_search"));
 			assert.deepEqual(hostTools(first.tools), []);
 			assert.doesNotMatch(
-				first.payload,
+				// Pi's docs block names its install path, which can contain these
+				// words (for example a checkout under ~/.herdr/worktrees).
+				first.payload.replaceAll(PACKAGE_ROOT, "<package-root>"),
 				/subagent|worktree|coordinator|model catalog|faux\/m/i,
 				"the first request carries no host schema, guideline, or catalog",
 			);
