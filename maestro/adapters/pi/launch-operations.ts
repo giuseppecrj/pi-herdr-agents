@@ -1,3 +1,4 @@
+import { win32 } from "node:path";
 import type { PaneConfig } from "../../core/config/pane-config.ts";
 import type {
 	SurfaceProvider,
@@ -111,16 +112,103 @@ export function isExpectedPiProcess(
 		pid: number;
 		name?: string;
 		argv0?: string;
+		argv?: string[];
 		cwd?: string;
 	},
 	sessionFile: string,
 	cwd: string,
 	readEnvironment: ProcessEnvironmentReader = readLinuxProcessEnvironment,
+	platform: NodeJS.Platform = globalThis.process.platform,
 ): boolean {
+	if (platform === "win32")
+		return isExpectedWindowsPiProcess(process, sessionFile, cwd);
 	return (
 		(process.name === "pi" || process.argv0?.split("/").pop() === "pi") &&
 		process.cwd === cwd &&
 		readEnvironment(process.pid)?.get(PI_LAUNCH_SESSION_ENV) === sessionFile
+	);
+}
+
+/** A Windows path in one comparable form: separators, `.`/`..`, case, trailing `\`. */
+function comparableWindowsPath(path: string): string {
+	const normal = win32.normalize(path).toLowerCase();
+	return win32.parse(normal).root === normal
+		? normal
+		: normal.replace(/[\\/]+$/, "");
+}
+
+/** Runtimes that can be Pi itself on Windows: Node, Bun, or a compiled `pi`. */
+const WINDOWS_PI_RUNTIMES = new Set(["node", "bun", "pi"]);
+
+/** Node options whose value is the next argument, so it is not the script. */
+const NODE_OPTIONS_WITH_VALUE = new Set([
+	"-r",
+	"--require",
+	"--import",
+	"--loader",
+	"--experimental-loader",
+	"-e",
+	"--eval",
+	"-p",
+	"--print",
+]);
+
+/** The entrypoint basenames Pi's package `bin` and a source checkout use. */
+const PI_ENTRYPOINT = /^cli\.(?:[cm]?js|ts)$/i;
+
+/**
+ * Where `--session` sits in `argv` if this is Pi's own command line, else
+ * `-1`. Pi's own means the runtime is Node, Bun or a compiled `pi` (so not
+ * `sh`, `bash`, `cmd` or PowerShell running npm's shim), and for Node and Bun
+ * the script it runs is Pi's CLI entrypoint (so not the managed install's
+ * `pi-launcher.js`, which forwards the same arguments and then spawns Pi, and
+ * not an unrelated script). `--session` must follow the entrypoint, because
+ * only then is it an argument to Pi.
+ */
+function windowsPiSessionFlag(argv: string[]): number {
+	const runtime = win32
+		.basename(argv[0] ?? "")
+		.toLowerCase()
+		.replace(/\.exe$/, "");
+	if (!WINDOWS_PI_RUNTIMES.has(runtime)) return -1;
+	let entry = 1;
+	if (runtime === "pi") entry = 0;
+	else {
+		if (runtime === "bun" && argv[entry] === "run") entry++;
+		while (argv[entry]?.startsWith("-")) {
+			const option = argv[entry]!;
+			entry += NODE_OPTIONS_WITH_VALUE.has(option) ? 2 : 1;
+		}
+		const script = argv[entry];
+		if (script === undefined || !PI_ENTRYPOINT.test(win32.basename(script)))
+			return -1;
+	}
+	return argv.indexOf("--session", entry + 1);
+}
+
+/**
+ * On Windows there is no `/proc/<pid>/environ` to read, and no process-title
+ * rewrite either: the pane's process reports the command line it really was
+ * started with. So the launched session is proved by `--session <file>` in
+ * that argv, but only on a command line that is Pi's own (`windowsPiSessionFlag`).
+ * A launcher in front of Pi carries the same `--session` before Pi has started
+ * and must not mark the launch ready. Herdr names Pi's process `node.exe` (or
+ * `pi.exe`), so the reported name proves nothing and `argv[0]` is read instead;
+ * its cwd arrives with a trailing `\`.
+ */
+function isExpectedWindowsPiProcess(
+	process: { argv?: string[]; cwd?: string },
+	sessionFile: string,
+	cwd: string,
+): boolean {
+	const { argv, cwd: processCwd } = process;
+	if (!argv || processCwd === undefined) return false;
+	const flag = windowsPiSessionFlag(argv);
+	const value = flag === -1 ? undefined : argv[flag + 1];
+	return (
+		value !== undefined &&
+		comparableWindowsPath(value) === comparableWindowsPath(sessionFile) &&
+		comparableWindowsPath(processCwd) === comparableWindowsPath(cwd)
 	);
 }
 
