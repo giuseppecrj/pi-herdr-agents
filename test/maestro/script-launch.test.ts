@@ -10,7 +10,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, join, win32 } from "node:path";
 import { describe, it } from "node:test";
 import {
 	createPiScriptShellResolver,
@@ -442,12 +442,16 @@ async function withFakeHerdr<T>(
 	run: (herdr: FakeHerdr) => Promise<T>,
 ): Promise<T> {
 	const dir = mkdtempSync(join(tmpdir(), "script-launch-"));
-	const bin = join(dir, "herdr");
+	// Some tests stub process.platform to "win32" before this runs. The host
+	// then looks for herdr.exe on a ';'-split PATH, so the fake has to follow
+	// whatever platform the host will see, not the one the test runs on.
+	const windows = process.platform === "win32";
+	const bin = join(dir, windows ? "herdr.exe" : "herdr");
 	writeFileSync(bin, "#!/bin/sh\nexit 0\n");
 	chmodSync(bin, 0o755);
 	const saved = { env: process.env.HERDR_ENV, path: process.env.PATH };
 	process.env.HERDR_ENV = "1";
-	process.env.PATH = `${dir}${delimiter}${saved.path ?? ""}`;
+	process.env.PATH = `${dir}${windows ? win32.delimiter : delimiter}${saved.path ?? ""}`;
 	const herdr: FakeHerdr = { runCommands: [], processInfoCalls: 0 };
 	try {
 		return await __herdrTest__.withMockHerdrExec(

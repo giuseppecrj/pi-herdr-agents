@@ -1,6 +1,6 @@
 import { spawn, execFileSync } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { isString } from "../../core/config/type-guards.ts";
 import { Deadline } from "../../core/deadline.ts";
 import { gitEnvironment } from "../../core/git-environment.ts";
@@ -12,17 +12,67 @@ export const HERDR_RECONCILE_TIMEOUT_MS = 6_000;
 export const HERDR_COSMETIC_TIMEOUT_MS = 1_000;
 export const HERDR_OUTPUT_BYTES = 1024 * 1024;
 
-export function isHerdrAvailable(): boolean {
-	if (process.env.HERDR_ENV !== "1") return false;
-	return (process.env.PATH ?? "").split(delimiter).some((directory) => {
-		try {
-			const path = join(directory, "herdr");
-			accessSync(path, constants.X_OK);
-			return statSync(path).isFile();
-		} catch {
-			return false;
-		}
-	});
+/**
+ * Names `spawn("herdr")` can start. Without a shell, Windows resolves a bare
+ * command only to `.exe` or `.com`, never to a script or an extensionless file.
+ */
+function herdrExecutableNames(platform: NodeJS.Platform): string[] {
+	return platform === "win32" ? ["herdr.exe", "herdr.com"] : ["herdr"];
+}
+
+function pathValue(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string {
+	if (platform !== "win32") return env.PATH ?? "";
+	// Windows environment names are case-insensitive; `Path` is the usual spelling.
+	const key = Object.keys(env).find((name) => name.toUpperCase() === "PATH");
+	return (key && env[key]) || "";
+}
+
+/**
+ * Windows PATH entries, split the way the loader reads them: `;` separates
+ * entries except inside a double-quoted span, the quotes themselves are not
+ * part of the directory, and empty entries are dropped. Only double quotes are
+ * handled. A single quote is not treated as one, which is the safe side: it
+ * can hide an entry, never invent one.
+ */
+function windowsPathEntries(value: string): string[] {
+	const entries: string[] = [];
+	let current = "";
+	let quoted = false;
+	for (const char of value) {
+		if (char === '"') quoted = !quoted;
+		else if (char === win32.delimiter && !quoted) {
+			entries.push(current);
+			current = "";
+		} else current += char;
+	}
+	entries.push(current);
+	return entries.filter(Boolean);
+}
+
+export function isHerdrAvailable(
+	env: NodeJS.ProcessEnv = process.env,
+	platform: NodeJS.Platform = process.platform,
+): boolean {
+	if (env.HERDR_ENV !== "1") return false;
+	const names = herdrExecutableNames(platform);
+	const windows = platform === "win32";
+	// An empty POSIX entry means the current directory and spawn honours it, so
+	// only Windows drops empty entries (and reads the quotes it allows).
+	const value = pathValue(env, platform);
+	const directories = windows
+		? windowsPathEntries(value)
+		: value.split(posix.delimiter);
+	return directories.some((directory) =>
+		names.some((name) => {
+			try {
+				const path = join(directory, name);
+				accessSync(path, constants.X_OK);
+				return statSync(path).isFile();
+			} catch {
+				return false;
+			}
+		}),
+	);
 }
 
 export function parseHerdrJson(value: string) {
