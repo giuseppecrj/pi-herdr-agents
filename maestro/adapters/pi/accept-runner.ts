@@ -8,6 +8,7 @@ import {
 	type AcceptSpec,
 } from "../../core/accept.ts";
 import { trackAcceptCheck, type AcceptCheckOwner } from "./accept-groups.ts";
+import { signalProcessTree, type ProcessTreeOptions } from "./process-tree.ts";
 
 export interface AcceptCommandOptions {
 	run: string;
@@ -15,7 +16,7 @@ export interface AcceptCommandOptions {
 	timeoutMs: number;
 	/** Aborting stops the check like a timeout and reports `aborted`. */
 	signal?: AbortSignal;
-	/** SIGTERM to the process group, then SIGKILL after this grace. */
+	/** SIGTERM to the process group (POSIX), then SIGKILL after this grace. */
 	killGraceMs?: number;
 	env?: NodeJS.ProcessEnv;
 	/** Stops this check at its shutdown (`accept-groups.ts`). */
@@ -42,29 +43,56 @@ export function acceptCheckEnv(
 	);
 }
 
-function signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
+/** Whether the check's shell is still running; its pid is only ours until then. */
+function shellRunning(child: ChildProcess): boolean {
+	return child.exitCode === null && child.signalCode === null;
+}
+
+function signalGroup(
+	child: ChildProcess,
+	signal: NodeJS.Signals,
+	tree: ProcessTreeOptions,
+): void {
 	if (child.pid === undefined) return;
-	try {
-		// Detached: the shell leads its own process group.
-		process.kill(-child.pid, signal);
-	} catch {
-		try {
-			child.kill(signal);
-		} catch {
-			/* already gone */
-		}
-	}
+	// Detached: the shell leads its own process group (POSIX), or its tree is
+	// ended by `taskkill /T` (Windows, only while the shell lives: after it
+	// exits the pid may belong to someone else). Fall back to the shell alone.
+	signalProcessTree(
+		child.pid,
+		signal,
+		() => {
+			try {
+				child.kill(signal);
+			} catch {
+				/* already gone */
+			}
+		},
+		{ ...tree, alive: () => shellRunning(child) },
+	);
 }
 
 /**
  * `sh -c <run>` in `cwd`, asynchronously, with a timeout. Keeps the last 64 KiB
  * of combined output. A timeout or abort sends SIGTERM to the process group
  * and SIGKILL after the grace; whatever is left of the group is killed once
- * the shell exits. After the shell exits, the check waits briefly for
+ * the shell exits. Windows has no groups or signals, so `taskkill /T /F` ends
+ * the tree while the shell still runs (never after it exits: the pid may then
+ * belong to an unrelated process) and any stop there is immediate. After the shell exits, the check waits briefly for
  * inherited pipes to close; a timeout or abort then ends it at once. The
  * group is tracked under `owner` until it is killed (`accept-groups.ts`).
  */
-export const runAcceptCommand: AcceptRunner = (options) =>
+export function createAcceptRunner(
+	processTree: ProcessTreeOptions = {},
+): AcceptRunner {
+	return (options) => runCheck(options, processTree);
+}
+
+export const runAcceptCommand: AcceptRunner = createAcceptRunner();
+
+const runCheck = (
+	options: AcceptCommandOptions,
+	tree: ProcessTreeOptions,
+): Promise<AcceptCommandResult> =>
 	new Promise((resolve) => {
 		try {
 			if (!statSync(options.cwd).isDirectory())
@@ -84,6 +112,8 @@ export const runAcceptCommand: AcceptRunner = (options) =>
 				cwd: options.cwd,
 				env: options.env ?? acceptCheckEnv(),
 				detached: true,
+				// Detached on Windows opens a console window unless it is hidden.
+				windowsHide: true,
 				stdio: ["ignore", "pipe", "pipe"],
 			});
 		} catch (error) {
@@ -109,8 +139,10 @@ export const runAcceptCommand: AcceptRunner = (options) =>
 			stopped ??= reason;
 			// The shell is gone; its group may still hold the pipes: kill it now.
 			if (exit) return finish(fromExit());
-			if (first) signalGroup(child, "SIGTERM");
-			timers.push(setTimeout(() => signalGroup(child, "SIGKILL"), graceMs));
+			if (first) signalGroup(child, "SIGTERM", tree);
+			timers.push(
+				setTimeout(() => signalGroup(child, "SIGKILL", tree), graceMs),
+			);
 		};
 		let settle = () => {};
 		const untrack =
@@ -118,6 +150,7 @@ export const runAcceptCommand: AcceptRunner = (options) =>
 				? () => {}
 				: trackAcceptCheck({
 						pgid: child.pid,
+						processTree: { ...tree, alive: () => shellRunning(child) },
 						owner: options.owner,
 						terminate: (graceMs) => stop("aborted", graceMs),
 						finished: new Promise<void>((resolve) => {
@@ -131,7 +164,7 @@ export const runAcceptCommand: AcceptRunner = (options) =>
 			for (const timer of timers) clearTimeout(timer);
 			options.signal?.removeEventListener("abort", onAbort);
 			// A bounded check leaves nothing running behind it.
-			signalGroup(child, "SIGKILL");
+			signalGroup(child, "SIGKILL", tree);
 			untrack();
 			settle();
 			child.stdout?.destroy();

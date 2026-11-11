@@ -13,6 +13,7 @@
  * module (an extension reload loads another) shares one set and one hook.
  */
 import { ACCEPT_SHUTDOWN_GRACE_MS } from "../../core/accept.ts";
+import { killProcessTree, type ProcessTreeOptions } from "./process-tree.ts";
 
 /** Extra wait, after the shutdown grace, for runners to report their exit. */
 const SETTLE_MARGIN_MS = 250;
@@ -26,10 +27,16 @@ export interface AcceptCheckOwner {
 }
 
 export interface TrackedAcceptCheck {
-	/** The check shell's pid, which leads its process group. */
+	/** The check shell's pid, which leads its process group (POSIX) or tree (Windows). */
 	readonly pgid: number;
 	/** Who stops it at shutdown; undefined is stopped only at process exit. */
 	readonly owner: AcceptCheckOwner | undefined;
+	/**
+	 * How its tree is killed. Carries `alive` so the synchronous sweeps never
+	 * run `taskkill` against a shell that has exited (its pid may be reused);
+	 * the other fields are test seams for the Windows branch.
+	 */
+	readonly processTree?: ProcessTreeOptions;
 	/** Stop it like an abort: SIGTERM to the group, SIGKILL after `graceMs`. */
 	terminate(graceMs: number): void;
 	/** Settles once the runner has finished and killed the group. */
@@ -50,17 +57,13 @@ function registry(): Registry {
 	return (global[SLOT] ??= { checks: new Set(), exitHook: false });
 }
 
-function killGroup(pgid: number): void {
-	try {
-		process.kill(-pgid, "SIGKILL");
-	} catch {
-		/* already gone */
-	}
+function killGroup(check: TrackedAcceptCheck): void {
+	killProcessTree(check.pgid, "SIGKILL", check.processTree);
 }
 
 /** Synchronous, for the `exit` hook: SIGKILL every group still tracked. */
 export function killTrackedAcceptChecks(): void {
-	for (const check of registry().checks) killGroup(check.pgid);
+	for (const check of registry().checks) killGroup(check);
 }
 
 /** Track one running check; the returned function untracks it. */
@@ -97,5 +100,5 @@ export async function terminateAcceptChecks(
 		}),
 	]);
 	clearTimeout(timer);
-	for (const check of owned) if (checks.has(check)) killGroup(check.pgid);
+	for (const check of owned) if (checks.has(check)) killGroup(check);
 }
