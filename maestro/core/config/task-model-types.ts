@@ -1,3 +1,5 @@
+import type { ThinkingLevel } from "../types.ts";
+
 export const TASK_CATEGORIES = [
 	"coding",
 	"review",
@@ -16,6 +18,9 @@ export const TASK_CATEGORY_DESCRIPTIONS = {
 	docs: "Documentation workers",
 } satisfies Record<TaskCategory, string>;
 export type TaskPreferences = Partial<Record<TaskCategory, string[]>>;
+export type TaskThinkingPreferences = Partial<
+	Record<TaskCategory, ThinkingLevel>
+>;
 export interface TaskPreferencesMeta {
 	generatedAt: string;
 	method: RankingBasis["kind"];

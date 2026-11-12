@@ -420,7 +420,9 @@ version, which refreshes `released.json`.
 
 The same test file pins fields packs depend on. These are
 `subagent.systemPrompt` and the optional `expectedConfigRevision` and `basis`
-of `subagents_write_task_models` (`tool-schema.test.ts:78-90`). It also pins
+of `subagents_write_task_models` (`tool-schema.test.ts:78-90`). Its optional
+`tasksThinking` map adds category thinking without changing existing request shapes;
+models and thinking use the same atomic revision-checked write. It also pins
 `caller_ping` and `subagent_done` to the child scope (`tool-schema.test.ts:92-97`).
 
 ## Verdicts

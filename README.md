@@ -178,9 +178,9 @@ Set each child's exact authenticated `provider/model-id` and a supported thinkin
 - mid for ordinary implementation or review
 - frontier for architecture, security, hard diagnosis, or adversarial review
 
-Then set thinking within that model's range. Without `model`, a child uses agent frontmatter, then `models.agents.<name>`, then `models.default`, then the parent model. Without `thinking`, it uses the role's thinking level when set, otherwise the parent level.
+Then set thinking within that model's range. Without `model`, a child uses agent frontmatter, then `models.agents.<name>`, then `models.default`, then the parent model. Without `thinking`, a `task:<category>` launch uses `models.tasksThinking.<category>` when set, clamped to each candidate's supported range, then the role's thinking, then the parent level. Explicit thinking overrides these defaults and must be supported.
 
-A `model` value can also be an ordered fallback list, such as `provider/preferred, provider/fallback`, or a whole-value `task:<category>`. Task categories are `coding`, `review`, `recon`, `qa`, `architecture`, and `docs`. Their candidates come from `models.tasks` in `config.json`. Run `/subagents-init` to draft those preferences from your authenticated models, then `/reload`:
+A `model` value can also be an ordered fallback list, such as `provider/preferred, provider/fallback`, or a whole-value `task:<category>`. Task categories are `coding`, `review`, `recon`, `qa`, `architecture`, and `docs`. Their candidates come from `models.tasks` in `config.json`, with optional per-category thinking in `models.tasksThinking`. Run `/subagents-init` to draft those preferences from your authenticated models, then `/reload`:
 
 ```text
 /subagents-init Prefer capability over price for implementation; keep recon inexpensive
@@ -306,7 +306,7 @@ The durable configuration file is `$PI_CODING_AGENT_DIR/herdr-agents/config.json
 | --- | --- | --- |
 | `herdr.backend` | `"auto"` | Select native-context Core or legacy Herdr; `"core"` and `"legacy"` are explicit overrides. |
 | `status.enabled` | `true` | The live subagent widget. This section is required. |
-| `models.default`, `models.agents`, `models.tasks` | none | Model defaults and task-category candidates. |
+| `models.default`, `models.agents`, `models.tasks`, `models.tasksThinking` | none | Model defaults, task-category candidates and thinking. |
 | `persistent.maxAgents` | `3` | How many persistent specialists can stay open. |
 | `spawning.maxDepth` | `3` | Deepest child any launch may create (parent is depth `0`); deeper launches are refused. |
 | `supervision.forcePolling`, `supervision.hangWarningMinutes` | `false`, `15` | Supervision transport and no-progress advisories. |

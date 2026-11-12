@@ -35,13 +35,13 @@ export function buildSubagentRoutingGuidelines(
 		"Children do not push, merge, deploy, or launch further agents unless their task allows it. Review each result or worktree yourself (diff against the reported base, run the relevant tests). Integration and cleanup are yours.",
 		...(Object.keys(authenticatedTaskPreferences ?? {}).length > 0
 			? [
-					"For non-review work, prefer the configured task-category shortlists below. Use exact IDs for reviews when the authoring family is known.",
+					"For non-review work, prefer the configured task-category shortlists below. Omit thinking on task:<category> to use its configured thinking, clamped per candidate; explicit thinking overrides it, then role and parent thinking are fallbacks when no category thinking is set. Use exact IDs for reviews when the authoring family is known.",
 				]
 			: [
 					"For orchestrated subagent work, explicitly set both model and thinking for every child: first choose a fast, mid, or frontier provider-family tier matched to task complexity, then set thinking within that model's supported range.",
 					"Use fast tier for bounded mechanical work and recon, mid tier for ordinary implementation or review, and frontier tier for architecture, security, hard diagnosis, or adversarial review. Use minimal/low thinking for mechanical work, medium for ordinary work, and high+ for hard work.",
 				]),
-		"Omitting model and thinking still inherits the parent runtime, but this is a discouraged fallback for orchestrated children.",
+		"Without configured model or thinking defaults, omitted fields inherit the parent runtime; this is a discouraged fallback for orchestrated children.",
 		"Before launching a new group of subagents, choose a short task slug and name each new child <task>-<role>[-n], for example login-api or login-test2. Use only plan, research, ui, api, build, test, review, browser, security, perf, or merge as roles; leave existing names unchanged. " +
 			(options.launchRoster === false
 				? "Use each name in prompts, handoffs, and results."
@@ -55,7 +55,7 @@ const ThinkingLevelSchema = Type.Union(
 	THINKING_LEVELS.map((level) => Type.Literal(level)),
 	{
 		description:
-			"Pi thinking level, within the chosen model's supported range. Use low for mechanical work, medium for ordinary work, and high+ for hard work.",
+			"Pi thinking level, within the chosen model's supported range. Overrides task-category thinking (clamped per candidate), then role thinking, then parent. Use low for mechanical work, medium for ordinary work, and high+ for hard work.",
 	},
 );
 

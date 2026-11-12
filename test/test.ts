@@ -5268,6 +5268,7 @@ describe("model configuration", () => {
 			assert.deepEqual(result, {
 				configPath,
 				tasks: { coding: ["fake/worker"] },
+				tasksThinking: {},
 				tasksMeta,
 				missingCategories: ["review", "recon", "qa", "architecture", "docs"],
 				configRevision: readConfigRevision(configPath),
@@ -11113,7 +11114,11 @@ describe("commands", () => {
 			const model = { provider: "fake", id: "worker", reasoning: false };
 			const result = await writer.execute(
 				"init-write",
-				{ tasks: { coding: [" fake/worker "] }, tasksMeta },
+				{
+					tasks: { coding: [" fake/worker "] },
+					tasksThinking: { coding: "high" },
+					tasksMeta,
+				},
 				undefined,
 				undefined,
 				{
@@ -11128,6 +11133,7 @@ describe("commands", () => {
 			assert.deepEqual(result.details, {
 				configPath,
 				tasks: { coding: ["fake/worker"] },
+				tasksThinking: { coding: "high" },
 				tasksMeta,
 				missingCategories: ["review", "recon", "qa", "architecture", "docs"],
 				configRevision: readConfigRevision(configPath),
@@ -11144,6 +11150,7 @@ describe("commands", () => {
 					default: "fake/default",
 					agents: { scout: "fake/scout" },
 					tasks: { coding: ["fake/worker"] },
+					tasksThinking: { coding: "high" },
 					tasksMeta,
 				},
 			});
@@ -11852,7 +11859,7 @@ describe("tool registration", () => {
 		);
 		assert.match(
 			subagent.promptGuidelines.join("\n"),
-			/Omitting model and thinking still inherits the parent runtime, but this is a discouraged fallback/,
+			/Without configured model or thinking defaults, omitted fields inherit the parent runtime; this is a discouraged fallback/,
 		);
 		assert.match(subagent.promptGuidelines.join("\n"), /login-test2/);
 	});

@@ -20,7 +20,7 @@ This page is the detailed reference for the tools, commands, and run lifecycle o
 | `subagent_send` | parent, child | Deliver one follow-up task to an idle persistent specialist. |
 | `subagent_stop` | parent, child | Stop a persistent specialist after its active task finishes. |
 | `subagents_list` | parent, child | List subagent role definitions, live persistent specialists, and the supervision mode. |
-| `subagents_write_task_models` | parent only | Validate and atomically replace models.tasks and models.tasksMeta in the durable Pi agent config, preserving unrelated settings. |
+| `subagents_write_task_models` | parent only | Validate and atomically replace models.tasks, models.tasksThinking and models.tasksMeta in the durable Pi agent config, preserving unrelated settings. |
 | `worktree_list` | parent only | List managed worktrees, including orphans from other sessions. |
 | `worktree_remove` | parent only | Remove one managed worktree by exact path, branch, or workspace ID, only when the user asks. |
 <!-- generated:tools:end -->
@@ -193,7 +193,7 @@ subagent({
 | `agent` | string | no | Role definition to load defaults from (see subagents_list). Omit for a bare agent. |
 | `systemPrompt` | string | no | Role/system-prompt text for a bare spawn. Named agents keep their definition body. |
 | `model` | string | no | Exact authenticated provider/model-id, a comma-separated fallback list, or task:\<category> as the whole value. Worktree launches take one model: a task: category uses its first candidate, and fallback lists are rejected. For ordinary review, prefer a different authenticated model family. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback. |
-| `thinking` | `"off"` \| `"minimal"` \| `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"` | no | Pi thinking level, within the chosen model's supported range. Use low for mechanical work, medium for ordinary work, and high+ for hard work. |
+| `thinking` | `"off"` \| `"minimal"` \| `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"` | no | Pi thinking level, within the chosen model's supported range. Overrides task-category thinking (clamped per candidate), then role thinking, then parent. Use low for mechanical work, medium for ordinary work, and high+ for hard work. |
 | `skills` | string | no | Comma-separated skills (overrides agent default) |
 | `tools` | string | no | Comma-separated tools (overrides agent default) |
 | `cwd` | string | no | Working directory. With `worktree`, the source repository; the child then starts at the new worktree root. |
@@ -215,7 +215,7 @@ Defaults and behavior the schema does not carry:
 - `persistent` defaults to `false`.
 - `interactive` defaults to the agent's `interactive` frontmatter, otherwise the inverse of `auto-exit`.
 - `model` resolves tool argument → agent frontmatter → per-agent config → global config → parent. `task:<category>` routing is tool-only, and worktrees use its first authenticated candidate.
-- `thinking` defaults to the role's thinking level when set, otherwise the parent's.
+- `thinking` resolves explicit argument → `models.tasksThinking.<category>` for `task:<category>` → role → parent. Category and parent defaults clamp per candidate; explicit and role values must be supported.
 - `cwd` is the source repository when `worktree` is set (see [Role Folders](roles.md#role-folders)); `worktree.base` defaults to committed `HEAD`.
 - `fork`: `true` forces fork, `false` forces standalone. Omit to inherit the agent `session-mode` frontmatter.
 - `accept` defaults: `maxRetries` 1 (at most 5), `timeoutSec` 600 (at most 3,600), `paths` none. It is refused before launch for a persistent or non-auto-exit child. See [Accept checks](#accept-checks).
@@ -594,6 +594,13 @@ Registered in: parent sessions.
 | `tasks.qa` | string[] | no | Software and test runners |
 | `tasks.architecture` | string[] | no | Planning and diagnosis |
 | `tasks.docs` | string[] | no | Documentation workers |
+| `tasksThinking` | object | no | Category thinking, clamped per fallback candidate. Replaces the map when supplied ({} clears it); omitted preserves thinking for retained categories. |
+| `tasksThinking.coding` | `"off"` \| `"minimal"` \| `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"` | no | — |
+| `tasksThinking.review` | `"off"` \| `"minimal"` \| `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"` | no | — |
+| `tasksThinking.recon` | `"off"` \| `"minimal"` \| `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"` | no | — |
+| `tasksThinking.qa` | `"off"` \| `"minimal"` \| `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"` | no | — |
+| `tasksThinking.architecture` | `"off"` \| `"minimal"` \| `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"` | no | — |
+| `tasksThinking.docs` | `"off"` \| `"minimal"` \| `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"` | no | — |
 | `tasksMeta` | object | yes | — |
 | `tasksMeta.generatedAt` | string | yes | — |
 | `tasksMeta.method` | `"research"` \| `"registry-only"` | yes | — |

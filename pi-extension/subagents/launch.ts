@@ -179,6 +179,7 @@ export function createLaunchPlanner({
 			sessionModelRegistry(ctx),
 			modelConfig.tasks,
 			!!params.worktree,
+			modelConfig.tasksThinking,
 		);
 		if (params.worktree && plans.length > 1) {
 			throw new Error(

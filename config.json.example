@@ -6,7 +6,8 @@
     "enabled": true
   },
   "models": {
-    "agents": {}
+    "agents": {},
+    "tasksThinking": {}
   },
   "persistent": {
     "maxAgents": 3

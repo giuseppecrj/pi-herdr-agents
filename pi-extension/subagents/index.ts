@@ -434,8 +434,19 @@ export default function subagentsExtension(
 			modelConfig.tasks,
 		);
 		runtime.modelCatalog = scopedModels
-			? buildScopedModelCatalog(registry, scopedModels, modelConfig.tasks)
-			: buildAuthenticatedModelCatalog(registry, 24, modelConfig.tasks);
+			? buildScopedModelCatalog(
+					registry,
+					scopedModels,
+					modelConfig.tasks,
+					24,
+					modelConfig.tasksThinking,
+				)
+			: buildAuthenticatedModelCatalog(
+					registry,
+					24,
+					modelConfig.tasks,
+					modelConfig.tasksThinking,
+				);
 		const refreshedGuidelines = buildSubagentRoutingGuidelines(
 			runtime.modelCatalog,
 			authenticatedTaskPreferences,

@@ -147,11 +147,10 @@ describe("task-model init composition", () => {
 		]);
 		assert.doesNotMatch(prompt, /secret-/);
 		// Golden SHA-256 of the accepted direct-writer prompt for these facts.
-		// Recaptured when init gained configRevision, basis guidance and
-		// replaceable destination instructions.
+		// Recaptured when init gained category thinking and its precedence guidance.
 		assert.equal(
 			createHash("sha256").update(prompt).digest("hex"),
-			"00b09cd79ff41b04f17ff5106c89a71bb1eb4e7f1dd8b379228abadeef1971ea",
+			"ed6e19646c8e3c71b333a087318dc3cbd9b874897fcfe558084426d516312c29",
 		);
 		const unknown = initHost(() => ({
 			projectActiveRegistry: (project) =>
@@ -160,6 +159,20 @@ describe("task-model init composition", () => {
 		const json = JSON.parse(unknown.match(/```json\n([\s\S]*?)\n```/)![1]);
 		assert.equal(Object.hasOwn(json.models[0], "extensionRegistered"), false);
 		assert.deepEqual(json.models[0].auth, { configured: true });
+	});
+
+	it("includes saved thinking in the brief and asks for a thinking draft", () => {
+		const { briefs, prompts } = initHost(() => ({
+			readConfig: () => ({
+				config: { agents: {}, tasksThinking: { coding: "high" } },
+				revision: REVISION,
+			}),
+		}));
+		assert.deepEqual(briefs[0].current.tasksThinking, { coding: "high" });
+		const json = JSON.parse(prompts[0].match(/```json\n([\s\S]*?)\n```/)![1]);
+		assert.deepEqual(json.current.tasksThinking, { coding: "high" });
+		assert.match(prompts[0], /Draft a tasksThinking map/);
+		assert.match(prompts[0], /reviewed draft as tasks and tasksThinking/);
 	});
 
 	it("reports an empty registry or an invalid config without asking anyone or prompting", () => {

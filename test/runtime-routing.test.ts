@@ -943,8 +943,14 @@ describe("authenticated model catalog", () => {
 			[model("zai", "glm-5.3"), model("zai", "glm-5.3-flash")],
 			tasks,
 		);
-		assert.match(catalog, /- coding: zai\/glm-5.3$/m);
-		assert.match(catalog, /- review: zai\/glm-5.3-flash$/m);
+		assert.match(
+			catalog,
+			/- coding: zai\/glm-5.3; thinking: role, then parent$/m,
+		);
+		assert.match(
+			catalog,
+			/- review: zai\/glm-5.3-flash; thinking: role, then parent$/m,
+		);
 		assert.doesNotMatch(catalog, /- qa:/);
 		assert.doesNotMatch(catalog, /other\/fast/);
 	});

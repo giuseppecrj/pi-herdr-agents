@@ -303,7 +303,8 @@ Ignored files are not captured. Commit failure restores the original index.
 _Avoid_: Implicit commit, stash, discard
 
 **Task-category model preference**:
-An ordered authenticated model shortlist in `models.tasks` for `coding`,
+An ordered authenticated model shortlist in `models.tasks`, with optional Pi
+thinking defaults per category in `models.tasksThinking`, for `coding`,
 `review`, `recon`, `qa`, `architecture`, or `docs`. Recon maps to scouts,
 architecture to planning and diagnosis, coding to workers, review to reviewers,
 QA to software and test runners, and docs to documentation workers. Categories
@@ -313,7 +314,9 @@ choices, with source-based research when available. A single loaded extension
 that offers on the task-model init approval event owns approval and the write
 instead of the host writer. A dynamic provider awaiting
 its initial catalog refresh might be absent. `task:<category>` is a subagent
-model selector, not a command or parent model change. Ordered authenticated
+model selector, not a command or parent model change. Thinking resolves explicit
+argument, category (clamped per candidate), role, then parent (clamped).
+Ordered authenticated
 candidate plans resolve before launch; ordinary nonpersistent runs can retry
 after launch failure or a running child's provider/agent error, not a completed
 negative task result. Persistent specialists do not advance after a running-child

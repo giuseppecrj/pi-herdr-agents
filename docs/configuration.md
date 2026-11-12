@@ -110,6 +110,14 @@ exact IDs from your authenticated model catalog:
       "architecture": ["your-provider/your-architecture-model"],
       "docs": ["your-provider/your-docs-model"]
     },
+    "tasksThinking": {
+      "coding": "high",
+      "review": "high",
+      "recon": "low",
+      "qa": "medium",
+      "architecture": "xhigh",
+      "docs": "medium"
+    },
     "tasksMeta": {
       "generatedAt": "2026-09-17T00:00:00Z",
       "method": "research"
@@ -117,6 +125,16 @@ exact IDs from your authenticated model catalog:
   }
 }
 ```
+
+`models.tasksThinking` is an optional map from the same six categories to Pi
+thinking levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`.
+The name parallels `models.tasks`; it is separate from the ordered candidate lists
+so older configs and callers remain valid. Absent entries use role thinking,
+then parent thinking. For `task:<category>` launches, precedence is explicit
+`thinking` → category thinking → role thinking → parent thinking. Category and
+parent thinking clamp to each candidate's supported range; explicit and role
+thinking must be supported and otherwise fail. Plans record category thinking
+as source `task`, with a `task-clamp` adjustment when changed.
 
 `models.tasks` candidates are ordered exact authenticated IDs. Use
 `task:<category>` only in the `subagent` tool's `model` argument; it is not
@@ -174,7 +192,8 @@ revision of the exact config bytes that supplied the saved preferences. Init
 does not start while a turn runs or messages are queued, and an empty registry
 ends with a notice instead of a prompt. Neither case writes anything.
 
-The draft considers current saved task, default, and per-agent preferences.
+The draft includes category thinking and considers current saved task, thinking,
+default, and per-agent preferences.
 Optional command arguments set ranking preferences. Otherwise it favors
 capability for substantive work and efficiency for bounded reconnaissance and
 test execution. Categories describe work, not complexity tiers:
@@ -220,11 +239,16 @@ restored by a reload or resume. A failed write leaves it active for a retry.
 An init that does not start undoes only its own activation. Another extension's
 approval flow never activates the writer.
 
-The writer validates and atomically replaces `models.tasks` and `tasksMeta`,
+The writer validates and atomically replaces `models.tasks`, category thinking,
+and `tasksMeta`,
 preserving unrelated settings. Its tool schema accepts partial nonempty
 categories (omitted categories are removed), rejects empty `tasks: {}` input,
 and rejects exact duplicate refs within a category after trimming;
-IDs remain case-sensitive. Its result includes normalized saved `tasks`,
+IDs remain case-sensitive. Optional `tasksThinking` replaces the thinking map
+(`{}` clears it). Omitting it preserves thinking for retained categories; removed
+categories lose their thinking. Thinking entries without a corresponding submitted
+task category are not saved. Models and thinking share one atomic, revision-checked
+write. Its result includes normalized saved `tasks`, optional `tasksThinking`,
 `tasksMeta`, `configPath`, `missingCategories`, and `configRevision`. Init requests all six categories
 and a before/after table based on that saved result, not the unsaved draft, and
 must explain missing categories or changed choices.

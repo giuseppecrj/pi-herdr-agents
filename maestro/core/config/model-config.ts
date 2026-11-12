@@ -13,6 +13,7 @@ import {
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { isPlainObject, isString } from "./type-guards.ts";
+import { isThinkingLevel, THINKING_LEVELS } from "../routing.ts";
 
 import {
 	type RankingBasis,
@@ -21,12 +22,14 @@ import {
 	type TaskCategory,
 	type TaskPreferences,
 	type TaskPreferencesMeta,
+	type TaskThinkingPreferences,
 } from "./task-model-types.ts";
 
 export interface ModelConfig {
 	default?: string;
 	agents: Record<string, string>;
 	tasks?: TaskPreferences;
+	tasksThinking?: TaskThinkingPreferences;
 	tasksMeta?: TaskPreferencesMeta;
 }
 
@@ -95,6 +98,32 @@ function parseTasks(value: any, source: string): TaskPreferences | undefined {
 	return tasks;
 }
 
+function parseTasksThinking(
+	value: any,
+	source: string,
+): TaskThinkingPreferences | undefined {
+	if (value === undefined) return undefined;
+	if (!isPlainObject(value))
+		invalidModelConfig(source, "models.tasksThinking must be an object");
+	const thinking: TaskThinkingPreferences = {};
+	for (const [category, level] of Object.entries(value)) {
+		// SAFETY: category membership is checked before indexing the typed map.
+		if (!TASK_CATEGORIES.includes(category as TaskCategory))
+			invalidModelConfig(
+				source,
+				`models.tasksThinking.${category} is unsupported; supported categories: ${TASK_CATEGORIES.join(", ")}`,
+			);
+		if (!isString(level) || !isThinkingLevel(level))
+			invalidModelConfig(
+				source,
+				`models.tasksThinking.${category} must be one of: ${THINKING_LEVELS.join(", ")}`,
+			);
+		// SAFETY: the fixed category check above rejects unknown keys.
+		thinking[category as TaskCategory] = level;
+	}
+	return thinking;
+}
+
 function parseTasksMeta(
 	value: any,
 	source: string,
@@ -142,7 +171,13 @@ export function parseModelConfig(
 	if (models == null) return { agents: {} };
 	if (!isPlainObject(models))
 		invalidModelConfig(source, "models must be an object");
-	const allowedKeys = new Set(["default", "agents", "tasks", "tasksMeta"]);
+	const allowedKeys = new Set([
+		"default",
+		"agents",
+		"tasks",
+		"tasksThinking",
+		"tasksMeta",
+	]);
 	const unsupportedKeys = Object.keys(models).filter(
 		(key) => !allowedKeys.has(key),
 	);
@@ -181,10 +216,12 @@ export function parseModelConfig(
 		}
 	}
 	const tasks = parseTasks(models.tasks, source);
+	const tasksThinking = parseTasksThinking(models.tasksThinking, source);
 	const tasksMeta = parseTasksMeta(models.tasksMeta, source);
 	const config: ModelConfig = { agents };
 	if (defaultModel) config.default = defaultModel;
 	if (tasks) config.tasks = tasks;
+	if (tasksThinking) config.tasksThinking = tasksThinking;
 	if (tasksMeta) config.tasksMeta = tasksMeta;
 	return config;
 }
@@ -296,6 +333,7 @@ export function parseRankingBasis(
 export interface SavedTaskModelConfig {
 	configPath: string;
 	tasks: TaskPreferences;
+	tasksThinking?: TaskThinkingPreferences;
 	tasksMeta: TaskPreferencesMeta | undefined;
 	missingCategories: TaskCategory[];
 	/** Revision of the exact bytes this call published. */
@@ -339,6 +377,8 @@ export class TaskModelConfigWriteError extends Error {
 }
 
 export interface WriteTaskModelConfigOptions {
+	/** Replaces category thinking when supplied; omitted preserves it for retained categories. */
+	tasksThinking?: TaskThinkingPreferences;
 	/**
 	 * Exact-byte revision the caller proposed against. Omitted keeps the
 	 * unconditional write; `missing` requires the file to be absent.
@@ -351,7 +391,7 @@ export interface WriteTaskModelConfigOptions {
 }
 
 /**
- * Atomically replace only models.tasks and models.tasksMeta in the durable user config.
+ * Atomically replace models.tasks, category thinking and models.tasksMeta in the durable user config.
  *
  * Every call holds an exclusive sibling lock file while it reads one snapshot,
  * checks the optional revision precondition, and renames a private temporary file
@@ -379,7 +419,7 @@ export function writeTaskModelConfig(
 		writeFileSync,
 	};
 	const candidateConfig = parseModelConfig(
-		{ models: { tasks, tasksMeta } },
+		{ models: { tasks, tasksThinking: options.tasksThinking, tasksMeta } },
 		configPath,
 	);
 	for (const candidates of Object.values(candidateConfig.tasks ?? {})) {
@@ -428,6 +468,20 @@ export function writeTaskModelConfig(
 				`Invalid JSON in subagent config ${configPath}: root must be an object`,
 			);
 		const models = isPlainObject(parsed.models) ? { ...parsed.models } : {};
+		// Legacy callers preserve thinking for retained categories. Removed task
+		// categories also lose their thinking; an explicit map replaces it entirely.
+		const tasksThinking =
+			candidateConfig.tasksThinking ??
+			parseTasksThinking(models.tasksThinking, configPath);
+		const retainedThinking = tasksThinking
+			? Object.fromEntries(
+					Object.entries(tasksThinking).filter(([category]) =>
+						Object.hasOwn(candidateConfig.tasks ?? {}, category),
+					),
+				)
+			: undefined;
+		if (retainedThinking) models.tasksThinking = retainedThinking;
+		else delete models.tasksThinking;
 		models.tasks = candidateConfig.tasks;
 		models.tasksMeta = candidateConfig.tasksMeta;
 		const output = JSON.stringify({ ...parsed, models }, null, 2) + "\n";
@@ -443,7 +497,7 @@ export function writeTaskModelConfig(
 		} finally {
 			if (!published) rmSync(temporary, { force: true });
 		}
-		return {
+		const saved: SavedTaskModelConfig = {
 			configPath,
 			tasks: candidateConfig.tasks ?? {},
 			tasksMeta: candidateConfig.tasksMeta,
@@ -452,6 +506,11 @@ export function writeTaskModelConfig(
 			),
 			configRevision: computeConfigRevision(Buffer.from(output, "utf8")),
 		};
+		if (retainedThinking) {
+			// SAFETY: keys and levels came from parseTasksThinking above.
+			saved.tasksThinking = retainedThinking as TaskThinkingPreferences;
+		}
+		return saved;
 	});
 }
 

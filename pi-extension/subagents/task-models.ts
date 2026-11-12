@@ -11,13 +11,17 @@ import {
 	startTaskModelInit,
 	type TaskModelInitOutcome,
 } from "../../maestro/runtime/index.ts";
-import { parseExactModelRef } from "../../maestro/core/routing.ts";
+import {
+	THINKING_LEVELS,
+	parseExactModelRef,
+} from "../../maestro/core/routing.ts";
 import { wrapPiModelRegistry } from "./model-registry.ts";
 import {
 	MISSING_CONFIG_REVISION,
 	parseRankingBasis,
 	readModelConfigSnapshot,
 	writeTaskModelConfig,
+	type WriteTaskModelConfigOptions,
 } from "../../maestro/core/config/model-config.ts";
 import {
 	DIRECT_WRITER_TOOL,
@@ -31,6 +35,7 @@ import {
 	TASK_CATEGORY_DESCRIPTIONS,
 	type TaskPreferences,
 	type TaskPreferencesMeta,
+	type TaskThinkingPreferences,
 } from "../../maestro/core/config/task-model-types.ts";
 import {
 	getSubagentsConfigDir,
@@ -98,7 +103,7 @@ export function registerTaskModelTool(
 			name: DIRECT_WRITER_TOOL,
 			label: "Write task model preferences",
 			defaultActive: false,
-			description: `Validate and atomically replace models.tasks and models.tasksMeta in the durable Pi agent config, preserving unrelated settings. Supported categories: ${TASK_CATEGORIES.join(", ")}. Partial nonempty categories are accepted; omitted categories are removed. Rejects duplicate exact refs within a category. Review the active authenticated registry and existing preferences first. Optional expectedConfigRevision makes the write conditional: it fails without replacing configuration when the config file no longer matches the revision the proposal was read from. Optional basis records what the ranking rests on; its kind must equal tasksMeta.method, and it is returned but not saved. Cooperating writes are serialized and fail on contention rather than waiting. Returns normalized saved preferences, missing categories, the configRevision of the written file, and any basis; reload required.`,
+			description: `Validate and atomically replace models.tasks, models.tasksThinking and models.tasksMeta in the durable Pi agent config, preserving unrelated settings. Supported categories: ${TASK_CATEGORIES.join(", ")}. Partial nonempty categories are accepted; omitted categories are removed. Rejects duplicate exact refs within a category. Review the active authenticated registry and existing preferences first. Optional expectedConfigRevision makes the write conditional: it fails without replacing configuration when the config file no longer matches the revision the proposal was read from. Optional basis records what the ranking rests on; its kind must equal tasksMeta.method, and it is returned but not saved. Cooperating writes are serialized and fail on contention rather than waiting. Returns normalized saved preferences, missing categories, the configRevision of the written file, and any basis; reload required.`,
 			parameters: Type.Object({
 				tasks: Type.Object(
 					Object.fromEntries(
@@ -113,6 +118,25 @@ export function registerTaskModelTool(
 						]),
 					),
 					{ additionalProperties: false, minProperties: 1 },
+				),
+				tasksThinking: Type.Optional(
+					Type.Object(
+						Object.fromEntries(
+							TASK_CATEGORIES.map((category) => [
+								category,
+								Type.Optional(
+									Type.Union(
+										THINKING_LEVELS.map((level) => Type.Literal(level)),
+									),
+								),
+							]),
+						),
+						{
+							additionalProperties: false,
+							description:
+								"Category thinking, clamped per fallback candidate. Replaces the map when supplied ({} clears it); omitted preserves thinking for retained categories.",
+						},
+					),
 				),
 				tasksMeta: Type.Object({
 					generatedAt: Type.String(),
@@ -174,6 +198,14 @@ export function registerTaskModelTool(
 				const basis = Object.hasOwn(params, "basis")
 					? parseRankingBasis(params.basis, tasksMeta.method)
 					: undefined;
+				const options: WriteTaskModelConfigOptions = {
+					// SAFETY: the write seam validates the map's category keys and levels.
+					tasksThinking: params.tasksThinking as
+						| TaskThinkingPreferences
+						| undefined,
+				};
+				if (Object.hasOwn(params, "expectedConfigRevision"))
+					options.expectedConfigRevision = params.expectedConfigRevision;
 				const saved = writeTaskModelConfig(
 					getSubagentsConfigPath(),
 					getSubagentsConfigExamplePath(),
@@ -186,9 +218,7 @@ export function registerTaskModelTool(
 						return !!model && registry.hasConfiguredAuth(model);
 					},
 					// Present-but-invalid values (including null or "") reach the seam and fail closed.
-					Object.hasOwn(params, "expectedConfigRevision")
-						? { expectedConfigRevision: params.expectedConfigRevision }
-						: {},
+					options,
 				);
 				releaseWriterAfterInit(pi);
 				const details = basis ? { ...saved, basis } : saved;

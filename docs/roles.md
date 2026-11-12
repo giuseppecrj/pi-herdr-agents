@@ -41,8 +41,9 @@ Role packs own their roles' prerequisites, such as a required skill, and must
 document them. This package does not install role packs or prerequisites.
 
 Roles use model defaults from `config.json` when configured; otherwise
-they inherit the parent model. Thinking defaults still come from agent
-frontmatter or the parent level. This resolution chain remains available as a
+they inherit the parent model. For `task:<category>` calls, thinking defaults first come from
+`models.tasksThinking.<category>` (clamped per candidate), then agent
+frontmatter, then the parent level. This resolution chain remains available as a
 fallback, but orchestrators should explicitly set each child's exact
 authenticated `provider/model-id` and supported thinking level. Select the
 model tier first: fast for bounded mechanical work and recon, mid for ordinary

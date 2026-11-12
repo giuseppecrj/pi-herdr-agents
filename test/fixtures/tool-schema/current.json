@@ -44,7 +44,7 @@
 						"type": "string"
 					},
 					"thinking": {
-						"description": "Pi thinking level, within the chosen model's supported range. Use low for mechanical work, medium for ordinary work, and high+ for hard work.",
+						"description": "Pi thinking level, within the chosen model's supported range. Overrides task-category thinking (clamped per candidate), then role thinking, then parent. Use low for mechanical work, medium for ordinary work, and high+ for hard work.",
 						"anyOf": [
 							{ "const": "off", "type": "string" },
 							{ "const": "minimal", "type": "string" },
@@ -248,7 +248,7 @@
 		{
 			"name": "subagents_write_task_models",
 			"scopes": ["parent"],
-			"description": "Validate and atomically replace models.tasks and models.tasksMeta in the durable Pi agent config, preserving unrelated settings. Supported categories: coding, review, recon, qa, architecture, docs. Partial nonempty categories are accepted; omitted categories are removed. Rejects duplicate exact refs within a category. Review the active authenticated registry and existing preferences first. Optional expectedConfigRevision makes the write conditional: it fails without replacing configuration when the config file no longer matches the revision the proposal was read from. Optional basis records what the ranking rests on; its kind must equal tasksMeta.method, and it is returned but not saved. Cooperating writes are serialized and fail on contention rather than waiting. Returns normalized saved preferences, missing categories, the configRevision of the written file, and any basis; reload required.",
+			"description": "Validate and atomically replace models.tasks, models.tasksThinking and models.tasksMeta in the durable Pi agent config, preserving unrelated settings. Supported categories: coding, review, recon, qa, architecture, docs. Partial nonempty categories are accepted; omitted categories are removed. Rejects duplicate exact refs within a category. Review the active authenticated registry and existing preferences first. Optional expectedConfigRevision makes the write conditional: it fails without replacing configuration when the config file no longer matches the revision the proposal was read from. Optional basis records what the ranking rests on; its kind must equal tasksMeta.method, and it is returned but not saved. Cooperating writes are serialized and fail on contention rather than waiting. Returns normalized saved preferences, missing categories, the configRevision of the written file, and any basis; reload required.",
 			"parameters": {
 				"type": "object",
 				"required": ["tasks", "tasksMeta"],
@@ -293,6 +293,79 @@
 								"description": "Documentation workers",
 								"type": "array",
 								"items": { "minLength": 1, "type": "string" }
+							}
+						}
+					},
+					"tasksThinking": {
+						"additionalProperties": false,
+						"description": "Category thinking, clamped per fallback candidate. Replaces the map when supplied ({} clears it); omitted preserves thinking for retained categories.",
+						"type": "object",
+						"properties": {
+							"coding": {
+								"anyOf": [
+									{ "const": "off", "type": "string" },
+									{ "const": "minimal", "type": "string" },
+									{ "const": "low", "type": "string" },
+									{ "const": "medium", "type": "string" },
+									{ "const": "high", "type": "string" },
+									{ "const": "xhigh", "type": "string" },
+									{ "const": "max", "type": "string" }
+								]
+							},
+							"review": {
+								"anyOf": [
+									{ "const": "off", "type": "string" },
+									{ "const": "minimal", "type": "string" },
+									{ "const": "low", "type": "string" },
+									{ "const": "medium", "type": "string" },
+									{ "const": "high", "type": "string" },
+									{ "const": "xhigh", "type": "string" },
+									{ "const": "max", "type": "string" }
+								]
+							},
+							"recon": {
+								"anyOf": [
+									{ "const": "off", "type": "string" },
+									{ "const": "minimal", "type": "string" },
+									{ "const": "low", "type": "string" },
+									{ "const": "medium", "type": "string" },
+									{ "const": "high", "type": "string" },
+									{ "const": "xhigh", "type": "string" },
+									{ "const": "max", "type": "string" }
+								]
+							},
+							"qa": {
+								"anyOf": [
+									{ "const": "off", "type": "string" },
+									{ "const": "minimal", "type": "string" },
+									{ "const": "low", "type": "string" },
+									{ "const": "medium", "type": "string" },
+									{ "const": "high", "type": "string" },
+									{ "const": "xhigh", "type": "string" },
+									{ "const": "max", "type": "string" }
+								]
+							},
+							"architecture": {
+								"anyOf": [
+									{ "const": "off", "type": "string" },
+									{ "const": "minimal", "type": "string" },
+									{ "const": "low", "type": "string" },
+									{ "const": "medium", "type": "string" },
+									{ "const": "high", "type": "string" },
+									{ "const": "xhigh", "type": "string" },
+									{ "const": "max", "type": "string" }
+								]
+							},
+							"docs": {
+								"anyOf": [
+									{ "const": "off", "type": "string" },
+									{ "const": "minimal", "type": "string" },
+									{ "const": "low", "type": "string" },
+									{ "const": "medium", "type": "string" },
+									{ "const": "high", "type": "string" },
+									{ "const": "xhigh", "type": "string" },
+									{ "const": "max", "type": "string" }
+								]
 							}
 						}
 					},
