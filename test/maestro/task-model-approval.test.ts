@@ -1,4 +1,4 @@
-import "../clean-host-env.ts";
+import "../isolated-agent-dir.ts";
 import assert from "node:assert/strict";
 import {
 	existsSync,
