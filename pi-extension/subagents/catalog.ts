@@ -35,7 +35,7 @@ export function buildSubagentRoutingGuidelines(
 		"Children do not push, merge, deploy, or launch further agents unless their task allows it. Review each result or worktree yourself (diff against the reported base, run the relevant tests). Integration and cleanup are yours.",
 		...(Object.keys(authenticatedTaskPreferences ?? {}).length > 0
 			? [
-					"For non-review work, prefer the configured task-category shortlists below. Omit thinking on task:<category> to use its configured thinking, clamped per candidate; explicit thinking overrides it, then role and parent thinking are fallbacks when no category thinking is set. Use exact IDs for reviews when the authoring family is known.",
+					"For non-review work, prefer the configured task-category shortlists below. Omit thinking on task:<category> only when that category has configured thinking, clamped per candidate; explicit thinking overrides it, then role and parent thinking are fallbacks when no category thinking is set. Use exact IDs for reviews when the authoring family is known.",
 				]
 			: [
 					"For orchestrated subagent work, explicitly set both model and thinking for every child: first choose a fast, mid, or frontier provider-family tier matched to task complexity, then set thinking within that model's supported range.",

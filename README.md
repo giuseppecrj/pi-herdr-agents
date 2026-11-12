@@ -186,7 +186,7 @@ A `model` value can also be an ordered fallback list, such as `provider/preferre
 /subagents-init Prefer capability over price for implementation; keep recon inexpensive
 ```
 
-Every task-preference write shows the exact before/after models and thinking and asks for approval in a UI dialog (60-second timeout), including writes through `/subagents-init` or another package. Decline, cancellation, timeout, print/JSON, no-UI and child sessions write nothing. TUI and dialog-capable RPC parents can approve. Changes to the config during approval are rejected.
+Every task-preference write shows the exact before/after models and thinking and asks for approval in a compact, refusal-first selector (60-second timeout), including writes through `/subagents-init` or another package. Decline, cancellation, timeout, print/JSON, no-UI and child sessions write nothing. TUI and dialog-capable RPC parents can approve. Changes to the config during approval are rejected. New files disclose their minimal status/models seed; symlinked config directories show the real destination. Concurrent approval calls refuse rather than stack selectors.
 
 Ordinary non-persistent runs try later candidates after a safe launch failure or a provider or agent error, never after a completed negative result. An uncertain resource creation or command dispatch blocks fallback because another attempt could duplicate work. Persistent specialists do not advance after a running-child error. Worktrees use the first authenticated candidate only. A catalog-listed model can still be rejected by your provider account at request time.
 

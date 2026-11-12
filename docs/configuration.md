@@ -192,7 +192,8 @@ revision of the exact config bytes that supplied the saved preferences. Init
 does not start while a turn runs or messages are queued, and an empty registry
 ends with a notice instead of a prompt. Neither case writes anything.
 
-The draft includes category thinking and considers current saved task, thinking,
+Init requires a dialog-capable UI before it starts. The direct-writer draft
+includes category thinking and considers current saved task, thinking,
 default, and per-agent preferences.
 Optional command arguments set ranking preferences. Otherwise it favors
 capability for substantive work and efficiency for bounded reconnaissance and
@@ -225,8 +226,10 @@ While init runs, it emits `pi-herdr-subagents:task-models:init:approval:v1`.
 With no offer, the prompt directs the model to `subagents_write_task_models`
 with `expectedConfigRevision`. When exactly one loaded extension offers, init
 opens that extension's flow, and the extension's instructions replace the
-writer instruction. That legacy flow remains working for existing packs, including
-pi-herdr-pstack until its setup migration. Any eventual host writer call still
+writer instruction. The legacy event protocol is retained, but pi-herdr-pstack
+0.6.0 cannot read a nonempty `models.tasksThinking` map or submit thinking.
+Only the direct-writer destination requests a thinking draft. Model-only writes
+do not add an empty map; configuring nonempty thinking requires a compatible pack. Any eventual host writer call still
 shows its own mandatory approval; the event cannot authorize or bypass it. Two or more
 offers, or an invalid one, stop init before any extension opens or a prompt is
 sent. Once an offer is recorded, a refusal or failure also stops init: it never
@@ -241,12 +244,16 @@ restored by a reload or resume. A failed write leaves it active for a retry.
 An init that does not start undoes only its own activation. Another extension's
 approval flow never activates the writer.
 
-Every valid write proposal shows a before/after table through `ctx.ui.confirm`,
-including all six categories, their ordered models and configured thinking,
-removed categories, and the metadata change. Values are normalized and JSON-escaped,
-never abbreviated; `null` means not configured. Omitted thinking uses the role,
-then parent; category thinking is clamped at launch. Any submitted ranking basis
-is shown as unverified and is not saved. The prompt has a 60-second timeout.
+Every valid proposal uses a compact `ctx.ui.select`: only changed categories,
+one line each, with exact ordered models and thinking before/after, a count of
+unchanged categories, and any metadata change. Values are normalized and
+JSON-escaped, including invisible format/default-ignorable characters, never
+abbreviated; `null` means not configured. The first/default option is **No, keep
+current**; only **Yes, save** approves. Enter alone therefore refuses even if a
+small pane clips the diff. The timeout remains 60 seconds. Only one approval
+may be open in the process; a second writer call refuses immediately. Ranking
+basis is summarized as submitted/unverified and is not saved. Missing thinking
+uses role, then parent; category thinking clamps at launch.
 Only an affirmative approval writes. Decline, Escape/cancellation, timeout,
 print/JSON mode, or unavailable UI writes nothing and returns a refusal. Parent
 TUI and dialog-capable RPC sessions use the same prompt. Child sessions have no
@@ -259,9 +266,10 @@ and `tasksMeta`, preserving unrelated settings. Its tool schema accepts partial 
 categories (omitted categories are removed), rejects empty `tasks: {}` input,
 and rejects exact duplicate refs within a category after trimming;
 IDs remain case-sensitive. Optional `tasksThinking` replaces the thinking map
-(`{}` clears it). Omitting it preserves thinking for retained categories; removed
-categories lose their thinking. Thinking entries without a corresponding submitted
-task category are not saved. Models and thinking share one atomic, revision-checked
+(`{}` clears and removes the key; empty maps are never persisted). Omitting it
+or passing `null` preserves thinking for retained categories; removed categories
+lose their thinking. Thinking entries without a corresponding submitted task
+category are rejected. Models and thinking share one atomic, revision-checked
 write. Its result includes normalized saved `tasks`, optional `tasksThinking`,
 `tasksMeta`, `configPath`, `missingCategories`, and `configRevision`. Init requests all six categories
 and a before/after table based on that saved result, not the unsaved draft, and
@@ -287,22 +295,36 @@ strings, fail closed. Omitting the field proposes against the current config;
 it never skips approval. Every approved write also binds the exact config bytes
 behind the displayed preferences and re-checks them under the write lock. Changes during approval
 are rejected, including unrelated settings and whitespace. Re-read, re-propose
-and obtain fresh approval. A write to a missing file still seeds from the
-packaged `config.json.example`.
-`configRevision` is the revision of the exact bytes written and can serve as the
-next precondition.
+and obtain fresh approval. The complete replacement bytes are computed before
+the selector and compared again before publication. A missing config is seeded
+only with required `status.enabled: true` and the proposed `models`, not the
+packaged example. This avoids silently adding model defaults, agent overrides,
+or spawning settings. The selector states that a new file will be created,
+lists every top-level key, and discloses the status setting beyond the task rows.
+Symlinked directories are supported: the selector shows the resolved real path
+when it differs, and that directory is rechecked under the advisory lock and
+immediately before rename. Writes target the approved real directory.
+`configRevision` is re-read after publication and can serve as the next precondition.
+Failures after approval re-read the file and report whether it is unchanged,
+matches the approved replacement, or has an unknown replacement state.
 
-After approval, every writer call holds an exclusive `config.json.lock`
-sibling while it re-reads the approved snapshot, checks the revision, and atomically renames
-a private temporary file into place. A held lock fails immediately with `Task
+After approval, cooperating writers use an exclusive `config.json.lock`
+sibling, check the snapshot and replacement bytes, and atomically rename a
+private temporary file. A held lock fails immediately with `Task
 model config writer busy`; there are no waits or retries. The lock is never
 broken automatically: after a crash, the error names the recorded owner and
 reports when that process is no longer running, and you remove the lock only
 after confirming that no writer is active. Each call removes only its own lock
 and temporary file. This lock is advisory: it serializes cooperating writers
 but cannot constrain a text editor or another process that ignores it. The
-revision check detects changes through the locked re-read after approval; it is not a
+revision check detects changes through the re-read after approval; it is not a
 filesystem transaction against arbitrary external writers.
+
+Known limits: a non-cooperating process can unlink/recreate the advisory lock,
+so the host does not guarantee that it remains held throughout publication.
+Approval is not a filesystem authorization boundary. A reload can hide an open
+selector; hiding it is not approval and writes nothing. Short/narrow panes can
+still clip unusually long changes; refusal is deliberately the default.
 
 ## Task routing
 
@@ -398,8 +420,8 @@ the same process. The context is current only while the event is emitted.
 The host keeps emitting `pi-herdr-subagents:task-models:init:approval:v1` while
 init runs for compatibility. This is a retained legacy pre-approval handoff,
 not a grant to write. Its collection, conflict, cancellation and destination
-semantics are unchanged so existing pi-herdr-pstack flows keep working until
-that pack migrates. They may temporarily show their approval before the host's
+semantics are unchanged. Old pi-herdr-pstack flows remain model-only and cannot
+read nonempty thinking until that pack migrates. They may temporarily show their approval before the host's
 mandatory writer approval. New integrations should let the host writer approve.
 No removal date is set.
 

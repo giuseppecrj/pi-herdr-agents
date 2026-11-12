@@ -11,6 +11,7 @@ import {
 	createToolSearchExtension,
 	DefaultResourceLoader,
 	type ExtensionFactory,
+	type ExtensionUIContext,
 	type InlineExtension,
 	ModelRuntime,
 	SessionManager,
@@ -144,6 +145,7 @@ let sessionCount = 0;
  */
 async function openSession(options: {
 	search: SearchMode;
+	uiContext?: ExtensionUIContext;
 	tools?: string[];
 	excludeTools?: string[];
 	settings?: Parameters<typeof SettingsManager.inMemory>[0];
@@ -226,6 +228,8 @@ async function openSession(options: {
 		options.beforeStart?.(created.session);
 		// Binding emits session_start; bindings also make reload emit it again.
 		await created.session.bindExtensions({
+			uiContext: options.uiContext,
+			mode: options.uiContext ? "tui" : "print",
 			onError: (error) => extensionErrors.push(error.error),
 		});
 		return created.session;
@@ -310,8 +314,13 @@ describe("routine host tools are deferred to Pi's native tool_search", () => {
 		}
 	});
 
-	it("leaves the one-shot task-model writer to /subagents-init", async () => {
-		const run = await openSession({ search: "native" });
+	it("leaves the one-shot task-model writer to interactive /subagents-init", async () => {
+		const ui: Partial<ExtensionUIContext> = { notify() {} };
+		const run = await openSession({
+			search: "native",
+			// SAFETY: this init-only SDK fixture uses notify; it never executes the writer.
+			uiContext: ui as ExtensionUIContext,
+		});
 		try {
 			const writer = run.session
 				.getAllTools()
@@ -328,6 +337,18 @@ describe("routine host tools are deferred to Pi's native tool_search", () => {
 				[WRITER],
 				"init loads no routine tool",
 			);
+		} finally {
+			run.dispose();
+		}
+	});
+
+	it("refuses headless init without activating the writer or requesting a model response", async () => {
+		const run = await openSession({ search: "native" });
+		try {
+			await run.session.prompt("/subagents-init");
+			await run.session.waitForIdle();
+			assert.equal(run.requests.length, 0);
+			assert.ok(!run.session.getActiveToolNames().includes(WRITER));
 		} finally {
 			run.dispose();
 		}

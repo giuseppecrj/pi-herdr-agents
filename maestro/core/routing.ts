@@ -2,6 +2,7 @@ import type {
 	TaskPreferences,
 	TaskThinkingPreferences,
 } from "./config/task-model-types.ts";
+import { encodeHostValue } from "./host-text.ts";
 import type { ThinkingLevel } from "./types.ts";
 import { isFiniteNumber, isString } from "./config/type-guards.ts";
 export type { ThinkingLevel } from "./types.ts";
@@ -561,7 +562,7 @@ function modelCatalogLine(
 			? `${formatTokenCount(model.maxTokens)} max output`
 			: undefined,
 	].filter(Boolean);
-	return `- ${model.provider}/${model.id} — ${facts.join(", ")}`;
+	return `- ${encodeHostValue(`${model.provider}/${model.id}`, Infinity)} — ${facts.join(", ")}`;
 }
 
 function finishModelCatalog(
@@ -595,7 +596,7 @@ function taskShortlistLines(
 		...configured.map(([category, candidates]) => {
 			// SAFETY: shortlists contain only parsed task category keys.
 			const thinking = tasksThinking?.[category as keyof TaskPreferences];
-			return `- ${category}: ${candidates.join(", ")}${thinking ? `; thinking: ${thinking} (clamped per candidate)` : "; thinking: role, then parent"}`;
+			return `- ${category}: ${candidates.map((candidate) => encodeHostValue(candidate, Infinity)).join(", ")}${thinking ? `; thinking: ${thinking} (clamped per candidate)` : "; thinking: role, then parent"}`;
 		}),
 	];
 }
@@ -630,7 +631,9 @@ export function buildAuthenticatedModelCatalog(
 			lines.push(
 				`Other authenticated model IDs: ${alternatives
 					.slice(0, limit)
-					.map((model) => `${model.provider}/${model.id}`)
+					.map((model) =>
+						encodeHostValue(`${model.provider}/${model.id}`, Infinity),
+					)
 					.join(", ")}`,
 			);
 		if (alternatives.length > limit)

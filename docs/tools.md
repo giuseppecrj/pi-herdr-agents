@@ -594,7 +594,7 @@ Registered in: parent sessions.
 | `tasks.qa` | string[] | no | Software and test runners |
 | `tasks.architecture` | string[] | no | Planning and diagnosis |
 | `tasks.docs` | string[] | no | Documentation workers |
-| `tasksThinking` | object | no | Category thinking, clamped per fallback candidate. Replaces the map when supplied ({} clears it); omitted preserves thinking for retained categories. |
+| `tasksThinking` | object \| null | no | — |
 | `tasksThinking.coding` | `"off"` \| `"minimal"` \| `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"` | no | — |
 | `tasksThinking.review` | `"off"` \| `"minimal"` \| `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"` | no | — |
 | `tasksThinking.recon` | `"off"` \| `"minimal"` \| `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"` | no | — |

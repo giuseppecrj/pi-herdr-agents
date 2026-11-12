@@ -150,7 +150,7 @@ describe("task-model init composition", () => {
 		// Recaptured when init gained mandatory host-writer UI approval guidance.
 		assert.equal(
 			createHash("sha256").update(prompt).digest("hex"),
-			"feb4526eb6ec8f5e73a1e9ebadcdbbd2dd049191c1537ca044584acd42029714",
+			"bb63f63538059cbc198c9a5b7f3e88fd0e215e94c02687dd377637a5c8152810",
 		);
 		const unknown = initHost(() => ({
 			projectActiveRegistry: (project) =>
@@ -220,6 +220,7 @@ describe("task-model init composition", () => {
 		assert.doesNotMatch(prompts[0], /call subagents_write_task_models/i);
 		assert.doesNotMatch(prompts[0], /normalized saved tasks/);
 		assert.match(prompts[0], /Submit the ranking basis/);
+		assert.doesNotMatch(prompts[0], /Draft a tasksThinking map/);
 	});
 
 	it("freezes the brief listeners see, so the prompt shows what they saw", () => {

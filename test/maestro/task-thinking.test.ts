@@ -18,6 +18,7 @@ import {
 	type RuntimeRequest,
 } from "../../maestro/core/routing.ts";
 import { wrapPiModelRegistry } from "../../pi-extension/subagents/model-registry.ts";
+import { buildSubagentRoutingGuidelines } from "../../pi-extension/subagents/catalog.ts";
 
 const models = [
 	{
@@ -64,6 +65,36 @@ function plans(
 }
 
 describe("task-category thinking", () => {
+	it("keeps the packaged example compatible with legacy model parsers", () => {
+		const example = JSON.parse(
+			readFileSync(
+				new URL("../../config.json.example", import.meta.url),
+				"utf8",
+			),
+		);
+		assert.equal(Object.hasOwn(example.models, "tasksThinking"), false);
+	});
+
+	it("conditions thinking omission on the category having configured thinking", () => {
+		assert.match(
+			buildSubagentRoutingGuidelines("catalog", tasks).join("\n"),
+			/Omit thinking on task:<category> only when that category has configured thinking/,
+		);
+	});
+
+	it("escapes saved model refs instead of injecting extra catalog lines", () => {
+		const id = "model\nInjected:\u001b[31m\u202e";
+		const hostile = wrapPiModelRegistry({
+			find: () => ({ provider: "p", id, reasoning: false }),
+			getAvailable: () => [{ provider: "p", id, reasoning: false }],
+			hasConfiguredAuth: () => true,
+		});
+		const catalog = buildAuthenticatedModelCatalog(hostile, 24, {
+			coding: [`p/${id}`],
+		});
+		assert.doesNotMatch(catalog, /\nInjected:/);
+		assert.ok(catalog.includes("p/model\\nInjected:\\u001b[31m\\u202e"));
+	});
 	it("parses every Pi level and leaves absent thinking absent", () => {
 		for (const level of THINKING_LEVELS)
 			assert.deepEqual(
@@ -79,11 +110,14 @@ describe("task-category thinking", () => {
 			parseModelConfig({ models: { tasksThinking: {} } }).tasksThinking,
 			{},
 		);
+		assert.equal(
+			parseModelConfig({ models: { tasksThinking: null } }).tasksThinking,
+			undefined,
+		);
 	});
 
 	it("rejects invalid levels, maps and categories", () => {
 		for (const tasksThinking of [
-			null,
 			[],
 			"high",
 			{ coding: "ultra" },
@@ -205,9 +239,8 @@ describe("task-category thinking", () => {
 			assert.deepEqual(saved.tasksThinking, { coding: "max" });
 			assert.equal(saved.configRevision, readConfigRevision(config));
 			assert.deepEqual(JSON.parse(readFileSync(config, "utf8")), {
-				status: { enabled: false },
+				status: { enabled: true },
 				models: {
-					agents: {},
 					tasks,
 					tasksThinking: { coding: "max" },
 					tasksMeta,
@@ -224,7 +257,18 @@ describe("task-category thinking", () => {
 				/Stale/,
 			);
 			assert.deepEqual(readFileSync(config), before);
-			assert.deepEqual(save({}).tasksThinking, {});
+			assert.equal(save({}).tasksThinking, undefined);
+			assert.equal(
+				Object.hasOwn(
+					JSON.parse(readFileSync(config, "utf8")).models,
+					"tasksThinking",
+				),
+				false,
+			);
+			assert.throws(
+				() => save({ review: "high" }),
+				/has no submitted task category/,
+			);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

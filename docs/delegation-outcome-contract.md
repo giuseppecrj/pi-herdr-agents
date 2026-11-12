@@ -423,9 +423,11 @@ The same test file pins fields packs depend on. These are
 of `subagents_write_task_models` (`tool-schema.test.ts:78-90`). Its optional
 `tasksThinking` map adds category thinking without changing existing request shapes;
 models and thinking use the same atomic revision-checked write. The host writer
-now requires approval of the exact changes in a parent UI dialog on every call;
+now requires approval of the exact changes in a refusal-first parent UI selector on every call;
 headless and child calls refuse. The optional proposal revision remains compatible,
-but even a call without it re-checks the snapshot shown at approval before writing.
+but even a call without it re-checks the snapshot, complete replacement bytes,
+and resolved directory shown at approval before writing. Missing files use only
+the disclosed status/models seed. Approval is not a filesystem boundary.
 The retained v1 init handoff cannot bypass this prompt. See
 [writer approval](configuration.md#task-model-writer). The same schema test also pins
 `caller_ping` and `subagent_done` to the child scope (`tool-schema.test.ts:92-97`).
