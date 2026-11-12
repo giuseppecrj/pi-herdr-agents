@@ -11015,6 +11015,9 @@ describe("commands", () => {
 					undefined,
 					undefined,
 					{
+						hasUI: true,
+						mode: "tui",
+						ui: { confirm: async () => true },
 						modelRegistry: {
 							find: () => INIT_MODEL,
 							getAvailable: () => [INIT_MODEL],
@@ -11122,6 +11125,9 @@ describe("commands", () => {
 				undefined,
 				undefined,
 				{
+					hasUI: true,
+					mode: "tui",
+					ui: { confirm: async () => true },
 					modelRegistry: {
 						find: (provider: string, id: string) =>
 							provider === "fake" && id === "worker" ? model : undefined,
@@ -11232,6 +11238,9 @@ describe("commands", () => {
 					getAvailable: () => [model],
 					hasConfiguredAuth: () => true,
 				},
+				hasUI: true,
+				mode: "tui",
+				ui: { confirm: async () => true },
 			};
 			const tasks = { coding: ["fake/worker"] };
 			const research = {
@@ -11362,6 +11371,9 @@ describe("commands", () => {
 					getAvailable: () => [model],
 					hasConfiguredAuth: () => true,
 				},
+				hasUI: true,
+				mode: "tui",
+				ui: { confirm: async () => true },
 			};
 			const tasksMeta = {
 				generatedAt: "2026-10-05T00:00:00Z",

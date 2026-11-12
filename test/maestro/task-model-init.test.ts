@@ -147,10 +147,10 @@ describe("task-model init composition", () => {
 		]);
 		assert.doesNotMatch(prompt, /secret-/);
 		// Golden SHA-256 of the accepted direct-writer prompt for these facts.
-		// Recaptured when init gained category thinking and its precedence guidance.
+		// Recaptured when init gained mandatory host-writer UI approval guidance.
 		assert.equal(
 			createHash("sha256").update(prompt).digest("hex"),
-			"ed6e19646c8e3c71b333a087318dc3cbd9b874897fcfe558084426d516312c29",
+			"feb4526eb6ec8f5e73a1e9ebadcdbbd2dd049191c1537ca044584acd42029714",
 		);
 		const unknown = initHost(() => ({
 			projectActiveRegistry: (project) =>

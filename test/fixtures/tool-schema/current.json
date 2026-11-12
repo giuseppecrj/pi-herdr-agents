@@ -248,7 +248,7 @@
 		{
 			"name": "subagents_write_task_models",
 			"scopes": ["parent"],
-			"description": "Validate and atomically replace models.tasks, models.tasksThinking and models.tasksMeta in the durable Pi agent config, preserving unrelated settings. Supported categories: coding, review, recon, qa, architecture, docs. Partial nonempty categories are accepted; omitted categories are removed. Rejects duplicate exact refs within a category. Review the active authenticated registry and existing preferences first. Optional expectedConfigRevision makes the write conditional: it fails without replacing configuration when the config file no longer matches the revision the proposal was read from. Optional basis records what the ranking rests on; its kind must equal tasksMeta.method, and it is returned but not saved. Cooperating writes are serialized and fail on contention rather than waiting. Returns normalized saved preferences, missing categories, the configRevision of the written file, and any basis; reload required.",
+			"description": "Validate task preferences, show exact before/after for user approval, then atomically replace models.tasks, models.tasksThinking and models.tasksMeta in the durable Pi agent config, preserving unrelated settings. Every call shows the exact before/after models and thinking per category and requires user approval through the session UI (60-second timeout), even when another extension already approved it. No-UI, print/JSON and child sessions are refused without writing. Supported categories: coding, review, recon, qa, architecture, docs. Partial nonempty categories are accepted; omitted categories are removed. Rejects duplicate exact refs within a category. Review the active authenticated registry and existing preferences first. Optional expectedConfigRevision also binds the proposal's starting revision: it fails without replacing configuration when the config file no longer matches the revision the proposal was read from. Optional basis records what the ranking rests on; its kind must equal tasksMeta.method, and it is returned but not saved. Cooperating writes are serialized and fail on contention rather than waiting. Returns normalized saved preferences, missing categories, the configRevision of the written file, and any basis; reload required.",
 			"parameters": {
 				"type": "object",
 				"required": ["tasks", "tasksMeta"],
@@ -383,7 +383,7 @@
 						}
 					},
 					"expectedConfigRevision": {
-						"description": "Revision of the config the proposal was read from: \"sha256:\" plus 64 lowercase hex digits of the exact file bytes, or \"missing\" when the file is absent. A mismatch fails without writing; re-read, re-propose, and re-approve. Omit for an unconditional write.",
+						"description": "Revision of the config the proposal was read from: \"sha256:\" plus 64 lowercase hex digits of the exact file bytes, or \"missing\" when the file is absent. A mismatch fails without writing; re-read, re-propose, and re-approve. Omit to propose against the current config; user approval still binds the exact snapshot shown.",
 						"anyOf": [
 							{ "const": "missing", "type": "string" },
 							{ "pattern": "^sha256:[0-9a-f]{64}$", "type": "string" }

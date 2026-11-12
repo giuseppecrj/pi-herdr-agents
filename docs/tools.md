@@ -20,7 +20,7 @@ This page is the detailed reference for the tools, commands, and run lifecycle o
 | `subagent_send` | parent, child | Deliver one follow-up task to an idle persistent specialist. |
 | `subagent_stop` | parent, child | Stop a persistent specialist after its active task finishes. |
 | `subagents_list` | parent, child | List subagent role definitions, live persistent specialists, and the supervision mode. |
-| `subagents_write_task_models` | parent only | Validate and atomically replace models.tasks, models.tasksThinking and models.tasksMeta in the durable Pi agent config, preserving unrelated settings. |
+| `subagents_write_task_models` | parent only | Validate task preferences, show exact before/after for user approval, then atomically replace models.tasks, models.tasksThinking and models.tasksMeta in the durable Pi agent config, preserving unrelated settings. |
 | `worktree_list` | parent only | List managed worktrees, including orphans from other sessions. |
 | `worktree_remove` | parent only | Remove one managed worktree by exact path, branch, or workspace ID, only when the user asks. |
 <!-- generated:tools:end -->
@@ -604,7 +604,7 @@ Registered in: parent sessions.
 | `tasksMeta` | object | yes | — |
 | `tasksMeta.generatedAt` | string | yes | — |
 | `tasksMeta.method` | `"research"` \| `"registry-only"` | yes | — |
-| `expectedConfigRevision` | `"missing"` \| string | no | Revision of the config the proposal was read from: "sha256:" plus 64 lowercase hex digits of the exact file bytes, or "missing" when the file is absent. A mismatch fails without writing; re-read, re-propose, and re-approve. Omit for an unconditional write. |
+| `expectedConfigRevision` | `"missing"` \| string | no | Revision of the config the proposal was read from: "sha256:" plus 64 lowercase hex digits of the exact file bytes, or "missing" when the file is absent. A mismatch fails without writing; re-read, re-propose, and re-approve. Omit to propose against the current config; user approval still binds the exact snapshot shown. |
 | `basis` | object \| object | no | What the ranking rests on, as submitted by the proposer and not independently verified: {"kind":"registry-only"}, or {"kind":"research"} with the http(s) sources consulted in this run, how each informed the ranking, and the remaining uncertainty. kind must equal tasksMeta.method. Not saved. Omit for a legacy write. |
 | `basis.kind` | `"registry-only"` \| `"research"` | yes | — |
 | `basis.sources` | object[] | no | — |

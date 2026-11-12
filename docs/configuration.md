@@ -225,7 +225,9 @@ While init runs, it emits `pi-herdr-subagents:task-models:init:approval:v1`.
 With no offer, the prompt directs the model to `subagents_write_task_models`
 with `expectedConfigRevision`. When exactly one loaded extension offers, init
 opens that extension's flow, and the extension's instructions replace the
-writer instruction; the extension then owns approval and the write. Two or more
+writer instruction. That legacy flow remains working for existing packs, including
+pi-herdr-pstack until its setup migration. Any eventual host writer call still
+shows its own mandatory approval; the event cannot authorize or bypass it. Two or more
 offers, or an invalid one, stop init before any extension opens or a prompt is
 sent. Once an offer is recorded, a refusal or failure also stops init: it never
 falls back to the direct writer. See [Task-model init events](#task-model-init-events).
@@ -239,9 +241,21 @@ restored by a reload or resume. A failed write leaves it active for a retry.
 An init that does not start undoes only its own activation. Another extension's
 approval flow never activates the writer.
 
+Every valid write proposal shows a before/after table through `ctx.ui.confirm`,
+including all six categories, their ordered models and configured thinking,
+removed categories, and the metadata change. Values are normalized and JSON-escaped,
+never abbreviated; `null` means not configured. Omitted thinking uses the role,
+then parent; category thinking is clamped at launch. Any submitted ranking basis
+is shown as unverified and is not saved. The prompt has a 60-second timeout.
+Only an affirmative approval writes. Decline, Escape/cancellation, timeout,
+print/JSON mode, or unavailable UI writes nothing and returns a refusal. Parent
+TUI and dialog-capable RPC sessions use the same prompt. Child sessions have no
+writer tool, and a captured writer also refuses in child context. Earlier
+approval in any package never skips the host dialog, even for identical writes.
+An init draft goes through this same writer prompt; refusal stops the write.
+
 The writer validates and atomically replaces `models.tasks`, category thinking,
-and `tasksMeta`,
-preserving unrelated settings. Its tool schema accepts partial nonempty
+and `tasksMeta`, preserving unrelated settings. Its tool schema accepts partial nonempty
 categories (omitted categories are removed), rejects empty `tasks: {}` input,
 and rejects exact duplicate refs within a category after trimming;
 IDs remain case-sensitive. Optional `tasksThinking` replaces the thinking map
@@ -260,8 +274,8 @@ writing, returns it in the result, and never saves it; only `tasksMeta.method`
 persists. Calls without `basis`, including research calls, keep the earlier
 contract.
 
-Optional `expectedConfigRevision` makes a write conditional on the config the
-proposal was read from. A revision is `sha256:` followed by 64 lowercase hex
+Optional `expectedConfigRevision` binds the proposal to the config it was read
+from, checked before showing approval. A revision is `sha256:` followed by 64 lowercase hex
 digits of the SHA-256 of the exact `config.json` bytes (not normalized JSON or
 only `models.tasks`), or the literal `missing` when the file is absent. Any byte
 change, including whitespace or unrelated settings, makes the revision stale; a
@@ -269,13 +283,17 @@ change, including whitespace or unrelated settings, makes the revision stale; a
 rejects a file that was removed. A stale revision fails with `Stale task model
 config revision` without replacing configuration: re-read, re-propose, and
 re-approve rather than retrying. Malformed revisions, including `null` and empty
-strings, fail closed. Omitting the field keeps the unconditional write. A write
-to a missing file still seeds from the packaged `config.json.example`.
+strings, fail closed. Omitting the field proposes against the current config;
+it never skips approval. Every approved write also binds the exact config bytes
+behind the displayed preferences and re-checks them under the write lock. Changes during approval
+are rejected, including unrelated settings and whitespace. Re-read, re-propose
+and obtain fresh approval. A write to a missing file still seeds from the
+packaged `config.json.example`.
 `configRevision` is the revision of the exact bytes written and can serve as the
 next precondition.
 
-Every writer call, conditional or not, holds an exclusive `config.json.lock`
-sibling while it reads one snapshot, checks the revision, and atomically renames
+After approval, every writer call holds an exclusive `config.json.lock`
+sibling while it re-reads the approved snapshot, checks the revision, and atomically renames
 a private temporary file into place. A held lock fails immediately with `Task
 model config writer busy`; there are no waits or retries. The lock is never
 broken automatically: after a crash, the error names the recorded owner and
@@ -283,7 +301,7 @@ reports when that process is no longer running, and you remove the lock only
 after confirming that no writer is active. Each call removes only its own lock
 and temporary file. This lock is advisory: it serializes cooperating writers
 but cannot constrain a text editor or another process that ignores it. The
-revision check detects changes made before the snapshot is read; it is not a
+revision check detects changes through the locked re-read after approval; it is not a
 filesystem transaction against arbitrary external writers.
 
 ## Task routing
@@ -377,8 +395,15 @@ Two versioned `pi.events` channels let another extension take part in
 command's live `ExtensionCommandContext`, so they are for trusted extensions in
 the same process. The context is current only while the event is emitted.
 
-The host emits `pi-herdr-subagents:task-models:init:approval:v1` while init
-runs:
+The host keeps emitting `pi-herdr-subagents:task-models:init:approval:v1` while
+init runs for compatibility. This is a retained legacy pre-approval handoff,
+not a grant to write. Its collection, conflict, cancellation and destination
+semantics are unchanged so existing pi-herdr-pstack flows keep working until
+that pack migrates. They may temporarily show their approval before the host's
+mandatory writer approval. New integrations should let the host writer approve.
+No removal date is set.
+
+The event payload is:
 
 ```typescript
 type ApprovalRequest = {
@@ -398,7 +423,7 @@ type OpenResult =
 
 - Call `offer` synchronously, before the listener's first `await`. After `emit`
   returns, `offer` answers `"closed"` and records nothing.
-- Offer whenever your extension owns task-model approval, even when it is busy,
+- Existing approval integrations should still offer even when busy,
   and refuse from `open`. `owner` is one printable token without spaces.
 - The host opens nothing until collection ends. Two offers (even with the same
   owner) or an invalid offer stop init. With one offer, the host calls `open()`

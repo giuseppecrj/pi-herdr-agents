@@ -310,9 +310,10 @@ architecture to planning and diagnosis, coding to workers, review to reviewers,
 QA to software and test runners, and docs to documentation workers. Categories
 describe work, not complexity. `/subagents-init [preferences]` drafts them from
 the active extension-loaded registry's synchronous snapshot and existing saved
-choices, with source-based research when available. A single loaded extension
-that offers on the task-model init approval event owns approval and the write
-instead of the host writer. A dynamic provider awaiting
+choices, with source-based research when available. Every host writer call asks
+the user to approve the exact before/after models and thinking in a dialog;
+no-UI and child sessions cannot write. The v1 init approval event retains
+existing packs' pre-approval flows, but cannot bypass the host's approval. A dynamic provider awaiting
 its initial catalog refresh might be absent. `task:<category>` is a subagent
 model selector, not a command or parent model change. Thinking resolves explicit
 argument, category (clamped per candidate), role, then parent (clamped).

@@ -155,7 +155,7 @@ The parent session gets these tools:
 | `subagents_list` | List agent definitions, live specialists, and the supervision mode. |
 | `worktree_list` | List managed worktrees and what blocks their cleanup. |
 | `worktree_remove` | Remove one managed worktree on explicit request. |
-| `subagents_write_task_models` | Internal writer for `models.tasks` preferences. Inactive until `/subagents-init` needs it. |
+| `subagents_write_task_models` | Writer for task models and thinking. Every write asks for user approval; inactive until `/subagents-init` needs it. |
 
 The routine tools above load on demand. Their schemas and the `subagent` guidelines stay out of the prompt until the model loads them with Pi's built-in `tool_search`, which the host activates at session start. Without Pi's tool search, for example under `--no-extensions` or with `"-tool_search"` in the `defaultTools` setting, they are active from the start. A `--tools` allowlist, `--exclude-tools`, and a role's `deny-tools` still decide which of them exist. See [Tool loading](docs/tools.md#tool-loading).
 
@@ -185,6 +185,8 @@ A `model` value can also be an ordered fallback list, such as `provider/preferre
 ```text
 /subagents-init Prefer capability over price for implementation; keep recon inexpensive
 ```
+
+Every task-preference write shows the exact before/after models and thinking and asks for approval in a UI dialog (60-second timeout), including writes through `/subagents-init` or another package. Decline, cancellation, timeout, print/JSON, no-UI and child sessions write nothing. TUI and dialog-capable RPC parents can approve. Changes to the config during approval are rejected.
 
 Ordinary non-persistent runs try later candidates after a safe launch failure or a provider or agent error, never after a completed negative result. An uncertain resource creation or command dispatch blocks fallback because another attempt could duplicate work. Persistent specialists do not advance after a running-child error. Worktrees use the first authenticated candidate only. A catalog-listed model can still be rejected by your provider account at request time.
 

@@ -390,6 +390,73 @@ export interface WriteTaskModelConfigOptions {
 	>;
 }
 
+/** Normalize and validate a proposal without creating files or acquiring a lock. */
+export function validateTaskModelProposal(
+	configPath: string,
+	tasks: TaskPreferences,
+	tasksMeta: TaskPreferencesMeta,
+	isAuthenticatedCandidate: (candidate: string) => boolean,
+	options: WriteTaskModelConfigOptions = {},
+): ModelConfig {
+	if (
+		options.expectedConfigRevision !== undefined &&
+		!isConfigRevision(options.expectedConfigRevision)
+	) {
+		throw new TaskModelConfigWriteError(
+			"invalid-revision",
+			`Invalid expectedConfigRevision: use "sha256:" followed by 64 lowercase hex digits of the exact config bytes, or "${MISSING_CONFIG_REVISION}" when the config file is absent. Omit it only for an unconditional write.`,
+		);
+	}
+	const candidate = parseModelConfig(
+		{ models: { tasks, tasksThinking: options.tasksThinking, tasksMeta } },
+		configPath,
+	);
+	for (const candidates of Object.values(candidate.tasks ?? {})) {
+		for (const ref of candidates) {
+			if (!isAuthenticatedCandidate(ref))
+				throw new Error(
+					`Task model candidate ${JSON.stringify(ref)} is not an authenticated exact registry model`,
+				);
+		}
+	}
+	return candidate;
+}
+
+/** Check the proposal's revision before approval and again under the write lock. */
+export function assertTaskModelConfigRevision(
+	configPath: string,
+	expected: string | undefined,
+	actual: string,
+): void {
+	if (expected === undefined || actual === expected) return;
+	let state = "the config file bytes changed since the proposal was read";
+	if (expected === MISSING_CONFIG_REVISION)
+		state = "the proposal expected no config file, but one now exists";
+	else if (actual === MISSING_CONFIG_REVISION)
+		state =
+			"the proposal expected an existing config file, but it is now missing";
+	throw new TaskModelConfigWriteError(
+		"stale-revision",
+		`Stale task model config revision for ${configPath}: ${state}. Configuration was not replaced. Re-read the config, prepare a fresh proposal, and obtain fresh approval before writing.`,
+	);
+}
+
+/** Legacy callers preserve thinking only for task categories they retain. */
+export function resolveTaskThinkingPreferences(
+	tasks: TaskPreferences | undefined,
+	requested: TaskThinkingPreferences | undefined,
+	previous: TaskThinkingPreferences | undefined,
+): TaskThinkingPreferences | undefined {
+	const selected = requested ?? previous;
+	if (!selected) return undefined;
+	const retained: TaskThinkingPreferences = {};
+	for (const category of TASK_CATEGORIES) {
+		const level = selected[category];
+		if (tasks?.[category] && level !== undefined) retained[category] = level;
+	}
+	return retained;
+}
+
 /**
  * Atomically replace models.tasks, category thinking and models.tasksMeta in the durable user config.
  *
@@ -408,50 +475,27 @@ export function writeTaskModelConfig(
 	options: WriteTaskModelConfigOptions = {},
 ): SavedTaskModelConfig {
 	const expected = options.expectedConfigRevision;
-	if (expected !== undefined && !isConfigRevision(expected)) {
-		throw new TaskModelConfigWriteError(
-			"invalid-revision",
-			`Invalid expectedConfigRevision: use "sha256:" followed by 64 lowercase hex digits of the exact config bytes, or "${MISSING_CONFIG_REVISION}" when the config file is absent. Omit it only for an unconditional write.`,
-		);
-	}
+	const candidateConfig = validateTaskModelProposal(
+		configPath,
+		tasks,
+		tasksMeta,
+		isAuthenticatedCandidate,
+		options,
+	);
 	const fileOperations = options.fileOperations ?? {
 		renameSync,
 		writeFileSync,
 	};
-	const candidateConfig = parseModelConfig(
-		{ models: { tasks, tasksThinking: options.tasksThinking, tasksMeta } },
-		configPath,
-	);
-	for (const candidates of Object.values(candidateConfig.tasks ?? {})) {
-		for (const candidate of candidates) {
-			if (!isAuthenticatedCandidate(candidate)) {
-				throw new Error(
-					`Task model candidate ${JSON.stringify(candidate)} is not an authenticated exact registry model`,
-				);
-			}
-		}
-	}
 	mkdirSync(dirname(configPath), { recursive: true });
 	return withConfigWriteLock(configPath, () => {
 		const currentBytes = readBytesIfExists(configPath);
-		if (expected !== undefined) {
-			const actual =
-				currentBytes == null
-					? MISSING_CONFIG_REVISION
-					: computeConfigRevision(currentBytes);
-			if (actual !== expected) {
-				let state = "the config file bytes changed since the proposal was read";
-				if (expected === MISSING_CONFIG_REVISION)
-					state = "the proposal expected no config file, but one now exists";
-				else if (currentBytes == null)
-					state =
-						"the proposal expected an existing config file, but it is now missing";
-				throw new TaskModelConfigWriteError(
-					"stale-revision",
-					`Stale task model config revision for ${configPath}: ${state}. Configuration was not replaced. Re-read the config, prepare a fresh proposal, and obtain fresh approval before writing.`,
-				);
-			}
-		}
+		assertTaskModelConfigRevision(
+			configPath,
+			expected,
+			currentBytes == null
+				? MISSING_CONFIG_REVISION
+				: computeConfigRevision(currentBytes),
+		);
 		const current = currentBytes?.toString("utf8");
 		const source = current ?? readFileSync(examplePath, "utf8");
 		let parsed: any;
@@ -468,18 +512,13 @@ export function writeTaskModelConfig(
 				`Invalid JSON in subagent config ${configPath}: root must be an object`,
 			);
 		const models = isPlainObject(parsed.models) ? { ...parsed.models } : {};
-		// Legacy callers preserve thinking for retained categories. Removed task
-		// categories also lose their thinking; an explicit map replaces it entirely.
-		const tasksThinking =
-			candidateConfig.tasksThinking ??
-			parseTasksThinking(models.tasksThinking, configPath);
-		const retainedThinking = tasksThinking
-			? Object.fromEntries(
-					Object.entries(tasksThinking).filter(([category]) =>
-						Object.hasOwn(candidateConfig.tasks ?? {}, category),
-					),
-				)
-			: undefined;
+		const retainedThinking = resolveTaskThinkingPreferences(
+			candidateConfig.tasks,
+			candidateConfig.tasksThinking,
+			candidateConfig.tasksThinking === undefined
+				? parseTasksThinking(models.tasksThinking, configPath)
+				: undefined,
+		);
 		if (retainedThinking) models.tasksThinking = retainedThinking;
 		else delete models.tasksThinking;
 		models.tasks = candidateConfig.tasks;
@@ -506,10 +545,7 @@ export function writeTaskModelConfig(
 			),
 			configRevision: computeConfigRevision(Buffer.from(output, "utf8")),
 		};
-		if (retainedThinking) {
-			// SAFETY: keys and levels came from parseTasksThinking above.
-			saved.tasksThinking = retainedThinking as TaskThinkingPreferences;
-		}
+		if (retainedThinking) saved.tasksThinking = retainedThinking;
 		return saved;
 	});
 }

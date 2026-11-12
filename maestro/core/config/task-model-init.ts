@@ -5,8 +5,9 @@ import { TASK_CATEGORY_DESCRIPTIONS } from "./task-model-types.ts";
 import { isFunction, isRecord, isString } from "./type-guards.ts";
 
 /**
- * Emitted while host init runs. An extension that owns approval of task-model
- * writes offers to open its flow for this one request.
+ * Retained v1 compatibility handoff while host init runs. An extension may
+ * still offer its existing pre-approval flow; every eventual host writer call
+ * separately requires user approval and cannot be authorized by this event.
  */
 export const TASK_MODEL_INIT_APPROVAL_EVENT =
 	"pi-herdr-subagents:task-models:init:approval:v1";
@@ -82,11 +83,11 @@ export interface TaskModelInitDestination {
 	instructions: string;
 }
 
-/** The host's own writer, used when no extension offers to own approval. */
+/** The host's own writer, used when no extension offers its legacy approval flow. */
 export const DIRECT_WRITER_DESTINATION: TaskModelInitDestination = {
 	toolName: DIRECT_WRITER_TOOL,
 	instructions: [
-		`Then call ${DIRECT_WRITER_TOOL} with the reviewed draft as tasks and tasksThinking, tasksMeta containing current UTC generatedAt and method equal to basis.kind, the same basis, and expectedConfigRevision equal to configRevision from the brief. The tool atomically replaces tasks, tasksThinking and tasksMeta, preserves unrelated settings, and accepts partial nonempty categories; explain any missing categories rather than inventing candidates. A stale revision fails without writing; run /subagents-init again for a fresh brief instead of retrying.`,
+		`Then call ${DIRECT_WRITER_TOOL} with the reviewed draft as tasks and tasksThinking, tasksMeta containing current UTC generatedAt and method equal to basis.kind, the same basis, and expectedConfigRevision equal to configRevision from the brief. The tool shows the exact before/after models and thinking and asks the user to approve through ctx.ui (60-second timeout). Prior approvals never bypass it; declining, timing out, no-UI or child sessions write nothing. Stop on refusal and report that nothing was written. The tool atomically replaces tasks, tasksThinking and tasksMeta, preserves unrelated settings, and accepts partial nonempty categories; explain any missing categories rather than inventing candidates. A stale revision fails without writing; run /subagents-init again for a fresh brief instead of retrying.`,
 		"Base the final category-to-candidates table and before/after summary on the normalized saved tasks, tasksThinking, tasksMeta, configPath, and missingCategories returned by the tool, not the unsaved draft.",
 	].join("\n\n"),
 };
@@ -113,7 +114,7 @@ export function buildTaskModelInitPrompt(
 	].join("\n\n");
 }
 
-/** One extension's offer to own approval and writing for one init request. */
+/** One extension's legacy pre-approval/write flow for an init request. The host writer still prompts. */
 export interface ApprovalOffer {
 	owner: string;
 	/** Foreign code; openApprovalOffer parses what it returns. */

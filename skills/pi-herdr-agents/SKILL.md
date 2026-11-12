@@ -291,9 +291,13 @@ drafts task preferences from the live model registry and the saved config's
 `configRevision`, then saves them through `subagents_write_task_models`
 (parent-only and inactive until init activates it; validates, atomically
 replaces `models.tasks`, category thinking and `tasksMeta`, preserves other settings). A successful
-write deactivates it again. When one loaded extension offers to approve the
-write, the init prompt names that extension's tool instead; follow the prompt
-and do not call the writer around it. Payload: `tasks`
+write deactivates it again. Every writer call shows the exact before/after
+models and thinking for user approval in `ctx.ui` (60-second timeout).
+Decline, cancellation, timeout, print/JSON, no-UI and child sessions write
+nothing. TUI and dialog-capable RPC parents can approve; an earlier package
+approval never bypasses the host prompt. Init uses this same prompt. A retained
+v1 init handoff may still name an existing extension's tool; follow that flow
+without bypassing it, but its eventual host write asks for approval again. Payload: `tasks`
 (partial but nonempty categories; empty `tasks: {}` and duplicate refs within a
 category are rejected) and required `tasksMeta`. Warning: categories you omit
 are removed from the saved config, so send every category you want to keep.
@@ -305,7 +309,8 @@ Optional `basis` states what the ranking rests on and is not saved: use
 then `{"kind":"research","sources":[{"url":"https://...","influence":"how it changed the ranking"}],"uncertainty":"what remains unknown"}`.
 Its kind must equal `tasksMeta.method`.
 Optional `expectedConfigRevision` (`sha256:` plus 64 lowercase hex digits of the exact file bytes,
-or `missing`) makes the write conditional; a stale revision fails with
+or `missing`) checks the proposal's starting snapshot; even when omitted,
+approval binds the exact snapshot shown. A change during approval fails with
 `Stale task model config revision`: re-read, re-propose, re-approve, do not
 retry blindly. Every write holds an advisory `config.json.lock`; a held lock
 fails immediately with `Task model config writer busy`, and it is never broken
