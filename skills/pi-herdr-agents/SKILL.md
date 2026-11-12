@@ -314,7 +314,9 @@ handoffs therefore do not request a thinking draft.
 Optional `basis` states what the ranking rests on and is not saved: use
 `{"kind":"registry-only"}` unless sources consulted in this run informed it,
 then `{"kind":"research","sources":[{"url":"https://...","influence":"how it changed the ranking"}],"uncertainty":"what remains unknown"}`.
-Its kind must equal `tasksMeta.method`.
+Its kind must equal `tasksMeta.method`. The approval dialog summarizes only the
+basis kind as submitted/unverified; research sources and their influence appear
+in the tool result, not the dialog.
 Optional `expectedConfigRevision` (`sha256:` plus 64 lowercase hex digits of the exact file bytes,
 or `missing`) checks the proposal's starting snapshot; even when omitted,
 approval binds the exact snapshot shown. A change during approval fails with
@@ -323,7 +325,9 @@ retry blindly. Cooperating writes use an advisory `config.json.lock`; a held loc
 fails immediately with `Task model config writer busy`, and it is never broken
 automatically. Remove it only after confirming no writer is active. A process
 ignoring the protocol can unlink it; approval is not a filesystem boundary.
-Reload may hide the selector but never approves a write.
+Reload may hide the selector but never approves a write. Shutdown or session
+replacement aborts pending approval and releases the gate, even if the hidden
+selector never resolves.
 
 ## Optional Herdr sidebar plugin
 

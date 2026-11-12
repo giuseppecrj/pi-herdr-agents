@@ -156,7 +156,16 @@ export function registerTaskModelTool(
 	pi: ExtensionAPI,
 	{ shouldRegister }: { shouldRegister: (name: string) => boolean },
 ): void {
-	if (!process.env.PI_SUBAGENT_ID && shouldRegister(DIRECT_WRITER_TOOL))
+	if (!process.env.PI_SUBAGENT_ID && shouldRegister(DIRECT_WRITER_TOOL)) {
+		let pendingApproval:
+			| { controller: AbortController; finished: Promise<void> }
+			| undefined;
+		pi.on("session_shutdown", async () => {
+			const pending = pendingApproval;
+			if (!pending) return;
+			pending.controller.abort();
+			await pending.finished;
+		});
 		pi.registerTool({
 			name: DIRECT_WRITER_TOOL,
 			label: "Write task model preferences",
@@ -267,6 +276,20 @@ export function registerTaskModelTool(
 						"Task model preferences not written: another approval is already open. Retry after it finishes.",
 					);
 				writeGlobalSlot(TASK_MODEL_APPROVAL_SLOT, true);
+				const controller = new AbortController();
+				const approvalSignal = signal
+					? AbortSignal.any([signal, controller.signal])
+					: controller.signal;
+				let finishApproval = () => {};
+				const finished = new Promise<void>((resolve) => {
+					finishApproval = resolve;
+				});
+				pendingApproval = { controller, finished };
+				let onAbort = () => {};
+				const aborted = new Promise<undefined>((resolve) => {
+					onAbort = () => resolve(undefined);
+				});
+				approvalSignal.addEventListener("abort", onAbort, { once: true });
 				try {
 					const registry = wrapPiModelRegistry(ctx.modelRegistry);
 					// SAFETY: TypeBox validates the tool payload; the write seam performs stricter schema validation.
@@ -306,12 +329,17 @@ export function registerTaskModelTool(
 						options.expectedConfigRevision,
 					);
 					const message = taskModelApprovalMessage(prepared);
-					const approved = await ctx.ui.select(
-						`Approve task model preferences\n${message}${basis ? `\nRanking basis: ${basis.kind} (submitted, unverified; not saved).` : ""}`,
-						[DECLINE_TASK_MODELS, SAVE_TASK_MODELS],
-						{ timeout: 60_000, signal },
-					);
-					if (approved !== SAVE_TASK_MODELS || signal?.aborted)
+					// Hiding a Pi selector may leave its promise pending, even after abort.
+					// Our own abort race must settle before shutdown invalidates this API.
+					const approved = await Promise.race([
+						ctx.ui.select(
+							`Approve task model preferences\n${message}${basis ? `\nRanking basis: ${basis.kind} (submitted, unverified; not saved).` : ""}`,
+							[DECLINE_TASK_MODELS, SAVE_TASK_MODELS],
+							{ timeout: 60_000, signal: approvalSignal },
+						),
+						aborted,
+					]);
+					if (approved !== SAVE_TASK_MODELS || approvalSignal.aborted)
 						throw new Error(
 							"Task model preferences not written: approval declined, cancelled or timed out. Obtain fresh approval before retrying.",
 						);
@@ -347,10 +375,14 @@ export function registerTaskModelTool(
 						details,
 					};
 				} finally {
+					approvalSignal.removeEventListener("abort", onAbort);
+					pendingApproval = undefined;
 					writeGlobalSlot(TASK_MODEL_APPROVAL_SLOT, false);
+					finishApproval();
 				}
 			},
 		});
+	}
 }
 
 /** The /subagents-init command and its cross-extension start event. */

@@ -1,5 +1,7 @@
 import "../isolated-agent-dir.ts";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import {
 	existsSync,
 	mkdirSync,
@@ -364,14 +366,93 @@ describe("task-model writer approval", () => {
 			assert.equal(f.prompts.length, 0);
 			const during = new AbortController();
 			f.ctx.ui.select = async (_title, _choices, options) => {
-				assert.equal(options?.signal, during.signal);
+				assert.equal(options?.signal?.aborted, false);
 				during.abort();
+				assert.equal(options?.signal?.aborted, true);
 				return YES;
 			};
 			await assert.rejects(
 				execute(f, proposal(), during.signal),
 				/not written: approval declined/,
 			);
+			assertUntouched(f, original);
+		});
+	});
+
+	it("shutdown releases a hidden never-settled selector without writing and admits a later writer", async () => {
+		for (const reason of ["reload", "new", "resume", "fork", "quit"])
+			await withWriter(async (f) => {
+				const original = readFileSync(f.configPath);
+				let observedSignal: AbortSignal | undefined;
+				f.ctx.ui.select = async (_title, _choices, options) => {
+					observedSignal = options?.signal;
+					// Simulate resetExtensionUI hiding the selector without resolving it,
+					// including a UI implementation that no longer handles abort events.
+					return new Promise<string | undefined>(() => {});
+				};
+				let settled = false;
+				const refused = assert
+					.rejects(
+						execute(f),
+						/not written: approval declined, cancelled or timed out/,
+					)
+					.then(() => {
+						settled = true;
+					});
+				const shutdown = Promise.all(
+					(f.eventHandlers.get("session_shutdown") ?? []).map((handler) =>
+						handler({ reason }, f.ctx),
+					),
+				);
+				await new Promise<void>((resolve) => setImmediate(resolve));
+				assert.equal(
+					observedSignal?.aborted,
+					true,
+					`${reason} must abort the pending selector`,
+				);
+				assert.equal(
+					settled,
+					true,
+					`${reason} must settle the call even when the UI ignores abort`,
+				);
+				await shutdown;
+				await refused;
+				assertUntouched(f, original);
+				f.invalidate();
+				const replacement = createMockExtensionApi();
+				subagentsExtension(replacement.api);
+				f.ctx.ui.select = async () => NO;
+				await assert.rejects(
+					replacement.registeredTools
+						.find((tool) => tool.name === f.writer.name)
+						.execute("replacement", proposal(), undefined, undefined, f.ctx),
+					/not written: approval declined, cancelled or timed out/,
+				);
+				assert.deepEqual(readFileSync(f.configPath), original);
+			});
+	});
+
+	it("tool cancellation also releases a selector that ignores its abort signal", async () => {
+		await withWriter(async (f) => {
+			const original = readFileSync(f.configPath);
+			const controller = new AbortController();
+			f.ctx.ui.select = async () => new Promise<string | undefined>(() => {});
+			let settled = false;
+			const refused = assert
+				.rejects(
+					execute(f, proposal(), controller.signal),
+					/not written: approval declined/,
+				)
+				.then(() => {
+					settled = true;
+				});
+			controller.abort();
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			assert.equal(settled, true);
+			await refused;
+			assertUntouched(f, original);
+			f.ctx.ui.select = async () => NO;
+			await assert.rejects(execute(f), /not written: approval declined/);
 			assertUntouched(f, original);
 		});
 	});
@@ -655,6 +736,77 @@ describe("task-model writer approval", () => {
 					JSON.stringify(before),
 				);
 				assert.deepEqual(readdirSync(path), ["config.json"]);
+			}
+		});
+	});
+
+	it("rechecks the real directory immediately after acquiring the lock before creating a temporary file", {
+		skip: process.platform === "win32",
+	}, async (t) => {
+		await withWriter(async (f) => {
+			const first = join(f.dir, "first-target");
+			const second = join(f.dir, "second-target");
+			renameSync(dirname(f.configPath), first);
+			mkdirSync(second);
+			writeFileSync(join(second, "config.json"), JSON.stringify(before));
+			symlinkSync(first, dirname(f.configPath));
+			const prepared = preparedProposal(f);
+			const originalOpen = fs.openSync;
+			let locked = false;
+			let temporaryWrites = 0;
+			const open = t.mock.method(
+				fs,
+				"openSync",
+				(...args: Parameters<typeof fs.openSync>) => {
+					const descriptor = originalOpen(...args);
+					if (String(args[0]) === `${prepared.realConfigPath}.lock`) {
+						locked = true;
+						unlinkSync(dirname(f.configPath));
+						symlinkSync(second, dirname(f.configPath));
+					}
+					return descriptor;
+				},
+			);
+			syncBuiltinESMExports();
+			try {
+				assert.throws(
+					() =>
+						writeTaskModelConfig(
+							f.configPath,
+							"unused",
+							prepared.after.tasks ?? {},
+							tasksMeta,
+							() => true,
+							{
+								approvedWrite: prepared,
+								tasksThinking: prepared.after.tasksThinking,
+								fileOperations: {
+									renameSync,
+									writeFileSync(path, data, options) {
+										temporaryWrites++;
+										writeFileSync(path, data, options);
+									},
+								},
+							},
+						),
+					/directory changed after approval/,
+				);
+				assert.equal(locked, true);
+				assert.equal(
+					temporaryWrites,
+					0,
+					"the under-lock check must reject before any temporary write",
+				);
+				for (const path of [first, second]) {
+					assert.equal(
+						readFileSync(join(path, "config.json"), "utf8"),
+						JSON.stringify(before),
+					);
+					assert.deepEqual(readdirSync(path), ["config.json"]);
+				}
+			} finally {
+				open.mock.restore();
+				syncBuiltinESMExports();
 			}
 		});
 	});

@@ -147,10 +147,10 @@ describe("task-model init composition", () => {
 		]);
 		assert.doesNotMatch(prompt, /secret-/);
 		// Golden SHA-256 of the accepted direct-writer prompt for these facts.
-		// Recaptured when init gained mandatory host-writer UI approval guidance.
+		// Recaptured when basis guidance distinguished the compact dialog from the tool result.
 		assert.equal(
 			createHash("sha256").update(prompt).digest("hex"),
-			"bb63f63538059cbc198c9a5b7f3e88fd0e215e94c02687dd377637a5c8152810",
+			"ee1c2798118b09883d54d156a73eb21b9fd286de85c42b4ddaef5008c35bbd1e",
 		);
 		const unknown = initHost(() => ({
 			projectActiveRegistry: (project) =>
@@ -159,6 +159,19 @@ describe("task-model init composition", () => {
 		const json = JSON.parse(unknown.match(/```json\n([\s\S]*?)\n```/)![1]);
 		assert.equal(Object.hasOwn(json.models[0], "extensionRegistered"), false);
 		assert.deepEqual(json.models[0].auth, { configured: true });
+	});
+
+	it("describes a basis-kind summary in the dialog and research sources in the tool result", () => {
+		const { prompts } = initHost();
+		assert.match(
+			prompts[0],
+			/approval dialog summarizes the basis by kind as submitted, not independently verified/,
+		);
+		assert.match(
+			prompts[0],
+			/research sources and their influence appear in the tool result/,
+		);
+		assert.doesNotMatch(prompts[0], /The basis is shown as submitted/);
 	});
 
 	it("includes saved thinking in the brief and asks for a thinking draft", () => {

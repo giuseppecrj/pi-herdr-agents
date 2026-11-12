@@ -252,8 +252,9 @@ abbreviated; `null` means not configured. The first/default option is **No, keep
 current**; only **Yes, save** approves. Enter alone therefore refuses even if a
 small pane clips the diff. The timeout remains 60 seconds. Only one approval
 may be open in the process; a second writer call refuses immediately. Ranking
-basis is summarized as submitted/unverified and is not saved. Missing thinking
-uses role, then parent; category thinking clamps at launch.
+basis is summarized by kind as submitted/unverified; research sources and their
+influence appear in the tool result, not the dialog. The basis is not saved.
+Missing thinking uses role, then parent; category thinking clamps at launch.
 Only an affirmative approval writes. Decline, Escape/cancellation, timeout,
 print/JSON mode, or unavailable UI writes nothing and returns a refusal. Parent
 TUI and dialog-capable RPC sessions use the same prompt. Child sessions have no
@@ -323,7 +324,9 @@ filesystem transaction against arbitrary external writers.
 Known limits: a non-cooperating process can unlink/recreate the advisory lock,
 so the host does not guarantee that it remains held throughout publication.
 Approval is not a filesystem authorization boundary. A reload can hide an open
-selector; hiding it is not approval and writes nothing. Short/narrow panes can
+selector; hiding it is not approval and writes nothing. On shutdown or session
+replacement, the host aborts pending approval and releases its gate even if the
+hidden selector never resolves. Short/narrow panes can
 still clip unusually long changes; refusal is deliberately the default.
 
 ## Task routing
