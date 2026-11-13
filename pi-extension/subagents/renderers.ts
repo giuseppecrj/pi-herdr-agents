@@ -248,10 +248,16 @@ export function registerMessageRenderers(pi: ExtensionAPI): void {
 				const content = isString(message.content) ? message.content : "";
 				const lines = displayLines(content.trim()).filter(Boolean);
 				const shown = options.expanded ? lines : lines.slice(1, 2);
+				// Expanded shows the whole notice; Text wraps it. Collapsed keeps one line.
 				const contentLines = [
 					header,
 					...shown.map((line) =>
-						theme.fg("dim", truncateToWidth(line, Math.max(0, width - 6))),
+						theme.fg(
+							"dim",
+							options.expanded
+								? line
+								: truncateToWidth(line, Math.max(0, width - 6)),
+						),
 					),
 				];
 				if (!options.expanded)
