@@ -32,6 +32,11 @@ import {
 } from "../../../core/accept.ts";
 import { readAcceptSpecFile } from "../accept-runner.ts";
 import { createChildAcceptLoop } from "./accept-check.ts";
+import {
+	childNoticeRefusal,
+	NOTICE_CAP,
+	NOTICE_CHILD_INTERVAL_MS,
+} from "../../../core/specialist-notice.ts";
 
 export function shouldMarkUserTookOver(agentStarted: boolean): boolean {
 	return agentStarted;
@@ -132,7 +137,9 @@ function findUnsettledPersistentTask(
 ): string {
 	const settledTasks = new Set(
 		readPersistentTaskEvents(sessionFile)
-			.filter((event) => event.generation === generation)
+			.filter(
+				(event) => event.type !== "notice" && event.generation === generation,
+			)
 			.map((event) => event.task),
 	);
 	return (
@@ -186,6 +193,8 @@ export default function (pi: ExtensionAPI) {
 	const deniedToolsValue = process.env.PI_DENY_TOOLS;
 	const autoExit = process.env.PI_SUBAGENT_AUTO_EXIT === "1";
 	const persistent = process.env.PI_SUBAGENT_PERSISTENT === "1";
+	// The parent opted this specialist into notices at launch (ADR-0019).
+	const notify = persistent && process.env.PI_SUBAGENT_NOTIFY === "1";
 	const generation = process.env.PI_SUBAGENT_GENERATION_ID ?? "";
 	const sessionFile = process.env.PI_SUBAGENT_SESSION;
 	const initialTask = process.env.PI_SUBAGENT_TASK_ID ?? "";
@@ -194,7 +203,9 @@ export default function (pi: ExtensionAPI) {
 			(initialTask &&
 			!readPersistentTaskEvents(sessionFile ?? "").some(
 				(event) =>
-					event.task === initialTask && event.generation === generation,
+					event.type !== "notice" &&
+					event.task === initialTask &&
+					event.generation === generation,
 			)
 				? initialTask
 				: "")
@@ -452,6 +463,13 @@ export default function (pi: ExtensionAPI) {
 				);
 			}
 
+			// The parent ignores a help request for no task; an opted-in
+			// specialist has a tool that reaches it.
+			if (notify && !currentTask)
+				throw new Error(
+					"caller_ping has no current task to ask about, so the parent would ignore it. " +
+						"Use caller_notify to tell the parent something changed.",
+				);
 			recorder.callerPing();
 			if (persistent) {
 				appendPersistentTaskEvent(sessionFile, {
@@ -491,6 +509,62 @@ export default function (pi: ExtensionAPI) {
 			};
 		},
 	});
+
+	if (notify)
+		pi.registerTool({
+			name: "caller_notify",
+			label: "Caller Notify",
+			description:
+				"Wake the parent agent with a short notice that something changed, without ending or completing any task. " +
+				`Only for a persistent specialist whose parent opted in; at most ${NOTICE_CAP} notices, at least ${NOTICE_CHILD_INTERVAL_MS / 1_000} seconds apart. ` +
+				"Send one only when something the parent cares about changed, never to say that nothing changed.",
+			parameters: Type.Object({
+				message: Type.String({
+					description: "What changed, in a sentence or two",
+				}),
+			}),
+			async execute(_toolCallId, params) {
+				const sessionFile = process.env.PI_SUBAGENT_SESSION;
+				if (!sessionFile)
+					throw new Error(
+						"caller_notify is only available in persistent subagent contexts. " +
+							"PI_SUBAGENT_SESSION environment variable is not set.",
+					);
+				// Counted from the event file, so a child /reload keeps its place.
+				const sent = readPersistentTaskEvents(sessionFile).filter(
+					(event) => event.type === "notice" && event.generation === generation,
+				);
+				const last = sent.at(-1);
+				const refusal = childNoticeRefusal(
+					{
+						sent: sent.length,
+						lastAt: last ? Date.parse(last.at) : undefined,
+					},
+					Date.now(),
+				);
+				if (refusal) throw new Error(refusal);
+				const sequence = sent.length + 1;
+				// No activity change: a notice neither starts nor ends a task.
+				appendPersistentTaskEvent(sessionFile, {
+					type: "notice",
+					task: "",
+					generation,
+					message: params.message,
+					sequence,
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text:
+								`Notice ${sequence} of ${NOTICE_CAP} sent. ` +
+								"It does not end or complete any task; continue your current work or stay available for subagent_send.",
+						},
+					],
+					details: {},
+				};
+			},
+		});
 
 	let inboxPoller: ReturnType<typeof setInterval> | undefined;
 	if (persistent) {

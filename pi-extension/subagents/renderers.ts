@@ -228,6 +228,45 @@ export function registerMessageRenderers(pi: ExtensionAPI): void {
 		};
 	});
 
+	// ── subagent_notice message renderer ──
+	pi.registerMessageRenderer("subagent_notice", (message, options, theme) => {
+		// SAFETY: this renderer is only ever wired to messages this extension sends
+		// with customType "subagent_notice"; registerMessageRenderer has no static
+		// link between the customType string and a details shape.
+		const details = message.details as any;
+		if (!details) return undefined;
+		return {
+			invalidate() {},
+			render(width: number): string[] {
+				const name = displayValue(String(details.name ?? "subagent"));
+				const count =
+					isFiniteNumber(details.notice) && isFiniteNumber(details.cap)
+						? ` ${details.notice}/${details.cap}`
+						: "";
+				const header = `${theme.fg("accent", "!")} ${theme.fg("toolTitle", theme.bold(name))} ${theme.fg("dim", `— notice${count}`)}`;
+				// The serialized content: every child value in it is already encoded.
+				const content = isString(message.content) ? message.content : "";
+				const lines = displayLines(content.trim()).filter(Boolean);
+				const shown = options.expanded ? lines : lines.slice(1, 2);
+				const contentLines = [
+					header,
+					...shown.map((line) =>
+						theme.fg("dim", truncateToWidth(line, Math.max(0, width - 6))),
+					),
+				];
+				if (!options.expanded)
+					contentLines.push(
+						theme.fg("muted", keyHint("app.tools.expand", "to expand")),
+					);
+				const box = new Box(1, 1, (text: string) =>
+					theme.bg("customMessageBg", text),
+				);
+				box.addChild(new Text(contentLines.join("\n"), 0, 0));
+				return ["", ...box.render(width)];
+			},
+		};
+	});
+
 	// ── subagent_ping message renderer ──
 	pi.registerMessageRenderer("subagent_ping", (message, options, theme) => {
 		// SAFETY: this renderer is only ever wired to messages this extension sends

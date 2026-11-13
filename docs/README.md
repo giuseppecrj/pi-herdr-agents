@@ -80,6 +80,7 @@ real implementations; in-memory fakes are conformance fixtures only.
 | [`0016`](adr/0016-delegation-outcome-contract.md) | Accepted | Define a small, versioned delegation outcome contract with this package as its reference implementation. |
 | [`0017`](adr/0017-accept-check.md) | Accepted | A caller-supplied accept check; the parent's re-check decides a verdict from a closed set, and each model attempt adds an outcome-ledger line. |
 | [`0018`](adr/0018-herdr-core-execution.md) | Accepted | Add local Core execution with pinned ownership and explicit atomic-start uncertainty; keep Desktop placement and visual parity separate. |
+| [`0019`](adr/0019-specialist-notices.md) | Accepted | Let a persistent specialist the parent opted in wake it between tasks with bounded `caller_notify` notices that change no task state. |
 
 ## Active design
 

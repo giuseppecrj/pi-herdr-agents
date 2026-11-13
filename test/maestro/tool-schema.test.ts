@@ -94,6 +94,8 @@ describe("public tool schema snapshot", () => {
 		const current = fixture("current");
 		assert.deepEqual(toolNamed(current, "caller_ping").scopes, ["child"]);
 		assert.deepEqual(toolNamed(current, "subagent_done").scopes, ["child"]);
+		// Registered only in an opted-in persistent specialist (ADR-0019).
+		assert.deepEqual(toolNamed(current, "caller_notify").scopes, ["child"]);
 	});
 });
 

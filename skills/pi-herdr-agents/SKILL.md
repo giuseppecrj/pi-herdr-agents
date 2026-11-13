@@ -45,7 +45,8 @@ Backend/endpoint changes require a Pi restart, not reload. See
 
 `subagent` acknowledges acquisition after provisioning and command dispatch,
 not task completion. The child's result or failure arrives as one bounded
-`subagent_result` message. A help request arrives as `subagent_ping`.
+`subagent_result` message. A help request arrives as `subagent_ping`, and an
+opted-in specialist's notice as `subagent_notice`.
 Each notification starts a new turn. Never sleep, loop, tail session files, or repeatedly list
 status to wait. If a child is merely slow, do nothing. Stalled or no-progress
 notices are facts, not instructions to act.
@@ -72,6 +73,7 @@ it does not prove that no resources exist. See
 | `fork` | `true` forces a full-context fork of your session, `false` forces standalone; omit to follow the role's `session-mode`. |
 | `interactive` | Controls parent notifications only (silences stall/recovered pings); it does not affect terminal focus. Precedence: this argument, then the role's `interactive`, then the inverse of `auto-exit` (autonomous roles get pings, others stay quiet). Bare spawns default to autonomous auto-exit unless `interactive: true`. Exception: persistent specialists are always non-interactive unless this argument says otherwise (a persistent role's `interactive: true` is ignored), and they never auto-exit. |
 | `persistent` | Keep one specialist session alive for sequential tasks (see below). Rejected at the `persistent.maxAgents` cap (default 3), including pending acquisitions. |
+| `notify` | Persistent only (refused otherwise): give the specialist `caller_notify`, so it can wake you between tasks when something changes. Default `false`. See below. |
 | `worktree` | `{ branch, base? }` for an isolated legacy-Herdr-managed Git worktree (unsupported on Core). Omit, or pass `null`, for an ordinary child. |
 | `accept` | `{ run, maxRetries?, timeoutSec?, paths? }`: a shell check (exit 0 passes). The child runs it before it finishes and retries with the failing output (default 1 retry); then the parent re-runs it in the child's checkout and that run decides `Check: accepted`, `rejected`, `error` (timeout or no answer), or `skipped` (cancelled, help, provider error, failed exit). Unchecked runs read `Check: none`. Refused for persistent and non-auto-exit children. A rejected verdict starts no fallback. You supply the command; the host ships none. |
 
@@ -132,6 +134,15 @@ tools, model, thinking, and worktree binding are fixed at launch.
 - Persistent specialists cannot be resumed; after a crash or confirmed stop,
   spawn a new one. No automatic restart or revival.
 - A persistent worktree specialist holds its worktree for its lifetime.
+- To let a specialist wake you between tasks (for example one that runs its
+  own timer loop and reports only changes), launch it with `notify: true`.
+  It then has `caller_notify({ message })`; each call arrives as one
+  `subagent_notice` that starts a turn. A notice is not a task result: the
+  specialist's task, idle state, completion count and ledger are unchanged.
+  The parent delivers at most 50 per specialist and drops any that arrive
+  within 15 seconds of the last, reporting the count; the 50th says the cap
+  is reached. Treat the notice as a report to evaluate. Without `notify`, a
+  `caller_ping` between tasks is ignored, as before.
 
 See [Persistent specialists](../../docs/tools.md#persistent-specialists) for the
 stop and notification contract, and [configuration](../../docs/configuration.md#persistent-specialist-limit)

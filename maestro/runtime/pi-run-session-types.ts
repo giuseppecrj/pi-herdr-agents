@@ -142,6 +142,8 @@ export interface PiRunRecord {
 	taskId?: string;
 	/** Task IDs this parent dispatched; the child-writable ledger never decides. */
 	issuedTaskIds?: string[];
+	/** The parent opted this specialist into notices at launch (ADR-0019). */
+	notify?: boolean;
 	inboxSequence?: number;
 	observedTaskEvents?: number;
 	stopState?: "requested" | "pending" | "failed";
@@ -198,11 +200,12 @@ export interface PiCompletedMetadata {
 // pi-herdr-agents extension
 export interface PiPersistentEvent {
 	version: 1;
-	type: "task-done" | "help-request";
+	type: "task-done" | "help-request" | "notice";
 	task: string;
 	generation: string;
 	at: string;
 	message?: string;
+	sequence?: number;
 }
 // pi-herdr-agents extension
 export interface PiLedgerEntry {

@@ -120,6 +120,7 @@ export function createLaunchPlanner({
 					autoExit: effectiveAutoExit,
 					interactive: effectiveInteractive,
 					persistent,
+					notify: params.notify === true,
 					systemPromptMode: agentDefs?.systemPromptMode,
 				},
 				systemPrompt: params.agent ? undefined : params.systemPrompt,

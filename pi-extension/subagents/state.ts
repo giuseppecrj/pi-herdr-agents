@@ -16,6 +16,7 @@ import type {
 	SubagentLifecycle,
 } from "../../maestro/core/lifecycle.ts";
 import { SUBAGENT_RUNTIME_KEY } from "../../maestro/core/undelivered-children.ts";
+import type { NoticeBudget } from "../../maestro/core/specialist-notice.ts";
 import type {
 	WorktreeHandoff,
 	WorktreeLaunch,
@@ -133,6 +134,10 @@ export interface RunningSubagent {
 	issuedTaskIds?: string[];
 	/** Events for tasks the parent never issued, ignored after one notice. */
 	ignoredTaskEvents?: number;
+	/** The parent opted this specialist into notices at launch (ADR-0019). */
+	notify?: boolean;
+	/** Parent-owned notice accounting; survives reload, not a process crash. */
+	noticeBudget?: NoticeBudget;
 	inboxSequence?: number;
 	observedTaskEvents?: number;
 	/** Parent-owned send/ack progress survives reload, not a process crash. */

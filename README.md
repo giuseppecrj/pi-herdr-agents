@@ -168,7 +168,7 @@ Children get `caller_ping` to ask the parent for help. Interactive children also
 | `/subagents-init [preferences]` | Draft task-category model preferences from the live model registry. |
 | `/skill:pi-herdr-agents` | Load the host operating guide. |
 
-The main `subagent` parameters are `name`, `task`, `agent`, `model`, `thinking`, `fork`, `cwd`, `persistent`, `interactive`, `worktree`, and `accept`. Pass `accept: { run: "npm test" }` to have the child run your check before it finishes and retry on failure, then have the parent re-run it: every result carries a `Check:` verdict (`accepted`, `rejected`, `error`, `skipped`, or `none`), and only the parent's re-check decides it ([Accept checks](docs/tools.md#accept-checks)). See [Parameters](docs/tools.md#parameters) for every parameter, and [Tools and lifecycle reference](docs/tools.md) for the full behavior of each tool. Live tool descriptions and these documents are authoritative. The `pi-herdr-agents` skill is a general operating guide.
+The main `subagent` parameters are `name`, `task`, `agent`, `model`, `thinking`, `fork`, `cwd`, `persistent`, `notify`, `interactive`, `worktree`, and `accept`. Pass `accept: { run: "npm test" }` to have the child run your check before it finishes and retry on failure, then have the parent re-run it: every result carries a `Check:` verdict (`accepted`, `rejected`, `error`, `skipped`, or `none`), and only the parent's re-check decides it ([Accept checks](docs/tools.md#accept-checks)). See [Parameters](docs/tools.md#parameters) for every parameter, and [Tools and lifecycle reference](docs/tools.md) for the full behavior of each tool. Live tool descriptions and these documents are authoritative. The `pi-herdr-agents` skill is a general operating guide.
 
 ## Choose models
 
@@ -206,7 +206,7 @@ Three tools end or pause work, and each does something different:
 
 A child that needs help calls `caller_ping`. An ordinary child exits, and you continue it with `subagent_resume({ sessionPath, message })`. A persistent specialist stays alive. Its help request ends the current task, and your `subagent_send` answer starts the next one. `subagent_resume` restores the child's launch tool policy and rejects managed-worktree sessions. Continue a worktree child in its retained workspace instead.
 
-Set `persistent: true` to keep one specialist session for sequential tasks. It accepts one task at a time and rejects sends while busy. `persistent.maxAgents` caps how many stay open (default `3`). Persistent sessions cannot be resumed.
+Set `persistent: true` to keep one specialist session for sequential tasks. It accepts one task at a time and rejects sends while busy. `persistent.maxAgents` caps how many stay open (default `3`). Persistent sessions cannot be resumed. Add `notify: true` to let a specialist that watches something wake you between tasks with `caller_notify`. Each notice starts a turn but is not a task result, and the parent delivers at most 50 per specialist, rate-limited ([Notices between tasks](docs/tools.md#notices-between-tasks)).
 
 Details: [Persistent specialists](docs/tools.md#persistent-specialists), [Interrupting](docs/tools.md#interrupting-a-running-subagent), [Cancelling](docs/tools.md#cancelling-a-running-subagent), and [`caller_ping`](docs/tools.md#caller_ping--child-to-parent-help-request).
 

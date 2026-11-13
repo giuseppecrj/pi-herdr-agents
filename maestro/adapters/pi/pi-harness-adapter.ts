@@ -54,6 +54,7 @@ import {
 import type { WorktreeOperations } from "../../core/worktree.ts";
 import { waitForCompletion } from "./completion.ts";
 import { acceptLaunchRefusal } from "../../core/accept.ts";
+import { notifyLaunchRefusal } from "../../core/specialist-notice.ts";
 import {
 	appendPersistentDeliveryLedger,
 	findObservedSessionRuntime,
@@ -182,6 +183,9 @@ export class PiHarnessAdapter implements HarnessAdapter {
 		const acceptRefusal =
 			opts.accept && acceptLaunchRefusal({ persistent, autoExit });
 		if (acceptRefusal) throw new Error(acceptRefusal);
+		const notify = opts.behavior?.notify === true;
+		const notifyRefusal = notifyLaunchRefusal({ persistent, notify });
+		if (notifyRefusal) throw new Error(notifyRefusal);
 		const denied = new Set([
 			...(defaults?.denyTools ?? []),
 			...(opts.behavior?.denyTools ?? []),
@@ -243,6 +247,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 				autoExit,
 				interactive,
 				persistent,
+				notify,
 				logicalId: opts.launchIdentity?.logicalId ?? id,
 				generationId: opts.launchIdentity?.generationId ?? randomUUID(),
 				taskId,
