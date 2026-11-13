@@ -86,11 +86,11 @@ function harness(dir: string, notify = true) {
 	return {
 		running,
 		mock,
-		notice(message = "PR 12 changed") {
+		notice(message = "PR 12 changed", generation = "generation") {
 			appendPersistentTaskEvent(running.sessionFile, {
 				type: "notice",
 				task: "",
-				generation: "generation",
+				generation,
 				message,
 				sequence: ++sequence,
 			});
@@ -153,6 +153,23 @@ describe("parent delivery of specialist notices", () => {
 			h.drain();
 			assert.equal(h.mock.sentMessages.length, 0);
 			assert.equal(h.running.ignoredTaskEvents, undefined);
+		}));
+
+	it("ignores a notice from another generation without spending the budget", () =>
+		withDir((dir) => {
+			const h = harness(dir);
+			h.notice("stale", "previous-generation");
+			h.drain();
+			assert.equal(h.notices().length, 0);
+			assert.equal(h.running.noticeBudget, undefined);
+			h.notice("current");
+			h.drain();
+			assert.equal(h.notices().length, 1);
+			assert.equal(
+				h.notices()[0]?.message.details.notice,
+				1,
+				"it is notice 1: the stale one spent nothing",
+			);
 		}));
 
 	it("delivers each notice once across reloads and re-reads", () =>
