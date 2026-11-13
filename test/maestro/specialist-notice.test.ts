@@ -253,6 +253,30 @@ describe("parent delivery of specialist notices", () => {
 			);
 		}));
 
+	it("wraps a long notice when expanded instead of cutting its end", () =>
+		withDir((dir) => {
+			const h = harness(dir);
+			h.notice(`${"word ".repeat(60)}TAIL-MARKER`);
+			h.drain();
+			const host = createMockExtensionApi();
+			subagentsModule.default(host.api);
+			const { renderer } = host.registeredMessageRenderers.find(
+				(entry) => entry.name === "subagent_notice",
+			)!;
+			const theme = {
+				fg: (_color: string, text: string) => text,
+				bg: (_color: string, text: string) => text,
+				bold: (text: string) => text,
+			};
+			const lines = renderer(
+				h.notices()[0].message,
+				{ expanded: true },
+				theme,
+			).render(60);
+			assert.match(lines.join("\n"), /TAIL-MARKER/);
+			assert.ok(lines.length > 4, "the long notice wraps over several lines");
+		}));
+
 	it("still delivers a later task result with the right count", () =>
 		withDir((dir) => {
 			const h = harness(dir);
