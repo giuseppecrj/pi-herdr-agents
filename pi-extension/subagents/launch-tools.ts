@@ -27,6 +27,7 @@ import {
 	acceptLaunchRefusal,
 	normalizeAcceptSpec,
 } from "../../maestro/core/accept.ts";
+import { notifyLaunchRefusal } from "../../maestro/core/specialist-notice.ts";
 import { getFirstText, launchDiagnosticsText } from "./presentation.ts";
 import {
 	encodeHostValue,
@@ -210,6 +211,15 @@ export function registerSubagentTool(
 							details: { error: "accept-unsupported" },
 						};
 				}
+				const notifyRefusal = notifyLaunchRefusal({
+					persistent,
+					notify: params.notify,
+				});
+				if (notifyRefusal)
+					return {
+						content: [{ type: "text", text: `Error: ${notifyRefusal}` }],
+						details: { error: "notify-unsupported" },
+					};
 				const capError = persistent ? persistentCapacityError() : undefined;
 				if (capError) {
 					return {

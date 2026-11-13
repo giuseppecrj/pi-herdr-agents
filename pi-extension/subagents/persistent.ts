@@ -9,6 +9,7 @@ import type {
 } from "../../maestro/runtime/index.ts";
 import type { PersistentConfig } from "../../maestro/core/config/persistent-config.ts";
 import { projectLifecycle } from "../../maestro/core/lifecycle.ts";
+import { NOTICE_CAP } from "../../maestro/core/specialist-notice.ts";
 import type { WorktreeHandoff } from "../../maestro/core/worktree.ts";
 import {
 	type RunningSubagent,
@@ -186,7 +187,7 @@ export function createPersistentControls({
 			...specialists.map((running) => {
 				const allowlist = running.policyTools?.join(",") ?? "unrestricted";
 				const denied = running.policyDeniedTools?.join(",") || "none";
-				return `• ${encodeHostValue(running.name)} | ${encodeHostValue(running.logicalId ?? "")} | ${encodeHostValue(running.generationId ?? "")} | ${encodeHostValue(running.agent ?? "bare")} | ${persistentSpecialistState(running)} | ${running.tasksCompleted ?? 0} completed | tools: ${encodeHostValue(allowlist, HOST_PATH_CHARS)}; denied: ${encodeHostValue(denied, HOST_PATH_CHARS)}; persistent: true`;
+				return `• ${encodeHostValue(running.name)} | ${encodeHostValue(running.logicalId ?? "")} | ${encodeHostValue(running.generationId ?? "")} | ${encodeHostValue(running.agent ?? "bare")} | ${persistentSpecialistState(running)} | ${running.tasksCompleted ?? 0} completed | tools: ${encodeHostValue(allowlist, HOST_PATH_CHARS)}; denied: ${encodeHostValue(denied, HOST_PATH_CHARS)}; persistent: true${running.notify ? `; notices: ${running.noticeBudget?.delivered ?? 0} of ${NOTICE_CAP} delivered` : ""}`;
 			}),
 		];
 	}

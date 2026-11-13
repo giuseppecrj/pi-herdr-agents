@@ -134,6 +134,12 @@ export const SubagentParams = Type.Object({
 				"Keep the child alive between tasks. Send later tasks with subagent_send.",
 		}),
 	),
+	notify: Type.Optional(
+		Type.Boolean({
+			description:
+				"Persistent only. Give the specialist caller_notify, so it can wake you between tasks when something changes (at most 50 notices, rate-limited). Default false.",
+		}),
+	),
 	accept: Type.Optional(
 		Type.Object(
 			{

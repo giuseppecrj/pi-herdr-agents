@@ -69,6 +69,8 @@ export interface Task {
 	// pi-herdr-agents extension
 	behavior?: {
 		persistent?: boolean;
+		/** A persistent specialist may wake the parent with notices (ADR-0019). */
+		notify?: boolean;
 		autoExit?: boolean;
 		interactive?: boolean;
 		systemPromptMode?: "replace" | "append";

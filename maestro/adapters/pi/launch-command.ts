@@ -56,6 +56,7 @@ export function childDepthAssignment(
 export function buildSubagentToolAllowlist(
 	tools?: string,
 	autoExit = false,
+	notify = false,
 ): string | null {
 	const requested = (tools ?? "")
 		.split(",")
@@ -64,7 +65,9 @@ export function buildSubagentToolAllowlist(
 	if (requested.length === 0) return null;
 	const allow = new Set(requested);
 	allow.delete("subagent_done");
+	allow.delete("caller_notify");
 	allow.add("caller_ping");
+	if (notify) allow.add("caller_notify");
 	if (!autoExit) allow.add("subagent_done");
 	return [...allow].join(",");
 }

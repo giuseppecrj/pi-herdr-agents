@@ -63,7 +63,9 @@ Fakes are for conformance tests only.
   normalization for child text.
 - `maestro/adapters/pi/` — Pi launch, completion, session I/O, activity files,
   model SDK glue, and registry projection behind `PiHarnessAdapter`;
-  `child/subagent-done.ts` implements the child protocol, and
+  `child/subagent-done.ts` implements the child protocol (including the
+  opt-in persistent `caller_notify`, bounded by `maestro/core/specialist-notice.ts`,
+  [ADR-0019](adr/0019-specialist-notices.md)), and
   `child/declared-skills.ts` injects the declared skills the child's own Pi
   loaded on its first run (names come from `maestro/core/declared-skills.ts`).
   Launch is split into `launch.ts` (fresh transaction), `launch-resume.ts`

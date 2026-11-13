@@ -95,6 +95,14 @@ line.
 | `help-request` | A child calls `caller_ping`, or a persistent specialist asks for help on a task the parent issued. | `pi-extension/subagents/delivery.ts` `settle`, `deliverPersistentTaskEvent` |
 | `task-result` | A persistent specialist finishes a task the parent issued. | `delivery.ts` `deliverPersistentTaskEvent` |
 
+A persistent specialist's notice (`subagent_notice`,
+[ADR-0019](adr/0019-specialist-notices.md)) is not a kind and has no envelope.
+It is delivered only when the parent launched the specialist with `notify:
+true`. Its message is one [host-line value](#host-line-values) after the fixed
+`Notice:` label, followed by a host line telling the parent to treat it as a
+report to evaluate. The optional `notify` request field and this message are
+additive: a parent that never sets `notify` receives nothing new.
+
 A provider or agent error has no envelope. The host puts the error after the
 fixed `Error:` label in its head and delivers no body
 (`resolveResultPresentation`). The child process
@@ -186,6 +194,7 @@ The raw values stay in structured details (`errorMessage`, `fallbackFailures`,
 | Worktree fields | `Worktree:`, `Workspace:`, `Branch:`, `Base/head:`, the `Changed:` and `Untracked:` lists, and `Git inspection warning:` |
 | Session file | `Session:` |
 | Persistent task IDs | Task-result and help-request heads, the ignored-event notice, and the `Task outcomes:` list in crash and stop notices |
+| Specialist notice message | `Notice:` in a `subagent_notice`, bounded to 4,000 characters (`delivery.ts` `deliverNotice`) |
 
 #### Executable commands
 

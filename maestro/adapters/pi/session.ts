@@ -22,6 +22,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import {
 	isBoolean,
+	isFiniteNumber,
 	isPlainObject,
 	isRecord,
 	isString,
@@ -97,11 +98,14 @@ export type SubagentSessionPolicy =
 
 export interface PersistentTaskEvent {
 	version: 1;
-	type: "task-done" | "help-request";
+	/** A `notice` belongs to no task: its `task` is "" (ADR-0019). */
+	type: "task-done" | "help-request" | "notice";
 	task: string;
 	generation: string;
 	at: string;
 	message?: string;
+	/** A notice's 1-based number within its generation. */
+	sequence?: number;
 }
 
 export interface PersistentDeliveryLedgerEntry {
@@ -393,12 +397,24 @@ export function appendPersistentTaskEvent(
 		at: event.at ?? new Date().toISOString(),
 	};
 	if (event.message !== undefined) value.message = event.message;
+	if (event.sequence !== undefined) value.sequence = event.sequence;
 	appendFileSync(
 		getPersistentTaskEventsFile(sessionFile),
 		`${JSON.stringify(value)}\n`,
 		"utf8",
 	);
 	return value;
+}
+
+/** A notice's number; `undefined` when it lacks a message or a positive whole number. */
+function parseNoticeSequence(value: JsonObject): number | undefined {
+	const sequence = value.sequence;
+	return isString(value.message) &&
+		isFiniteNumber(sequence) &&
+		Number.isSafeInteger(sequence) &&
+		sequence >= 1
+		? sequence
+		: undefined;
 }
 
 export function readPersistentTaskEvents(
@@ -414,13 +430,17 @@ export function readPersistentTaskEvents(
 				if (
 					!isRecord(value) ||
 					value.version !== 1 ||
-					(value.type !== "task-done" && value.type !== "help-request") ||
+					(value.type !== "task-done" &&
+						value.type !== "help-request" &&
+						value.type !== "notice") ||
 					!isString(value.task) ||
 					!isString(value.generation) ||
 					!isString(value.at) ||
 					(value.message !== undefined && !isString(value.message))
 				)
 					return [];
+				const sequence = parseNoticeSequence(value);
+				if (value.type === "notice" && sequence === undefined) return [];
 				const event: PersistentTaskEvent = {
 					version: 1,
 					type: value.type,
@@ -429,6 +449,7 @@ export function readPersistentTaskEvents(
 					at: value.at,
 				};
 				if (value.message !== undefined) event.message = value.message;
+				if (value.type === "notice") event.sequence = sequence;
 				return [event];
 			} catch {
 				return [];

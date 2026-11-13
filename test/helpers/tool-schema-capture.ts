@@ -50,6 +50,7 @@ const PINNED_ENV = [
 	"PI_DENY_TOOLS",
 	"PI_SUBAGENT_AUTO_EXIT",
 	"PI_SUBAGENT_PERSISTENT",
+	"PI_SUBAGENT_NOTIFY",
 	"PI_SUBAGENT_PROCESS_FILE",
 	"PI_SUBAGENT_SESSION",
 	"PI_SUBAGENT_NAME",
@@ -72,8 +73,17 @@ async function importFresh(path: string): Promise<ExtensionFactory> {
 }
 
 async function captureScope(scope: ToolScope) {
-	if (scope === "child") process.env.PI_SUBAGENT_ID = "tool-schema-capture";
-	else delete process.env.PI_SUBAGENT_ID;
+	// The child scope is an opted-in persistent specialist, so it registers the
+	// widest child surface, including caller_notify (ADR-0019).
+	if (scope === "child") {
+		process.env.PI_SUBAGENT_ID = "tool-schema-capture";
+		process.env.PI_SUBAGENT_PERSISTENT = "1";
+		process.env.PI_SUBAGENT_NOTIFY = "1";
+	} else {
+		delete process.env.PI_SUBAGENT_ID;
+		delete process.env.PI_SUBAGENT_PERSISTENT;
+		delete process.env.PI_SUBAGENT_NOTIFY;
+	}
 
 	const mock = createMockExtensionApi();
 	const factories = [

@@ -94,6 +94,8 @@ export interface FreshPiLaunchRequest {
 		autoExit: boolean;
 		interactive: boolean;
 		persistent?: boolean;
+		/** A persistent specialist may wake the parent with notices (ADR-0019). */
+		notify?: boolean;
 		logicalId?: string;
 		generationId?: string;
 		taskId?: string;
@@ -159,6 +161,8 @@ export interface PiRunningChild {
 	taskId?: string;
 	/** Task IDs this parent dispatched; the child-writable ledger never decides. */
 	issuedTaskIds?: string[];
+	/** The parent opted this specialist into notices at launch (ADR-0019). */
+	notify?: boolean;
 	inboxSequence?: number;
 	observedTaskEvents?: number;
 	stopState?: "requested" | "pending" | "failed";
@@ -836,9 +840,14 @@ function buildPiCommand(
 			shellQuote(artifacts.systemPromptFile),
 		);
 	}
+	const notify =
+		!request.handoff &&
+		request.behavior.persistent === true &&
+		request.behavior.notify === true;
 	const toolAllowlist = buildSubagentToolAllowlist(
 		request.behavior.tools,
 		request.behavior.autoExit,
+		notify,
 	);
 	if (toolAllowlist) parts.push("--tools", shellQuote(toolAllowlist));
 	if (!request.handoff) parts.push(shellQuote(artifacts.taskArg));
@@ -880,6 +889,8 @@ function buildPiCommand(
 				`PI_SUBAGENT_GENERATION_ID=${shellQuote(artifacts.policy.generationId)}`,
 			);
 			env.push(`PI_SUBAGENT_TASK_ID=${shellQuote(artifacts.initialTaskId!)}`);
+			// Explicit either way, so an opt-in left in the pane's shell never leaks.
+			env.push(`PI_SUBAGENT_NOTIFY=${notify ? "1" : "0"}`);
 		}
 		env.push(`PI_SUBAGENT_SESSION=${shellQuote(artifacts.sessionFile)}`);
 		env.push(`PI_SUBAGENT_ID=${shellQuote(resolved.id)}`);
@@ -962,6 +973,8 @@ function createRunningChild(
 			inboxSequence: 0,
 			observedTaskEvents: 0,
 		});
+		if (resolved.request.behavior.notify === true && !resolved.request.handoff)
+			child.notify = true;
 		appendPersistentDeliveryLedger(child.sessionFile, {
 			task: initialTaskId!,
 			outcome: "dispatched",

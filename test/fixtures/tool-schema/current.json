@@ -1,6 +1,21 @@
 {
 	"tools": [
 		{
+			"name": "caller_notify",
+			"scopes": ["child"],
+			"description": "Wake the parent agent with a short notice that something changed, without ending or completing any task. Only for a persistent specialist whose parent opted in; at most 50 notices, at least 30 seconds apart. Send one only when something the parent cares about changed, never to say that nothing changed.",
+			"parameters": {
+				"type": "object",
+				"required": ["message"],
+				"properties": {
+					"message": {
+						"description": "What changed, in a sentence or two",
+						"type": "string"
+					}
+				}
+			}
+		},
+		{
 			"name": "caller_ping",
 			"scopes": ["child"],
 			"description": "Send a help request to the parent agent and exit this session. The parent will be notified with your message and can resume this session with a response. Use when you're stuck, need clarification, or need the parent to take action.",
@@ -94,6 +109,10 @@
 					},
 					"persistent": {
 						"description": "Keep the child alive between tasks. Send later tasks with subagent_send.",
+						"type": "boolean"
+					},
+					"notify": {
+						"description": "Persistent only. Give the specialist caller_notify, so it can wake you between tasks when something changes (at most 50 notices, rate-limited). Default false.",
 						"type": "boolean"
 					},
 					"accept": {
