@@ -125,11 +125,13 @@ export async function launchResumedPiSubagent(
 				: []),
 			childDepthAssignment(),
 			modelScopeAssignment(request.modelScope),
-			// The saved session policy records no self-spawn opt-in.
-			"PI_SUBAGENT_SELF_SPAWN=0",
+			`PI_SUBAGENT_SELF_SPAWN=${policy.selfSpawn ? "1" : "0"}`,
 			// A resumed session already holds its skills; never inject them again.
 			`${DECLARED_SKILLS_ENV}=${shellQuote(formatDeclaredSkillsEnv([]))}`,
 			`PI_SUBAGENT_NAME=${shellQuote(request.name)}`,
+			...(policy.agent
+				? [`PI_SUBAGENT_AGENT=${shellQuote(policy.agent)}`]
+				: []),
 			`PI_SUBAGENT_SESSION=${shellQuote(request.sessionFile)}`,
 			`PI_SUBAGENT_ID=${shellQuote(id)}`,
 			`PI_SUBAGENT_ACTIVITY_FILE=${shellQuote(activityFile)}`,

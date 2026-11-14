@@ -283,18 +283,14 @@ describe("PiHarnessAdapter", () => {
 			);
 			const policy = readSubagentSessionPolicy(h.sessionId);
 			assert.equal(policy.version, 2);
-			const { agent: _agent, selfSpawn: _selfSpawn, ...legacyFields } =
-				policy as typeof policy & {
-					agent?: string | null;
-					selfSpawn?: boolean;
-				};
+			if (policy.version !== 2) throw new Error("expected v2 policy");
 			writeSubagentSessionPolicy(h.sessionId, {
-				owner: legacyFields.owner,
-				tools: legacyFields.tools ?? undefined,
-				deniedTools: legacyFields.deniedTools,
-				persistent: legacyFields.persistent,
-				logicalId: legacyFields.logicalId,
-				generationId: legacyFields.generationId,
+				owner: policy.owner,
+				tools: policy.tools ?? undefined,
+				deniedTools: policy.deniedTools,
+				persistent: policy.persistent,
+				logicalId: policy.logicalId,
+				generationId: policy.generationId,
 			});
 			const rewritten = readSubagentSessionPolicy(h.sessionId);
 			assert.equal(
