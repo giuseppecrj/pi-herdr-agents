@@ -89,6 +89,8 @@ export interface SubagentSessionPolicyV2 {
 	logicalId: string;
 	generationId: string;
 	policyHash: string;
+	agent?: string | null;
+	selfSpawn?: boolean;
 	worktree?: PolicyWorktree;
 }
 
@@ -160,7 +162,7 @@ function normalizePolicyToolNames(
 function canonicalPolicyJson(
 	policy: Omit<SubagentSessionPolicyV2, "policyHash">,
 ): string {
-	const canonical = {
+	const canonical: Omit<SubagentSessionPolicyV2, "policyHash"> = {
 		version: policy.version,
 		owner: policy.owner,
 		tools: policy.tools,
@@ -169,9 +171,10 @@ function canonicalPolicyJson(
 		logicalId: policy.logicalId,
 		generationId: policy.generationId,
 	};
-	return JSON.stringify(
-		policy.worktree ? { ...canonical, worktree: policy.worktree } : canonical,
-	);
+	if ("agent" in policy) canonical.agent = policy.agent;
+	if ("selfSpawn" in policy) canonical.selfSpawn = policy.selfSpawn;
+	if (policy.worktree) canonical.worktree = policy.worktree;
+	return JSON.stringify(canonical);
 }
 
 export function writeSubagentSessionPolicy(
@@ -183,6 +186,8 @@ export function writeSubagentSessionPolicy(
 		persistent?: boolean;
 		logicalId?: string;
 		generationId?: string;
+		agent?: string | null;
+		selfSpawn?: boolean;
 		worktree?: PolicyWorktree;
 	},
 ): SubagentSessionPolicyV2 {
@@ -195,6 +200,8 @@ export function writeSubagentSessionPolicy(
 		logicalId: policy.logicalId ?? randomUUID(),
 		generationId: policy.generationId ?? randomUUID(),
 	};
+	if (policy.agent !== undefined) unsigned.agent = policy.agent;
+	if (policy.selfSpawn !== undefined) unsigned.selfSpawn = policy.selfSpawn;
 	if (policy.worktree) unsigned.worktree = policy.worktree;
 	const value: SubagentSessionPolicyV2 = {
 		...unsigned,
@@ -256,6 +263,8 @@ export function readSubagentSessionPolicy(
 					"logicalId",
 					"generationId",
 					"policyHash",
+					"agent",
+					"selfSpawn",
 					"worktree",
 				]);
 	if (Object.keys(value).some((key) => !expected.has(key))) {
@@ -368,6 +377,24 @@ export function readSubagentSessionPolicy(
 		logicalId: value.logicalId,
 		generationId: value.generationId,
 	};
+	if (value.agent !== undefined) {
+		if (value.agent !== null && !isString(value.agent)) {
+			throw policyError(
+				sessionFile,
+				"the saved launch agent policy is malformed",
+			);
+		}
+		unsigned.agent = value.agent;
+	}
+	if (value.selfSpawn !== undefined) {
+		if (!isBoolean(value.selfSpawn)) {
+			throw policyError(
+				sessionFile,
+				"the saved launch self-spawn policy is malformed",
+			);
+		}
+		unsigned.selfSpawn = value.selfSpawn;
+	}
 	if (worktree) unsigned.worktree = worktree;
 	if (
 		createHash("sha256").update(canonicalPolicyJson(unsigned)).digest("hex") !==

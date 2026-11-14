@@ -33,6 +33,7 @@ import { FileWakeRegistry } from "../../maestro/core/wake.ts";
 import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
 import {
 	readSubagentSessionPolicy,
+	writeSubagentSessionPolicy,
 	appendPersistentTaskEvent,
 	consumePersistentTaskInbox,
 	readPersistentDeliveryLedger,
@@ -225,6 +226,89 @@ describe("PiHarnessAdapter", () => {
 			});
 			assert.match(denied, /PI_SUBAGENT_SELF_SPAWN=0/);
 			assert.match(denied, /PI_DENY_TOOLS='subagent,/);
+		}));
+	it("restores PI_SUBAGENT_AGENT and self-spawn on resume from the saved policy", async () =>
+		usingFixture(async (f) => {
+			const commands: string[] = [];
+			f.operations.runScript = (_surface, command, options) => {
+				commands.push(command);
+				return options.scriptPath;
+			};
+			const h = await f.adapter.spawn({
+				...f.options,
+				role: {
+					...f.options.role,
+					defaults: { autoExit: true, selfSpawn: true },
+				},
+			});
+			assert.match(commands.at(-1) ?? "", /PI_SUBAGENT_AGENT='worker'/);
+			assert.match(commands.at(-1) ?? "", /PI_SUBAGENT_SELF_SPAWN=1/);
+			writeFileSync(
+				h.sessionId,
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: h.id,
+					cwd: f.root,
+				}) + "\n",
+			);
+			await f.adapter.kill(h);
+			await f.adapter.resume({ name: "resumed", sessionId: h.sessionId });
+			const resumed = commands.at(-1) ?? "";
+			assert.match(resumed, /PI_SUBAGENT_AGENT='worker'/);
+			assert.match(resumed, /PI_SUBAGENT_SELF_SPAWN=1/);
+		}));
+	it("resumes an old policy without agent or selfSpawn exactly as before", async () =>
+		usingFixture(async (f) => {
+			const commands: string[] = [];
+			f.operations.runScript = (_surface, command, options) => {
+				commands.push(command);
+				return options.scriptPath;
+			};
+			const h = await f.adapter.spawn({
+				...f.options,
+				role: {
+					...f.options.role,
+					defaults: { autoExit: true, selfSpawn: true },
+				},
+			});
+			writeFileSync(
+				h.sessionId,
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: h.id,
+					cwd: f.root,
+				}) + "\n",
+			);
+			const policy = readSubagentSessionPolicy(h.sessionId);
+			assert.equal(policy.version, 2);
+			if (policy.version !== 2) throw new Error("expected v2 policy");
+			writeSubagentSessionPolicy(h.sessionId, {
+				owner: policy.owner,
+				tools: policy.tools ?? undefined,
+				deniedTools: policy.deniedTools,
+				persistent: policy.persistent,
+				logicalId: policy.logicalId,
+				generationId: policy.generationId,
+			});
+			const rewritten = readSubagentSessionPolicy(h.sessionId);
+			assert.equal(
+				"agent" in rewritten,
+				false,
+				"old policy fixture must omit agent",
+			);
+			assert.equal(
+				"selfSpawn" in rewritten,
+				false,
+				"old policy fixture must omit selfSpawn",
+			);
+			await f.adapter.kill(h);
+			await f.adapter.resume({ name: "legacy", sessionId: h.sessionId });
+			const resumed = commands.at(-1) ?? "";
+			assert.doesNotMatch(resumed, /PI_SUBAGENT_AGENT=/);
+			assert.match(resumed, /PI_SUBAGENT_SELF_SPAWN=0/);
+			assert.doesNotMatch(resumed, /PI_SUBAGENT_SELF_SPAWN=1/);
 		}));
 	it("never lets pane-shell values for self-spawn or depth reach a child", async () =>
 		usingFixture(async (f) => {
