@@ -35,6 +35,10 @@ import {
 	isAcquisitionUncertainError,
 } from "../../core/surface-provider.ts";
 
+function emptyDeclaredSkillsAssignment(): string {
+	return `${DECLARED_SKILLS_ENV}=${shellQuote(formatDeclaredSkillsEnv([]))}`;
+}
+
 export async function launchResumedPiSubagent(
 	callerRequest: ResumePiLaunchRequest,
 	operations: PiLaunchOperations,
@@ -126,8 +130,7 @@ export async function launchResumedPiSubagent(
 			childDepthAssignment(),
 			modelScopeAssignment(request.modelScope),
 			`PI_SUBAGENT_SELF_SPAWN=${policy.version === 2 && policy.selfSpawn ? "1" : "0"}`,
-			// A resumed session already holds its skills; never inject them again.
-			`${DECLARED_SKILLS_ENV}=${shellQuote(formatDeclaredSkillsEnv([]))}`,
+			emptyDeclaredSkillsAssignment(),
 			`PI_SUBAGENT_NAME=${shellQuote(request.name)}`,
 			...(policy.version === 2 && policy.agent
 				? [`PI_SUBAGENT_AGENT=${shellQuote(policy.agent)}`]

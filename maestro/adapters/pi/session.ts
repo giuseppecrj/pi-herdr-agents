@@ -89,9 +89,7 @@ export interface SubagentSessionPolicyV2 {
 	logicalId: string;
 	generationId: string;
 	policyHash: string;
-	/** Resolved role name, or null for a bare or handoff launch. Absent on older policies. */
 	agent?: string | null;
-	/** Effective self-spawn opt-in exported at first launch. Absent on older policies. */
 	selfSpawn?: boolean;
 	worktree?: PolicyWorktree;
 }
@@ -380,10 +378,7 @@ export function readSubagentSessionPolicy(
 		generationId: value.generationId,
 	};
 	if (value.agent !== undefined) {
-		if (
-			value.agent !== null &&
-			(!isString(value.agent) || value.agent === "")
-		) {
+		if (value.agent !== null && !isString(value.agent)) {
 			throw policyError(
 				sessionFile,
 				"the saved launch agent policy is malformed",
