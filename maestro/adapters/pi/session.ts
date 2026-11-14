@@ -164,7 +164,7 @@ function normalizePolicyToolNames(
 function canonicalPolicyJson(
 	policy: Omit<SubagentSessionPolicyV2, "policyHash">,
 ): string {
-	const canonical = {
+	const canonical: Omit<SubagentSessionPolicyV2, "policyHash"> = {
 		version: policy.version,
 		owner: policy.owner,
 		tools: policy.tools,
@@ -172,10 +172,10 @@ function canonicalPolicyJson(
 		persistent: policy.persistent,
 		logicalId: policy.logicalId,
 		generationId: policy.generationId,
-		...("agent" in policy ? { agent: policy.agent } : {}),
-		...("selfSpawn" in policy ? { selfSpawn: policy.selfSpawn } : {}),
-		...(policy.worktree ? { worktree: policy.worktree } : {}),
 	};
+	if ("agent" in policy) canonical.agent = policy.agent;
+	if ("selfSpawn" in policy) canonical.selfSpawn = policy.selfSpawn;
+	if (policy.worktree) canonical.worktree = policy.worktree;
 	return JSON.stringify(canonical);
 }
 
