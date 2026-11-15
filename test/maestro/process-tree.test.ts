@@ -243,7 +243,13 @@ test("a timed-out accept check leaves nothing it started running", async (t) => 
 	// If the runner fails to end the tree, still end what it left behind.
 	t.after(() => {
 		reap(dir);
-		rmSync(dir, { recursive: true, force: true });
+		// Windows can keep a handle briefly after the tree exits; retry the remove.
+		rmSync(dir, {
+			recursive: true,
+			force: true,
+			maxRetries: 10,
+			retryDelay: 50,
+		});
 	});
 	// `node` comes from PATH (the runner's `sh -c` line); the grandchild's pid
 	// goes to a file in the check's cwd, so no Windows path passes through `sh`.

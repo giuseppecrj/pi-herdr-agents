@@ -1,6 +1,12 @@
 import "../clean-host-env.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	copyFileSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
@@ -29,23 +35,39 @@ async function cleanupRecordedProcess(file: string) {
 async function client(script: string | undefined, run: () => Promise<void>) {
 	const dir = mkdtempSync(join(tmpdir(), "async-herdr-client-"));
 	const path = process.env.PATH;
+	const nodeOptions = process.env.NODE_OPTIONS;
 	const pidFile = join(dir, "client.pid");
-	if (script)
-		writeFileSync(
-			join(dir, "herdr"),
-			`#!${process.execPath}
-require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+	if (script) {
+		const body = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
 const descendantPidFile = ${JSON.stringify(join(dir, "descendant.pid"))};
 ${script}
-`,
-			{ mode: 0o755 },
-		);
+`;
+		if (process.platform === "win32") {
+			// libuv starts spawn("herdr") only from herdr.com or herdr.exe.
+			// The file is this Node binary. --require takes a path (a file URL
+			// is MODULE_NOT_FOUND) and the stub clears NODE_OPTIONS so a child
+			// it spawns does not load the stub again, then ignores argv.
+			const stub = join(dir, "preload.cjs");
+			writeFileSync(
+				stub,
+				`delete process.env.NODE_OPTIONS;\n${body}const Module = require('node:module');\nModule.runMain = function () {};\n`,
+			);
+			copyFileSync(process.execPath, join(dir, "herdr.exe"));
+			process.env.NODE_OPTIONS = `--require ${stub.replaceAll("\\", "/")}`;
+		} else {
+			writeFileSync(join(dir, "herdr"), `#!${process.execPath}\n${body}`, {
+				mode: 0o755,
+			});
+		}
+	}
 	process.env.PATH = dir;
 	try {
 		await run();
 	} finally {
 		if (path === undefined) delete process.env.PATH;
 		else process.env.PATH = path;
+		if (nodeOptions === undefined) delete process.env.NODE_OPTIONS;
+		else process.env.NODE_OPTIONS = nodeOptions;
 		try {
 			try {
 				await cleanupRecordedProcess(pidFile);
@@ -53,7 +75,12 @@ ${script}
 				await cleanupRecordedProcess(join(dir, "descendant.pid"));
 			}
 		} finally {
-			rmSync(dir, { recursive: true, force: true });
+			rmSync(dir, {
+				recursive: true,
+				force: true,
+				maxRetries: 5,
+				retryDelay: 50,
+			});
 		}
 	}
 }
