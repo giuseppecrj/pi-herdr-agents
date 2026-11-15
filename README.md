@@ -364,10 +364,6 @@ npm pack --dry-run
 
 Run the legacy deterministic integration suite from inside isolated Herdr with `npm run test:integration`. The independent `npm run test:integration:core` creates private Core servers and drives real parent Pi sessions without provider credentials. See [Development](docs/development.md) for the code map, tool versions, and the optional live-provider test, and [RELEASING.md](RELEASING.md) for releases.
 
-## Acknowledgements
-
-This package builds on earlier open-source work by [HazAT/pi-interactive-subagents](https://github.com/HazAT/pi-interactive-subagents) and [0xRichardH/pi-herdr-subagents](https://github.com/0xRichardH/pi-herdr-subagents). The sub-agent status supervision and turn-only interruption features were inspired by [RepoPrompt](https://repoprompt.com/)'s sub-agent snapshot polling and run cancellation features.
-
 ## License
 
 MIT, see [LICENSE](LICENSE).
