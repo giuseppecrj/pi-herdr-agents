@@ -1,7 +1,14 @@
 import "../clean-host-env.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	copyFileSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
 import { cleanupTestProcess } from "../helpers/process-cleanup.ts";
@@ -26,9 +33,16 @@ async function cleanupRecordedProcess(file: string) {
 	await cleanupTestProcess(Number(value));
 }
 
+/**
+ * A PATH entry that `spawn("herdr")` can start. On Windows that is only a PE
+ * `herdr.exe` (see herdr-cli `herdrExecutableNames`); a `.cmd` or extensionless
+ * script is ENOENT. The Windows stub is a copy of this Node plus a `--require`
+ * preload that runs `body.js` as the main module.
+ */
 async function client(script: string | undefined, run: () => Promise<void>) {
 	const dir = mkdtempSync(join(tmpdir(), "async-herdr-client-"));
 	const path = process.env.PATH;
+	const previousNodeOptions = process.env.NODE_OPTIONS;
 	const pidFile = join(dir, "client.pid");
 	if (script) {
 		const body = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
@@ -36,13 +50,25 @@ const descendantPidFile = ${JSON.stringify(join(dir, "descendant.pid"))};
 ${script}
 `;
 		if (process.platform === "win32") {
-			// Windows spawn("herdr") only finds PATHEXT entries; a bare file is ENOENT.
-			const js = join(dir, "herdr.js");
-			writeFileSync(js, body);
+			writeFileSync(join(dir, "body.js"), body);
 			writeFileSync(
-				join(dir, "herdr.cmd"),
-				`@"${process.execPath}" "${js}" %*\r\n`,
+				join(dir, "preload.cjs"),
+				`const path = require("node:path");
+const Module = require("node:module");
+const body = path.join(__dirname, "body.js");
+const original = Module.runMain;
+Module.runMain = function runMain() {
+	const args = process.argv.slice(1);
+	process.argv = [process.argv[0], body, ...args];
+	return original.call(this, body);
+};
+`,
 			);
+			copyFileSync(process.execPath, join(dir, "herdr.exe"));
+			const requireArg = `--require ${pathToFileURL(join(dir, "preload.cjs")).href}`;
+			process.env.NODE_OPTIONS = previousNodeOptions
+				? `${previousNodeOptions} ${requireArg}`
+				: requireArg;
 		} else {
 			writeFileSync(join(dir, "herdr"), `#!${process.execPath}\n${body}`, {
 				mode: 0o755,
@@ -55,6 +81,8 @@ ${script}
 	} finally {
 		if (path === undefined) delete process.env.PATH;
 		else process.env.PATH = path;
+		if (previousNodeOptions === undefined) delete process.env.NODE_OPTIONS;
+		else process.env.NODE_OPTIONS = previousNodeOptions;
 		try {
 			try {
 				await cleanupRecordedProcess(pidFile);
@@ -62,7 +90,12 @@ ${script}
 				await cleanupRecordedProcess(join(dir, "descendant.pid"));
 			}
 		} finally {
-			rmSync(dir, { recursive: true, force: true });
+			rmSync(dir, {
+				recursive: true,
+				force: true,
+				maxRetries: 5,
+				retryDelay: 50,
+			});
 		}
 	}
 }
