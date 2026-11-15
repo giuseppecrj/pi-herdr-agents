@@ -41,7 +41,7 @@ jobs:
       - name: Install pinned Herdr binaries
         run: |
           sudo apt-get update
-          sudo apt-get install -y fd-find
+          sudo apt-get install -y fd-find ripgrep
           bin="$RUNNER_TEMP/piha-bin"
           mkdir -p "$bin"
           curl --fail --location --retry 3 --max-time 120 \
