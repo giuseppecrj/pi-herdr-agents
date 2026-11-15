@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { Text } from "@earendil-works/pi-tui";
+import type { PiToolRenderers } from "./presentation-hooks.ts";
 import type { SupervisionConfig } from "../../maestro/core/config/supervision-config.ts";
 import type { SubagentRuntime } from "./state.ts";
 import {
@@ -8,15 +8,10 @@ import {
 	formatVisibleAgentDefinitions,
 	formatAgentDiagnostics,
 } from "./catalog.ts";
-import { getFirstText } from "./presentation.ts";
-import {
-	encodeHostValue,
-	HOST_ERROR_CHARS,
-} from "../../maestro/core/host-text.ts";
+import { encodeHostValue } from "../../maestro/core/host-text.ts";
 import {
 	SUBAGENT_CANCEL_DESCRIPTION,
 	SUBAGENT_CANCEL_SNIPPET,
-	type SubagentCancelDetails,
 	type Controls,
 } from "./controls.ts";
 import type { PersistentControls } from "./persistent.ts";
@@ -36,6 +31,8 @@ function formatSupervisionDiagnostics(
 }
 
 interface ControlToolDeps {
+	/** Terminal callbacks are supplied by the host, not the tool implementation. */
+	renderers?: PiToolRenderers;
 	shouldRegister: (name: string) => boolean;
 	runtime: SubagentRuntime;
 	supervisionConfig: SupervisionConfig;
@@ -53,6 +50,7 @@ export function registerControlTools(
 		runtime,
 		supervisionConfig,
 		resolvePersistentTarget,
+		renderers,
 		handleSubagentInterrupt,
 		handleSubagentCancel,
 		formatLivePersistentSpecialists,
@@ -161,39 +159,9 @@ export function registerControlTools(
 				return handleSubagentInterrupt(params);
 			},
 
-			renderCall(args, theme) {
-				const target = args.id ? `${args.id}` : (args.name ?? "(unknown)");
-				return new Text(
-					theme.fg("accent", "▸") +
-						" " +
-						theme.fg("toolTitle", theme.bold(target)) +
-						theme.fg("dim", " — interrupt turn"),
-					0,
-					0,
-				);
-			},
+			renderCall: renderers?.subagent_interrupt?.renderCall,
 
-			renderResult(result, _opts, theme) {
-				// SAFETY: renderResult only ever receives the details this tool's own
-				// execute() above returned; the framework's TDetails type isn't threaded
-				// through this callback precisely enough for TypeScript to see that.
-				const details = result.details as any;
-				if (details?.status === "interrupt_requested") {
-					return new Text(
-						theme.fg("accent", "▸") +
-							" " +
-							theme.fg(
-								"toolTitle",
-								theme.bold(details.name ?? details.id ?? "subagent"),
-							) +
-							theme.fg("dim", " — interrupt requested"),
-						0,
-						0,
-					);
-				}
-
-				return new Text(theme.fg("dim", getFirstText(result.content)), 0, 0);
-			},
+			renderResult: renderers?.subagent_interrupt?.renderResult,
 		});
 
 	// ── subagent_cancel tool ──
@@ -219,37 +187,9 @@ export function registerControlTools(
 				return handleSubagentCancel(params);
 			},
 
-			renderCall(args, theme) {
-				const target = args.id ? `${args.id}` : (args.name ?? "(unknown)");
-				return new Text(
-					theme.fg("accent", "▸") +
-						" " +
-						theme.fg("toolTitle", theme.bold(target)) +
-						theme.fg("dim", " — cancel run"),
-					0,
-					0,
-				);
-			},
+			renderCall: renderers?.subagent_cancel?.renderCall,
 
-			renderResult(result, _opts, theme) {
-				// SAFETY: renderResult only ever receives the details this tool's own
-				// execute() above returned; the framework's TDetails type isn't threaded
-				// through this callback precisely enough for TypeScript to see that.
-				const details = result.details as SubagentCancelDetails | undefined;
-				if (details?.status)
-					return new Text(
-						theme.fg("accent", "▸") +
-							" " +
-							theme.fg(
-								"toolTitle",
-								theme.bold(details.name ?? details.id ?? "subagent"),
-							) +
-							theme.fg("dim", ` — cancel ${details.status}`),
-						0,
-						0,
-					);
-				return new Text(theme.fg("dim", getFirstText(result.content)), 0, 0);
-			},
+			renderResult: renderers?.subagent_cancel?.renderResult,
 		});
 
 	// ── subagents_list tool ──
@@ -289,44 +229,6 @@ export function registerControlTools(
 				};
 			},
 
-			renderResult(result, _opts, theme) {
-				// SAFETY: renderResult only ever receives the details this tool's own
-				// execute() above returned; the framework's TDetails type isn't threaded
-				// through this callback precisely enough for TypeScript to see that.
-				const details = result.details as any;
-				const agents = details?.agents ?? [];
-				const diagnostics = details?.diagnostics ?? [];
-				if (agents.length === 0 && diagnostics.length === 0) {
-					return new Text(
-						theme.fg("dim", "No subagent definitions found."),
-						0,
-						0,
-					);
-				}
-				const lines = agents.map((a: any) => {
-					const source =
-						a.source === "package" && a.provider
-							? `package:${a.provider}`
-							: a.source;
-					// Definitions may be child-writable files: encode every value.
-					const badge = theme.fg("accent", ` (${encodeHostValue(source)})`);
-					const desc = a.description
-						? theme.fg("dim", ` — ${encodeHostValue(a.description)}`)
-						: "";
-					const model = a.model
-						? theme.fg("dim", ` [${encodeHostValue(a.model)}]`)
-						: "";
-					return `  ${theme.fg("toolTitle", theme.bold(encodeHostValue(a.name)))}${badge}${model}${desc}`;
-				});
-				for (const diagnostic of diagnostics) {
-					lines.push(
-						theme.fg(
-							"warning",
-							`  ! ${encodeHostValue(diagnostic.message, HOST_ERROR_CHARS)}`,
-						),
-					);
-				}
-				return new Text(lines.join("\n"), 0, 0);
-			},
+			renderResult: renderers?.subagents_list?.renderResult,
 		});
 }

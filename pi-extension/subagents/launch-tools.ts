@@ -1,13 +1,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { Text } from "@earendil-works/pi-tui";
+import type { PiToolRenderers } from "./presentation-hooks.ts";
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { PiLaunchInput } from "../../maestro/runtime/index.ts";
-import {
-	isPlainObject,
-	isString,
-} from "../../maestro/core/config/type-guards.ts";
 import {
 	awaitLiveContext,
 	bindLiveApi,
@@ -28,7 +24,7 @@ import {
 	normalizeAcceptSpec,
 } from "../../maestro/core/accept.ts";
 import { notifyLaunchRefusal } from "../../maestro/core/specialist-notice.ts";
-import { getFirstText, launchDiagnosticsText } from "./presentation.ts";
+import { launchDiagnosticsText } from "./presentation.ts";
 import {
 	encodeHostValue,
 	HOST_ERROR_CHARS,
@@ -80,19 +76,8 @@ function muxUnavailableResult(runtime: SubagentRuntime) {
 	};
 }
 
-interface PartialWorktreeArgs {
-	branch?: unknown;
-}
-
-interface PartialSubagentArgs {
-	name?: unknown;
-	task?: unknown;
-	agent?: unknown;
-	cwd?: unknown;
-	worktree?: PartialWorktreeArgs | null;
-}
-
 interface LaunchToolDeps {
+	renderers?: PiToolRenderers;
 	shouldRegister: (name: string) => boolean;
 	runtime: SubagentRuntime;
 	updateWidget: () => void;
@@ -111,6 +96,7 @@ export function registerSubagentTool(
 		runtime,
 		updateWidget,
 		subagentRoutingGuidelines,
+		renderers,
 		persistentCapacityError,
 		resolveSubagentRuntimePlans,
 		normalizePiAttempt,
@@ -335,84 +321,9 @@ export function registerSubagentTool(
 				};
 			},
 
-			renderCall(args, theme) {
-				const partialArgs: PartialSubagentArgs = isPlainObject(args)
-					? args
-					: {};
-				const name =
-					isString(partialArgs.name) && partialArgs.name
-						? partialArgs.name
-						: "(unnamed)";
-				const task = isString(partialArgs.task) ? partialArgs.task : "";
-				const agent =
-					isString(partialArgs.agent) && partialArgs.agent
-						? theme.fg("dim", ` (${partialArgs.agent})`)
-						: "";
-				const cwdHint =
-					isString(partialArgs.cwd) && partialArgs.cwd
-						? theme.fg("dim", ` in ${partialArgs.cwd}`)
-						: "";
-				const worktree = isPlainObject(partialArgs.worktree)
-					? partialArgs.worktree
-					: undefined;
-				const worktreeHint = isString(worktree?.branch)
-					? theme.fg("dim", ` on ${worktree.branch} (worktree)`)
-					: "";
-				let text =
-					"▸ " +
-					theme.fg("toolTitle", theme.bold(name)) +
-					agent +
-					cwdHint +
-					worktreeHint;
+			renderCall: renderers?.subagent?.renderCall,
 
-				// Show a one-line task preview. renderCall is called repeatedly as the
-				// LLM generates tool arguments, so args.task grows token by token.
-				// We keep it compact here — Ctrl+O on renderResult expands the full content.
-				if (task) {
-					const firstLine =
-						task.split("\n").find((l: string) => l.trim()) ?? "";
-					const preview =
-						firstLine.length > 100 ? firstLine.slice(0, 100) + "…" : firstLine;
-					if (preview) {
-						text += "\n" + theme.fg("toolOutput", preview);
-					}
-					const totalLines = task.split("\n").length;
-					if (totalLines > 1) {
-						text += theme.fg("muted", ` (${totalLines} lines)`);
-					}
-				}
-
-				return new Text(text, 0, 0);
-			},
-
-			renderResult(result, _opts, theme) {
-				// SAFETY: renderResult only ever receives the details this tool's own
-				// execute() above returned; the framework's TDetails type isn't threaded
-				// through this callback precisely enough for TypeScript to see that.
-				const details = result.details as any;
-				const name = details?.name ?? "(unnamed)";
-
-				// "Started" result — tool returned immediately
-				if (details?.status === "started") {
-					const runtime = details?.model
-						? ` — ${details.model}${details.thinking ? ` · ${details.thinking}` : ""}`
-						: " — started";
-					const worktree = details?.worktree?.branch
-						? ` · ${details.worktree.branch}`
-						: "";
-					return new Text(
-						theme.fg("accent", "▸") +
-							" " +
-							theme.fg("toolTitle", theme.bold(name)) +
-							theme.fg("dim", runtime + worktree),
-						0,
-						0,
-					);
-				}
-
-				// Fallback (shouldn't happen)
-				return new Text(theme.fg("dim", getFirstText(result.content)), 0, 0);
-			},
+			renderResult: renderers?.subagent?.renderResult,
 		});
 }
 
@@ -424,9 +335,14 @@ export function registerResumeTool(
 		runtime,
 		updateWidget,
 		spawningConfig,
+		renderers,
 	}: Pick<
 		LaunchToolDeps,
-		"shouldRegister" | "runtime" | "updateWidget" | "spawningConfig"
+		| "shouldRegister"
+		| "runtime"
+		| "updateWidget"
+		| "spawningConfig"
+		| "renderers"
 	>,
 ): void {
 	const runningSubagents = runtime.runningSubagents;
@@ -467,36 +383,9 @@ export function registerResumeTool(
 				),
 			}),
 
-			renderCall(args, theme) {
-				const name = args.name ?? "Resume";
-				const text =
-					"▸ " +
-					theme.fg("toolTitle", theme.bold(name)) +
-					theme.fg("dim", " — resuming session");
-				return new Text(text, 0, 0);
-			},
+			renderCall: renderers?.subagent_resume?.renderCall,
 
-			renderResult(result, _opts, theme) {
-				// SAFETY: renderResult only ever receives the details this tool's own
-				// execute() above returned; the framework's TDetails type isn't threaded
-				// through this callback precisely enough for TypeScript to see that.
-				const details = result.details as any;
-				const name = details?.name ?? "Resume";
-
-				if (details?.status === "started") {
-					return new Text(
-						theme.fg("accent", "▸") +
-							" " +
-							theme.fg("toolTitle", theme.bold(name)) +
-							theme.fg("dim", " — resumed"),
-						0,
-						0,
-					);
-				}
-
-				// Fallback
-				return new Text(theme.fg("dim", getFirstText(result.content)), 0, 0);
-			},
+			renderResult: renderers?.subagent_resume?.renderResult,
 
 			async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 				const name = params.name ?? "Resume";
