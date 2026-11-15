@@ -50,6 +50,11 @@ function expectedShellQuote(value: string): string {
 	return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
+/** Compare checkouts after realpath: Windows short names and slash forms differ. */
+function assertSamePath(actual: string, expected: string): void {
+	assert.equal(realpathSync(actual), realpathSync(expected));
+}
+
 function fixture() {
 	const root = realpathSync(
 		mkdtempSync(join(tmpdir(), "subagent-launch-test-[probe](regex)-")),
@@ -871,7 +876,7 @@ describe("Pi launch", () => {
 				worktree: createWorktreeOperations(),
 				createPane(name, cwd) {
 					assert.equal(name, "Worker");
-					assert.equal(cwd, project);
+					assertSamePath(cwd, project);
 					return "pane-null-worktree";
 				},
 				createWorktree() {
@@ -1698,7 +1703,7 @@ describe("Pi launch", () => {
 					worktree: createWorktreeOperations(),
 					createPane(name, cwd) {
 						assert.equal(name, "Resume worker");
-						assert.equal(cwd, project);
+						assertSamePath(cwd, project);
 						events.push("create");
 						return "pane-resume";
 					},
@@ -1934,7 +1939,7 @@ describe("Pi launch", () => {
 				},
 				createWorktree(name, cwd, branch, base) {
 					assert.equal(name, "Worker");
-					assert.equal(cwd, project);
+					assertSamePath(cwd, project);
 					assert.equal(branch, "issue/7");
 					assert.equal(base, baseSha);
 					assert.equal(
@@ -2039,11 +2044,11 @@ describe("Pi launch", () => {
 				},
 				createWorktree(name, cwd, branch, base) {
 					assert.equal(name, "Worker");
-					assert.equal(cwd, project);
+					assertSamePath(cwd, project);
 					assert.equal(branch, "issue/59-fresh");
 					assert.equal(base, linkedSha);
 					const provisioning = JSON.parse(readFileSync(manifestFile, "utf8"));
-					assert.equal(provisioning.sourceCwd, linkedCwd);
+					assertSamePath(provisioning.sourceCwd, linkedCwd);
 					assert.equal(provisioning.baseSha, linkedSha);
 					execFileSync(
 						"git",
@@ -2089,7 +2094,7 @@ describe("Pi launch", () => {
 				command.startsWith(`cd ${expectedShellQuote(worktreePath)} && `),
 			);
 			const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
-			assert.equal(manifest.sourceCwd, linkedCwd);
+			assertSamePath(manifest.sourceCwd, linkedCwd);
 			assert.equal(manifest.baseSha, linkedSha);
 		});
 	});
@@ -2154,10 +2159,10 @@ describe("Pi launch", () => {
 				},
 				createWorktree(name, cwd, branch, base) {
 					assert.equal(name, "Handoff");
-					assert.equal(cwd, project);
+					assertSamePath(cwd, project);
 					assert.equal(branch, "handoff/59");
 					assert.equal(base, linkedSha);
-					assert.equal(
+					assertSamePath(
 						JSON.parse(readFileSync(manifestFile, "utf8")).sourceCwd,
 						linkedCwd,
 					);
@@ -2227,7 +2232,7 @@ describe("Pi launch", () => {
 				readFileSync(join(worktreePath, "linked.txt"), "utf8"),
 				"linked\n",
 			);
-			assert.equal(
+			assertSamePath(
 				JSON.parse(readFileSync(manifestFile, "utf8")).sourceCwd,
 				linkedCwd,
 			);
@@ -2302,7 +2307,7 @@ describe("Pi launch", () => {
 					throw new Error("unexpected pane creation");
 				},
 				createWorktree(_name, cwd, branch, base) {
-					assert.equal(cwd, project);
+					assertSamePath(cwd, project);
 					assert.equal(branch, "handoff/feature");
 					assert.equal(
 						base,
