@@ -245,6 +245,12 @@ parent without ending, completing, or recording any task (`caller_notify`,
 [ADR-0019](docs/adr/0019-specialist-notices.md)).
 _Avoid_: Help request, task result, heartbeat, status ping
 
+**Watcher**:
+A persistent specialist launched with `notify: true` that owns a timer in its
+own session and sends a specialist notice only when the watched thing changes;
+the one sanctioned way for a parent to loop or poll.
+_Avoid_: Polling parent, sleep loop, monitor child
+
 **Agents tab**:
 An extension-owned Herdr tab grouping delegated child panes in an existing
 checkout workspace. Ownership comes from returned IDs, not its display label.
