@@ -13,10 +13,6 @@ import { tmpdir } from "node:os";
 import { delimiter, join, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
-
-/** A path is literal text in an expected pattern: `\\` and `.` must not be syntax. */
-const escapeRegExp = (value: string) =>
-	value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 import {
 	createPiScriptShellResolver,
 	piHasProjectTrustGating,
@@ -40,6 +36,10 @@ import { createLaunchPlanner } from "../../pi-extension/subagents/launch.ts";
 import { __herdrTest__ } from "../../maestro/surfaces/herdr/herdr.ts";
 import { HerdrSurfaceProvider } from "../../maestro/surfaces/herdr/herdr-surface-provider.ts";
 import { runScriptInPane } from "../../maestro/surfaces/herdr/terminal.ts";
+
+/** A path is literal text in an expected pattern: `\\` and `.` must not be syntax. */
+const escapeRegExp = (value: string) =>
+	value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const GIT_BASH = "C:\\Program Files\\Git\\bin\\bash.exe";
 const CJK_BASH = "D:\\工具 箱\\王小明's Git\\bin\\bash.exe";
