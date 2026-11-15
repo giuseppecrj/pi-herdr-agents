@@ -200,6 +200,7 @@ import {
 } from "../maestro/core/child-busy.ts";
 import {
 	interpretExitSidecar,
+	shellExitFileFor,
 	waitForCompletion,
 } from "../maestro/adapters/pi/completion.ts";
 import {
@@ -1440,6 +1441,43 @@ describe("host adapter migration", () => {
 			await f.finish(child);
 			assert.equal(f.registrations(), 1);
 			assert.equal(f.closed.length, 1);
+		}));
+	// Issue #143: without a process identity (macOS) a wrapped shell prompt
+	// pushed the on-screen marker out of the read, so the stop never confirmed.
+	it("confirms a stopped specialist's exit from the shell's post-exit record when the marker scrolled away", async () =>
+		withAdapterHost(async (f) => {
+			const child = await f.launch({
+				name: "watcher",
+				task: "first",
+				persistent: true,
+				notify: true,
+				lifecycle: createLifecycle(1_000),
+			});
+			assert.ok(f.handle(child));
+			const record = shellExitFileFor(child.sessionFile);
+			const launchLine = f.commands.find((command: string) =>
+				command.includes(record),
+			);
+			assert.ok(launchLine, "the launch line writes the post-exit record");
+			assert.ok(
+				launchLine.indexOf("piha_exit=$?") < launchLine.indexOf(record),
+				"the record is written only after Pi returns",
+			);
+			child.stopState = "requested";
+			f.surface.appendScreen(child.surface, "__SUBAGENT_DONE_0__");
+			for (const line of [
+				"",
+				"shep on main on",
+				"v29.8.2 (orbstack) to",
+				"ok 5m 28.7s",
+				"➜",
+			])
+				f.surface.appendScreen(child.surface, line);
+			writeFileSync(record, "0\n");
+			await f.finish(child);
+			assert.equal(child.lifecycle.process.kind, "completed");
+			assert.equal(f.closed.length, 1);
+			assert.equal(existsSync(record), false, "the record is consumed");
 		}));
 	it("retains each owning adapter and watcher through reload while new launches use the new parent snapshot", async () =>
 		withAdapterHost(async (f) => {
@@ -10050,6 +10088,44 @@ describe("completion.ts", () => {
 				ping: { name: "Scout", message: "ready" },
 			});
 			assert.equal(existsSync(exitFile), false);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("admits the shell's post-exit record unless the process is known alive", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "completion-shell-exit-"));
+		const sessionFile = join(dir, "child.jsonl");
+		const shellExitFile = shellExitFileFor(sessionFile);
+		try {
+			writeFileSync(shellExitFile, "3\n");
+			const options = {
+				intervalMs: 1,
+				sessionFile,
+				shellExitFile,
+				requireProcessExit: true,
+				paneDisappearanceGraceMs: 0,
+				readTerminalTail: async () => "",
+			};
+			const controller = new AbortController();
+			let checks = 0;
+			await assert.rejects(
+				waitForCompletion(controller.signal, {
+					...options,
+					inspectProcess: () => {
+						if (++checks === 3) controller.abort();
+						return "alive";
+					},
+				}),
+				/Aborted/,
+			);
+			assert.equal(existsSync(shellExitFile), true);
+			const result = await waitForCompletion(new AbortController().signal, {
+				...options,
+				inspectProcess: () => "unknown",
+			});
+			assert.deepEqual(result, { reason: "sentinel", exitCode: 3 });
+			assert.equal(existsSync(shellExitFile), false);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

@@ -11,6 +11,23 @@ import {
 const ABORT_MESSAGE = "Aborted while waiting for subagent to finish";
 const TERMINAL_SENTINEL = /__SUBAGENT_DONE_(\d+)__/;
 
+/**
+ * Where a persistent child's launch line records Pi's exit code once Pi has
+ * exited. Unlike the on-screen marker, a shell prompt cannot scroll it away.
+ */
+export function shellExitFileFor(sessionFile: string): string {
+	return `${sessionFile}.shell-exit`;
+}
+
+function readShellExitCode(file: string): number | null {
+	try {
+		const text = readFileSync(file, "utf8").trim();
+		return /^\d+$/.test(text) ? Number.parseInt(text, 10) : null;
+	} catch {
+		return null;
+	}
+}
+
 export interface CompletionResult {
 	reason: "done" | "ping" | "sentinel" | "error";
 	exitCode: number;
@@ -39,6 +56,8 @@ export interface CompletionOptions {
 	requireProcessExit?: boolean;
 	/** Only launch-verified process identity, never transcript or activity state. */
 	inspectProcess?: () => "alive" | "exited" | "unknown";
+	/** The launch line's post-exit record ({@link shellExitFileFor}); admitted unless the identity is alive. */
+	shellExitFile?: string;
 	onTick?: (elapsedSeconds: number) => void;
 	/** Wait for a local file wake-up or a scheduled reconciliation. */
 	waitForNextCheck?: (signal: AbortSignal) => Promise<"wake" | "reconcile">;
@@ -179,6 +198,12 @@ export async function waitForCompletion(
 			// Exit is already verified; a failed artifact cleanup cannot undo it.
 		}
 	}
+	if (options.shellExitFile)
+		try {
+			rmSync(options.shellExitFile, { force: true });
+		} catch {
+			// Same: the record has served its purpose.
+		}
 	return result;
 }
 
@@ -274,6 +299,21 @@ async function detectCompletion(
 					errorSource: "host",
 				}
 			);
+		}
+
+		// The shell writes this only after Pi exits, so it proves exit wherever the
+		// on-screen marker has scrolled (#143). A known-live identity outranks it.
+		if (
+			options.requireProcessExit &&
+			options.shellExitFile &&
+			options.inspectProcess?.() !== "alive"
+		) {
+			const exitCode = readShellExitCode(options.shellExitFile);
+			if (exitCode !== null) {
+				options.onLocalEvidence?.();
+				const completion = await waitForDelayedSidecar(signal, options);
+				return completion ?? { reason: "sentinel", exitCode };
+			}
 		}
 
 		if (reconcile)

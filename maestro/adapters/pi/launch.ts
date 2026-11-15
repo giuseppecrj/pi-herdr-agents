@@ -49,6 +49,7 @@ import {
 	SUBAGENTS_DIR,
 	timestampForFile,
 } from "./launch-command.ts";
+import { shellExitFileFor } from "./completion.ts";
 import {
 	PI_LAUNCH_SESSION_ENV,
 	type PiLaunchOperations,
@@ -911,11 +912,14 @@ function buildPiCommand(
 	const piCommand =
 		`cd ${shellQuote(artifacts.targetCwd)} && ` +
 		`${env.join(" ")} ${parts.join(" ")}`;
-	return request.handoff
-		? piCommand
-		: artifacts.surface
-			? `${piCommand}; echo '__SUBAGENT_DONE_'$?'__'`
-			: `${piCommand}; piha_exit=$?; echo "__SUBAGENT_DONE_\${piha_exit}__"; exit "$piha_exit"`;
+	if (request.handoff) return piCommand;
+	if (!artifacts.surface)
+		return `${piCommand}; piha_exit=$?; echo "__SUBAGENT_DONE_\${piha_exit}__"; exit "$piha_exit"`;
+	// A persistent stop needs exit evidence that a shell prompt cannot scroll
+	// off the screen, as the marker can (#143); the shell writes it after Pi exits.
+	if (request.behavior.persistent)
+		return `${piCommand}; piha_exit=$?; printf '%s\\n' "$piha_exit" > ${shellQuote(shellExitFileFor(artifacts.sessionFile))} 2>/dev/null; echo "__SUBAGENT_DONE_\${piha_exit}__"`;
+	return `${piCommand}; echo '__SUBAGENT_DONE_'$?'__'`;
 }
 
 async function startPiProcess(

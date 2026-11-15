@@ -52,7 +52,7 @@ import {
 	type PiRunningChild,
 } from "./launch.ts";
 import type { WorktreeOperations } from "../../core/worktree.ts";
-import { waitForCompletion } from "./completion.ts";
+import { shellExitFileFor, waitForCompletion } from "./completion.ts";
 import { acceptLaunchRefusal } from "../../core/accept.ts";
 import { notifyLaunchRefusal } from "../../core/specialist-notice.ts";
 import {
@@ -552,6 +552,9 @@ export class PiHarnessAdapter implements HarnessAdapter {
 							: undefined,
 						sessionFile: child.sessionFile,
 						requireProcessExit: child.persistent || !!child.launchFailure,
+						shellExitFile: child.persistent
+							? shellExitFileFor(child.sessionFile)
+							: undefined,
 						inspectProcess: () =>
 							child.processIdentity
 								? judgeProcessIdentity(
