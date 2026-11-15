@@ -114,6 +114,8 @@ function initializeGitRepository(cwd: string): void {
 	execFileSync("git", ["config", "user.email", "test@example.com"], { cwd });
 	execFileSync("git", ["config", "user.name", "Test"], { cwd });
 	execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd });
+	// Isolate from the runner's autocrlf so file-content asserts stay LF.
+	execFileSync("git", ["config", "core.autocrlf", "false"], { cwd });
 }
 
 function commitAll(cwd: string, message: string): string {
@@ -129,7 +131,13 @@ function createLinkedGitFixture(root: string, principal: string) {
 	initializeGitRepository(principal);
 	writeFileSync(join(principal, "base.txt"), "base\n");
 	const principalSha = commitAll(principal, "base");
-	const linked = join(root, "linked source α\ncheckout");
+	// Windows rejects a newline in a directory name; keep a spaced Unicode path.
+	const linked = join(
+		root,
+		process.platform === "win32"
+			? "linked source α checkout"
+			: "linked source α\ncheckout",
+	);
 	execFileSync(
 		"git",
 		["worktree", "add", "-q", "-b", "linked/source", linked, principalSha],
@@ -1884,6 +1892,9 @@ describe("Pi launch", () => {
 			execFileSync("git", ["config", "commit.gpgsign", "false"], {
 				cwd: project,
 			});
+			execFileSync("git", ["config", "core.autocrlf", "false"], {
+				cwd: project,
+			});
 			writeFileSync(join(project, "base.txt"), "base\n");
 			execFileSync("git", ["add", "base.txt"], { cwd: project });
 			execFileSync("git", ["commit", "-qm", "base"], { cwd: project });
@@ -2275,6 +2286,9 @@ describe("Pi launch", () => {
 			execFileSync("git", ["config", "commit.gpgsign", "false"], {
 				cwd: project,
 			});
+			execFileSync("git", ["config", "core.autocrlf", "false"], {
+				cwd: project,
+			});
 			writeFileSync(join(project, "base.txt"), "base\n");
 			execFileSync("git", ["add", "base.txt"], { cwd: project });
 			execFileSync("git", ["commit", "-qm", "base"], { cwd: project });
@@ -2402,6 +2416,9 @@ describe("Pi launch", () => {
 			execFileSync("git", ["config", "commit.gpgsign", "false"], {
 				cwd: project,
 			});
+			execFileSync("git", ["config", "core.autocrlf", "false"], {
+				cwd: project,
+			});
 			writeFileSync(join(project, "base.txt"), "base\n");
 			execFileSync("git", ["add", "base.txt"], { cwd: project });
 			execFileSync("git", ["commit", "-qm", "base"], { cwd: project });
@@ -2510,6 +2527,9 @@ describe("Pi launch", () => {
 			execFileSync("git", ["config", "commit.gpgsign", "false"], {
 				cwd: project,
 			});
+			execFileSync("git", ["config", "core.autocrlf", "false"], {
+				cwd: project,
+			});
 			writeFileSync(join(project, "base.txt"), "base\n");
 			execFileSync("git", ["add", "base.txt"], { cwd: project });
 			execFileSync("git", ["commit", "-qm", "base"], { cwd: project });
@@ -2614,6 +2634,9 @@ describe("Pi launch", () => {
 			});
 			execFileSync("git", ["config", "user.name", "Test"], { cwd: project });
 			execFileSync("git", ["config", "commit.gpgsign", "false"], {
+				cwd: project,
+			});
+			execFileSync("git", ["config", "core.autocrlf", "false"], {
 				cwd: project,
 			});
 			writeFileSync(join(project, "base.txt"), "base\n");

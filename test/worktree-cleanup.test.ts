@@ -489,8 +489,25 @@ n${link}
 				["missing", "ENOENT"],
 				["through-missing", "ENOENT"],
 				["loop-a", "ELOOP"],
-			]) {
-				assert.throws(() => fs.realpathSync(join(dir, name)), { code });
+			] as const) {
+				// Windows Node may lexically collapse `missing/../a` and not throw.
+				let hostCode: string | undefined;
+				try {
+					fs.realpathSync(join(dir, name));
+				} catch (error) {
+					hostCode =
+						error instanceof Error && "code" in error
+							? String(error.code)
+							: undefined;
+				}
+				if (hostCode === undefined) {
+					assert.equal(
+						realpathWithoutOpening(join(dir, name)),
+						fs.realpathSync(join(dir, name)),
+					);
+					continue;
+				}
+				assert.equal(hostCode, code);
 				assert.throws(() => realpathWithoutOpening(join(dir, name)), { code });
 			}
 		} finally {

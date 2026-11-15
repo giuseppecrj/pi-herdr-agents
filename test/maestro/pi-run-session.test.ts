@@ -15,6 +15,8 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { createServer } from "node:net";
+import { fileURLToPath } from "node:url";
+import { socketPath as testSocketPath } from "../socket-path.ts";
 import {
 	createWorktreeOperations,
 	readWorktreeManifest,
@@ -441,8 +443,9 @@ async function makeFixture() {
 	let latest: PiRunRecord | undefined;
 	const options: DefaultRunSessionOptions = {
 		configDir: dir,
-		configExamplePath: new URL("../../config.json.example", import.meta.url)
-			.pathname,
+		configExamplePath: fileURLToPath(
+			new URL("../../config.json.example", import.meta.url),
+		),
 		infrastructure: {
 			surfaceProvider: provider,
 			launchOperations: operations,
@@ -1989,15 +1992,15 @@ async function until(predicate: () => boolean, label: string) {
 
 test("injected infrastructure missing a marker seam never falls back to the ambient Herdr socket", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-marker-ambient-"));
-	const socketPath = join(dir, "herdr.sock");
+	const listenPath = testSocketPath(dir, "herdr.sock");
 	let connections = 0;
 	const server = createServer((socket) => {
 		connections++;
 		socket.destroy();
 	});
-	await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+	await new Promise<void>((resolve) => server.listen(listenPath, resolve));
 	const ambient = process.env.HERDR_SOCKET_PATH;
-	process.env.HERDR_SOCKET_PATH = socketPath;
+	process.env.HERDR_SOCKET_PATH = listenPath;
 	try {
 		await fixture(async (f) => {
 			const infrastructure = f.options.infrastructure;

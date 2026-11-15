@@ -30,16 +30,25 @@ async function client(script: string | undefined, run: () => Promise<void>) {
 	const dir = mkdtempSync(join(tmpdir(), "async-herdr-client-"));
 	const path = process.env.PATH;
 	const pidFile = join(dir, "client.pid");
-	if (script)
-		writeFileSync(
-			join(dir, "herdr"),
-			`#!${process.execPath}
-require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+	if (script) {
+		const body = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
 const descendantPidFile = ${JSON.stringify(join(dir, "descendant.pid"))};
 ${script}
-`,
-			{ mode: 0o755 },
-		);
+`;
+		if (process.platform === "win32") {
+			// Windows spawn("herdr") only finds PATHEXT entries; a bare file is ENOENT.
+			const js = join(dir, "herdr.js");
+			writeFileSync(js, body);
+			writeFileSync(
+				join(dir, "herdr.cmd"),
+				`@"${process.execPath}" "${js}" %*\r\n`,
+			);
+		} else {
+			writeFileSync(join(dir, "herdr"), `#!${process.execPath}\n${body}`, {
+				mode: 0o755,
+			});
+		}
+	}
 	process.env.PATH = dir;
 	try {
 		await run();
