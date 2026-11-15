@@ -50,12 +50,23 @@ function expectedShellQuote(value: string): string {
 	return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-/** Compare checkouts after realpath: Windows short names and slash forms differ. */
+/** Compare checkouts after native realpath: Windows 8.3 names and slash forms differ. */
 function assertSamePath(actual: string | undefined, expected: string): void {
 	if (actual === undefined) {
 		assert.fail("expected a path");
 	}
-	assert.equal(realpathSync(actual), realpathSync(expected));
+	// Node's JS realpath leaves 8.3 short names alone; the native one expands them.
+	assert.equal(
+		canonicalizeCheckoutPath(actual),
+		canonicalizeCheckoutPath(expected),
+	);
+}
+
+function canonicalizeCheckoutPath(path: string): string {
+	const resolved = realpathSync.native(path);
+	if (process.platform !== "win32") return resolved;
+	// GetFinalPathNameByHandle may prefix \\?\; drop it and ignore case.
+	return resolved.replace(/^\\\\\?\\/, "").toLowerCase();
 }
 
 function fixture() {
