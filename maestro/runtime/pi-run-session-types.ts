@@ -311,6 +311,8 @@ export interface DefaultRunSessionOptions {
 	 * `infrastructure` supplies the closed test composition.
 	 */
 	hostSurface?: HostSurfaceBinding;
+	/** Child reporter extension each launch loads; defaults to the protocol-only entry. */
+	childEntryPath?: string;
 	/** Test injection consumes the actual Stage 3 seams, not replacement launch logic. */
 	infrastructure?: PiRunSessionInfrastructure;
 	configDir: string;

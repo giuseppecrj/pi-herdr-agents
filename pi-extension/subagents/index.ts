@@ -6,6 +6,7 @@ import type {
 	SessionShutdownEvent,
 } from "@earendil-works/pi-coding-agent";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	createDefaultRunSession,
 	type PiRunSessionInfrastructure,
@@ -301,6 +302,13 @@ export default function subagentsExtension(
 			configDir: getAgentConfigDir(),
 			configExamplePath: getSubagentsConfigExamplePath(),
 			hostSurface: hostSurfaceBinding,
+			// Launches keep loading the terminal wrapper through its existing path.
+			childEntryPath: fileURLToPath(
+				new URL(
+					"../../maestro/adapters/pi/child/subagent-done.ts",
+					import.meta.url,
+				),
+			),
 			roles: [],
 			forcePolling: supervisionConfig.forcePolling,
 			outcomeLedger: outcomeLedgerConfig.enabled,

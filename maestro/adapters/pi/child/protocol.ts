@@ -1,0 +1,648 @@
+/**
+ * Extension loaded into sub-agents.
+ * - Shows agent identity + available tools as a compact styled widget above the editor
+ * - Provides a `subagent_done` tool for interactive agents to self-terminate
+ */
+import type {
+	ExtensionAPI,
+	ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
+import { writeFileSync } from "node:fs";
+import {
+	appendPersistentTaskEvent,
+	consumePersistentTaskInbox,
+	readPersistentDeliveryLedger,
+	readPersistentTaskEvents,
+} from "../session.ts";
+import { createSubagentActivityRecorder } from "../activity-file.ts";
+import { createDoneNudge } from "./done-nudge.ts";
+import { registerDeclaredSkills } from "./declared-skills.ts";
+import { isChildBusy } from "../../../core/child-busy.ts";
+import {
+	readOwnProcessIdentity,
+	writeProcessIdentityRecord,
+} from "../process-identity.ts";
+import { isString } from "../../../core/config/type-guards.ts";
+import { hasUndeliveredChildren } from "../../../core/undelivered-children.ts";
+import {
+	ACCEPT_FILE_ENV,
+	type ChildAcceptReport,
+} from "../../../core/accept.ts";
+import { readAcceptSpecFile } from "../accept-runner.ts";
+import { createChildAcceptLoop } from "./accept-check.ts";
+import {
+	childNoticeRefusal,
+	NOTICE_CAP,
+	NOTICE_CHILD_INTERVAL_MS,
+} from "../../../core/specialist-notice.ts";
+
+export function shouldMarkUserTookOver(agentStarted: boolean): boolean {
+	return agentStarted;
+}
+
+export function shouldAutoExitOnAgentEnd(
+	_userTookOver: boolean,
+	messages: any[] | undefined,
+	runAborted = false,
+): boolean {
+	// Escape during a tool lets Pi start the next provider request on the
+	// aborted signal, which lazyStream records as stopReason "error".
+	if (runAborted) return false;
+	// Manual input should not strand an auto-exit subagent. If the latest agent
+	// turn completed normally, close the session. Escape/abort still leaves it
+	// open for inspection or another prompt.
+	//
+	// stopReason: "error" (e.g. exhausted retries on a provider overload) also
+	// returns true — we want to shut down so the parent is woken up — but we
+	// pair this with findLatestAssistantError() so the parent learns it was an
+	// error, not a clean completion.
+	if (messages) {
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const msg = messages[i];
+			if (msg?.role === "assistant") {
+				return msg.stopReason !== "aborted";
+			}
+		}
+	}
+
+	return true;
+}
+
+export interface SubagentErrorInfo {
+	errorMessage: string;
+	stopReason: "error";
+}
+
+/**
+ * If the last assistant message in the turn ended with `stopReason: "error"`
+ * (typically auto-retry exhausted on an overload / rate limit / server error),
+ * return its error info so the parent orchestrator can surface a clear
+ * failure instead of silently treating the run as completed.
+ *
+ * Returns `null` when the latest assistant turn completed normally or was
+ * aborted by the user (handled separately by shouldAutoExitOnAgentEnd).
+ */
+export function findLatestAssistantError(
+	messages: any[] | undefined,
+): SubagentErrorInfo | null {
+	if (!messages) return null;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const msg = messages[i];
+		if (msg?.role !== "assistant") continue;
+		if (msg.stopReason !== "error") return null;
+		const raw = isString(msg.errorMessage) ? msg.errorMessage.trim() : "";
+		return {
+			errorMessage:
+				raw ||
+				"Subagent agent loop ended with stopReason=error (no errorMessage field).",
+			stopReason: "error",
+		};
+	}
+	return null;
+}
+
+export function buildCompletionSidecar(
+	messages: any[] | undefined,
+	accept?: ChildAcceptReport,
+):
+	| { type: "done"; accept?: ChildAcceptReport }
+	| { type: "error"; errorMessage: string; stopReason: "error" } {
+	const errorInfo = findLatestAssistantError(messages);
+	if (errorInfo) return { type: "error", ...errorInfo };
+	// Only a check that ran adds its report; the sidecar never holds output.
+	return accept ? { type: "done", accept } : { type: "done" };
+}
+
+export function buildPersistentTaskEvent(task: string, generation: string) {
+	return {
+		version: 1 as const,
+		type: "task-done" as const,
+		task,
+		generation,
+		at: new Date().toISOString(),
+	};
+}
+
+export function isPersistentStopDirective(
+	inbox: ReturnType<typeof consumePersistentTaskInbox>,
+): boolean {
+	return inbox?.type === "stop";
+}
+
+function findUnsettledPersistentTask(
+	sessionFile: string,
+	generation: string,
+): string {
+	const settledTasks = new Set(
+		readPersistentTaskEvents(sessionFile)
+			.filter(
+				(event) => event.type !== "notice" && event.generation === generation,
+			)
+			.map((event) => event.task),
+	);
+	return (
+		readPersistentDeliveryLedger(sessionFile)
+			.filter(
+				(entry) =>
+					entry.generation === generation &&
+					entry.outcome === "dispatched" &&
+					!settledTasks.has(entry.task),
+			)
+			.at(-1)?.task ?? ""
+	);
+}
+
+export function parseDeniedTools(rawValue: string | undefined): string[] {
+	return (rawValue ?? "")
+		.split(",")
+		.map((value) => value.trim())
+		.filter(Boolean);
+}
+
+/**
+ * A managed worktree child names its own process at load from immutable
+ * kernel facts, which Pi's process-title rewrite cannot alter.
+ */
+export function recordProcessIdentity(
+	id: string | undefined,
+	sessionFile: string | undefined,
+	file = process.env.PI_SUBAGENT_PROCESS_FILE,
+): void {
+	if (!file || !id || !sessionFile) return;
+	try {
+		writeProcessIdentityRecord(file, {
+			version: 1,
+			id,
+			sessionFile,
+			...readOwnProcessIdentity(),
+		});
+	} catch {
+		// Unrecorded identity leaves a worktree cancel unconfirmed, never guessed.
+	}
+}
+
+export type ChildPresentationHook = (
+	ctx: ExtensionContext,
+	identity: {
+		subagentName: string;
+		subagentAgent: string;
+		toolNames: string[];
+		denied: string[];
+	},
+) => void;
+
+export function createChildExtension(renderWidget?: ChildPresentationHook) {
+	return function subagentChildExtension(pi: ExtensionAPI) {
+		let toolNames: string[] = [];
+		let denied: string[] = [];
+
+		// Read subagent identity from env vars (set by parent orchestrator)
+		const subagentName = process.env.PI_SUBAGENT_NAME ?? "";
+		const subagentAgent = process.env.PI_SUBAGENT_AGENT ?? "";
+		const deniedToolsValue = process.env.PI_DENY_TOOLS;
+		const autoExit = process.env.PI_SUBAGENT_AUTO_EXIT === "1";
+		const persistent = process.env.PI_SUBAGENT_PERSISTENT === "1";
+		// The parent opted this specialist into notices at launch (ADR-0019).
+		const notify = persistent && process.env.PI_SUBAGENT_NOTIFY === "1";
+		const generation = process.env.PI_SUBAGENT_GENERATION_ID ?? "";
+		const sessionFile = process.env.PI_SUBAGENT_SESSION;
+		const initialTask = process.env.PI_SUBAGENT_TASK_ID ?? "";
+		let currentTask = persistent
+			? findUnsettledPersistentTask(sessionFile ?? "", generation) ||
+				(initialTask &&
+				!readPersistentTaskEvents(sessionFile ?? "").some(
+					(event) =>
+						event.type !== "notice" &&
+						event.task === initialTask &&
+						event.generation === generation,
+				)
+					? initialTask
+					: "")
+			: "";
+		const recorder = createSubagentActivityRecorder({
+			runningChildId: process.env.PI_SUBAGENT_ID,
+			activityFile: process.env.PI_SUBAGENT_ACTIVITY_FILE,
+			persistent,
+		});
+		recordProcessIdentity(process.env.PI_SUBAGENT_ID, sessionFile);
+		// The role's declared skills, as this child's own Pi loaded them.
+		registerDeclaredSkills(pi);
+
+		let userTookOver = false;
+		let agentStarted = false;
+		let latestAgentMessages: any[] | undefined;
+		let completionFinalized = false;
+		let sessionContext:
+			| Pick<ExtensionContext, "isIdle" | "abort" | "shutdown">
+			| undefined;
+		// A child without auto-exit closes only through subagent_done, so one that
+		// forgets it is asked once whether its task is complete.
+		const doneNudge =
+			!autoExit && !persistent
+				? createDoneNudge({
+						// A run that starts between the idle check and delivery queues the
+						// question instead of rejecting it.
+						send: (message) =>
+							pi.sendUserMessage(message, { deliverAs: "followUp" }),
+						isBusy: () => isChildBusy(pi.events),
+					})
+				: undefined;
+
+		// Show widget + status bar on session start
+		pi.on("session_start", (_event, ctx) => {
+			sessionContext = ctx;
+			recorder.sessionStart();
+			const tools = pi.getAllTools();
+			toolNames = tools.map((t) => t.name).sort();
+			denied = parseDeniedTools(deniedToolsValue);
+
+			renderWidget?.(ctx, { subagentName, subagentAgent, toolNames, denied });
+		});
+
+		pi.on("input", () => {
+			recorder.input();
+			// Ignore the initial task message that starts an autonomous subagent.
+			// Only inputs after the first agent run has started count as user takeover.
+			if (!shouldMarkUserTookOver(agentStarted)) return;
+			userTookOver = true;
+		});
+
+		pi.on("before_agent_start", () => {
+			recorder.beforeAgentStart();
+			doneNudge?.runStarting();
+		});
+
+		pi.on("agent_start", () => {
+			agentStarted = true;
+			recorder.agentStart();
+		});
+
+		pi.on("agent_end", (event) => {
+			latestAgentMessages = event.messages;
+			recorder.agentEndWaiting();
+			if (autoExit) {
+				// Reset any recorded manual input marker. Auto-exit is decided by whether
+				// the latest agent turn completed normally, not by who initiated it.
+				userTookOver = false;
+			}
+		});
+
+		// The accept check runs at the final actionable boundary, where Pi awaits
+		// the handler and may continue once; agent_settled only notifies.
+		const acceptSpec =
+			autoExit && !persistent
+				? readAcceptSpecFile(process.env[ACCEPT_FILE_ENV])
+				: undefined;
+		const acceptLoop = acceptSpec
+			? createChildAcceptLoop({ spec: acceptSpec, cwd: process.cwd() })
+			: undefined;
+		if (acceptLoop)
+			pi.on("agent_before_settle", async (event, ctx) => {
+				// A settle that will not exit (undelivered children) checks later.
+				if (completionFinalized || hasUndeliveredChildren()) return undefined;
+				return acceptLoop.beforeSettle(event, ctx.signal);
+			});
+
+		pi.on("agent_settled", (event, ctx) => {
+			const runAborted = event?.aborted === true;
+			if (doneNudge && !completionFinalized) {
+				doneNudge.settled(latestAgentMessages, runAborted, ctx);
+			}
+			if (persistent && !completionFinalized) {
+				let messages = latestAgentMessages;
+				try {
+					const branchMessages = ctx.sessionManager
+						.getBranch()
+						.flatMap((entry) =>
+							entry.type === "message" ? [entry.message] : [],
+						);
+					if (branchMessages.length > 0) messages = branchMessages;
+				} catch {
+					// Fall back to the latest low-level run when session evidence is unavailable.
+				}
+				if (
+					currentTask &&
+					shouldAutoExitOnAgentEnd(userTookOver, messages, runAborted)
+				) {
+					appendPersistentTaskEvent(
+						process.env.PI_SUBAGENT_SESSION ?? "",
+						buildPersistentTaskEvent(currentTask, generation),
+					);
+					currentTask = "";
+					recorder.agentEndWaiting();
+				}
+				return;
+			}
+			if (!autoExit || completionFinalized) return;
+
+			let messages = latestAgentMessages;
+			try {
+				const branchMessages = ctx.sessionManager
+					.getBranch()
+					.flatMap((entry) =>
+						entry.type === "message" ? [entry.message] : [],
+					);
+				if (branchMessages.length > 0) messages = branchMessages;
+			} catch {
+				// Fall back to the latest low-level run when session evidence is unavailable.
+			}
+
+			if (!shouldAutoExitOnAgentEnd(userTookOver, messages, runAborted)) return;
+			// Children this session launched deliver their results as steers. Exiting
+			// now would drop them, so wait: the last delivery starts a new turn, and
+			// its settlement reaches this point again. A settled error still exits so
+			// the parent learns of it promptly.
+			if (
+				findLatestAssistantError(messages) === null &&
+				hasUndeliveredChildren()
+			)
+				return;
+			completionFinalized = true;
+
+			// Surface a settled stopReason: "error" to the parent via the .exit
+			// sidecar. Transient errors followed by retry or compaction never reach
+			// this point as the latest assistant message.
+			const sessionFile = process.env.PI_SUBAGENT_SESSION;
+			if (sessionFile) {
+				try {
+					writeFileSync(
+						`${sessionFile}.exit`,
+						JSON.stringify(
+							buildCompletionSidecar(messages, acceptLoop?.report()),
+						),
+					);
+				} catch {
+					// Best effort — the watcher can still detect the terminal sentinel
+					// after shutdown if the completion sidecar cannot be written.
+				}
+			}
+
+			recorder.agentEndDone();
+			ctx.shutdown();
+		});
+
+		pi.on("turn_start", (event) => {
+			recorder.turnStart(event.turnIndex);
+		});
+
+		pi.on("turn_end", (event) => {
+			recorder.turnEnd(event.turnIndex);
+		});
+
+		pi.on("before_provider_request", () => {
+			recorder.beforeProviderRequest();
+		});
+
+		pi.on("after_provider_response", () => {
+			recorder.afterProviderResponse();
+		});
+
+		pi.on("message_update", (event) => {
+			recorder.messageUpdate(event.assistantMessageEvent?.type);
+		});
+
+		pi.on("tool_execution_start", (event) => {
+			recorder.toolExecutionStart(event.toolCallId, event.toolName);
+		});
+
+		pi.on("tool_call", (event) => {
+			recorder.toolCall(event.toolCallId, event.toolName);
+		});
+
+		pi.on("tool_execution_update", (event) => {
+			recorder.toolExecutionUpdate(event.toolCallId, event.toolName);
+		});
+
+		pi.on("tool_result", (event) => {
+			recorder.toolResult(event.toolCallId, event.toolName);
+		});
+
+		pi.on("tool_execution_end", (event) => {
+			recorder.toolExecutionEnd(event.toolCallId, event.toolName);
+		});
+
+		pi.on("session_shutdown", async (event) => {
+			if (inboxPoller) clearInterval(inboxPoller);
+			doneNudge?.cancel();
+			recorder.sessionShutdown(event.reason);
+			// A check still running belongs to this session: stop it, bounded.
+			await acceptLoop?.shutdown();
+		});
+
+		pi.registerTool({
+			name: "caller_ping",
+			label: "Caller Ping",
+			description:
+				"Send a help request to the parent agent and exit this session. " +
+				"The parent will be notified with your message and can resume this session with a response. " +
+				"Use when you're stuck, need clarification, or need the parent to take action.",
+			parameters: Type.Object({
+				message: Type.String({ description: "What you need help with" }),
+			}),
+			async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+				const sessionFile = process.env.PI_SUBAGENT_SESSION;
+				if (!sessionFile) {
+					throw new Error(
+						"caller_ping is only available in subagent contexts. " +
+							"PI_SUBAGENT_SESSION environment variable is not set.",
+					);
+				}
+
+				// The parent ignores a help request for no task; an opted-in
+				// specialist has a tool that reaches it.
+				if (notify && !currentTask)
+					throw new Error(
+						"caller_ping has no current task to ask about, so the parent would ignore it. " +
+							"Use caller_notify to tell the parent something changed.",
+					);
+				recorder.callerPing();
+				if (persistent) {
+					appendPersistentTaskEvent(sessionFile, {
+						type: "help-request",
+						task: currentTask,
+						generation,
+						message: params.message,
+					});
+					currentTask = "";
+					return {
+						content: [
+							{
+								type: "text",
+								text: "Help request sent. Stay available for subagent_send.",
+							},
+						],
+						details: {},
+					};
+				}
+				const exitData = {
+					type: "ping" as const,
+					name: process.env.PI_SUBAGENT_NAME ?? "subagent",
+					message: params.message,
+				};
+				writeFileSync(`${sessionFile}.exit`, JSON.stringify(exitData));
+				completionFinalized = true;
+
+				ctx.shutdown();
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Ping sent. Session will exit and parent will be notified.",
+						},
+					],
+					details: {},
+				};
+			},
+		});
+
+		if (notify)
+			pi.registerTool({
+				name: "caller_notify",
+				label: "Caller Notify",
+				description:
+					"Wake the parent agent with a short notice that something changed, without ending or completing any task. " +
+					`Only for a persistent specialist whose parent opted in; at most ${NOTICE_CAP} notices, at least ${NOTICE_CHILD_INTERVAL_MS / 1_000} seconds apart. ` +
+					"Send one only when something the parent cares about changed, never to say that nothing changed.",
+				parameters: Type.Object({
+					message: Type.String({
+						description: "What changed, in a sentence or two",
+					}),
+				}),
+				async execute(_toolCallId, params) {
+					const sessionFile = process.env.PI_SUBAGENT_SESSION;
+					if (!sessionFile)
+						throw new Error(
+							"caller_notify is only available in persistent subagent contexts. " +
+								"PI_SUBAGENT_SESSION environment variable is not set.",
+						);
+					// Counted from the event file, so a child /reload keeps its place.
+					const sent = readPersistentTaskEvents(sessionFile).filter(
+						(event) =>
+							event.type === "notice" && event.generation === generation,
+					);
+					const last = sent.at(-1);
+					const refusal = childNoticeRefusal(
+						{
+							sent: sent.length,
+							lastAt: last ? Date.parse(last.at) : undefined,
+						},
+						Date.now(),
+					);
+					if (refusal) throw new Error(refusal);
+					const sequence = sent.length + 1;
+					// No activity change: a notice neither starts nor ends a task.
+					appendPersistentTaskEvent(sessionFile, {
+						type: "notice",
+						task: "",
+						generation,
+						message: params.message,
+						sequence,
+					});
+					return {
+						content: [
+							{
+								type: "text",
+								text:
+									`Notice ${sequence} of ${NOTICE_CAP} sent. ` +
+									"It does not end or complete any task; continue your current work or stay available for subagent_send.",
+							},
+						],
+						details: {},
+					};
+				},
+			});
+
+		let inboxPoller: ReturnType<typeof setInterval> | undefined;
+		if (persistent) {
+			inboxPoller = setInterval(() => {
+				try {
+					const sessionFile = process.env.PI_SUBAGENT_SESSION;
+					if (!sessionFile || currentTask) return;
+					const inbox = consumePersistentTaskInbox(sessionFile);
+					if (!inbox) return;
+					if (isPersistentStopDirective(inbox)) {
+						try {
+							writeFileSync(
+								`${sessionFile}.exit`,
+								JSON.stringify({ type: "done" }),
+							);
+						} catch {
+							// The parent can still confirm the shell exit marker.
+						}
+						completionFinalized = true;
+						recorder.subagentDone();
+						// The run that asked for help belongs to no task, and shutdown waits for idle.
+						if (sessionContext && !sessionContext.isIdle())
+							sessionContext.abort();
+						sessionContext?.shutdown();
+						return;
+					}
+					currentTask = inbox.task;
+					recorder.taskStart();
+					// After caller_ping the run that asked for help may still be streaming.
+					pi.sendUserMessage(inbox.message, { deliverAs: "followUp" });
+				} catch {
+					// A malformed or transiently unavailable inbox must not kill the poller.
+				}
+			}, 1000);
+		}
+
+		if (autoExit) return;
+
+		pi.registerTool({
+			name: "subagent_done",
+			label: "Subagent Done",
+			description:
+				"Call this tool when you have completed your task. " +
+				"It will close this session and return your results to the main session. " +
+				"Your LAST assistant message before calling this becomes the summary returned to the caller.",
+			parameters: Type.Object({}),
+			async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+				const sessionFile = process.env.PI_SUBAGENT_SESSION;
+				recorder.subagentDone();
+				if (persistent) {
+					if (!sessionFile || !currentTask) {
+						return {
+							content: [
+								{
+									type: "text",
+									text: "No current task. Staying available for subagent_send.",
+								},
+							],
+							details: {},
+						};
+					}
+					appendPersistentTaskEvent(
+						sessionFile,
+						buildPersistentTaskEvent(currentTask, generation),
+					);
+					currentTask = "";
+					return {
+						content: [
+							{
+								type: "text",
+								text: "Task complete. Staying available for subagent_send.",
+							},
+						],
+						details: {},
+					};
+				}
+				if (sessionFile) {
+					writeFileSync(
+						`${sessionFile}.exit`,
+						JSON.stringify({ type: "done" }),
+					);
+				}
+				completionFinalized = true;
+				ctx.shutdown();
+				return {
+					content: [{ type: "text", text: "Shutting down subagent session." }],
+					details: {},
+				};
+			},
+		});
+	};
+}
+
+export default createChildExtension();

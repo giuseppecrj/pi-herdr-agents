@@ -559,6 +559,7 @@ export function createDefaultRunSession(
 	}
 	function adapter(snapshot: PiLaunchSnapshot): PiHarnessAdapter {
 		return new PiHarnessAdapter({
+			childEntryPath: state.options.childEntryPath,
 			surface: state.infrastructure.surfaceProvider,
 			paneConfig: snapshot.paneConfig,
 			modelRegistry: snapshot.modelRegistry,

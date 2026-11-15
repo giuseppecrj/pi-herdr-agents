@@ -172,6 +172,18 @@ function isForbiddenEdge(root: string, reference: ModuleReference) {
 			"pi-extension/subagents/marker-transport.ts",
 			["../../maestro/surfaces/herdr/herdr-socket.ts"],
 		],
+		[
+			"pi-extension/subagents/child.ts",
+			["../../maestro/adapters/pi/child/protocol.ts"],
+		],
+		[
+			"pi-extension/subagents/child-widget.ts",
+			["../../maestro/adapters/pi/child/protocol.ts"],
+		],
+		[
+			"maestro/adapters/pi/child/subagent-done.ts",
+			["../../../../pi-extension/subagents/child.ts"],
+		],
 	]);
 	if (hostEdges.get(toRepoPath(root, reference.file))?.includes(specifier))
 		return false;

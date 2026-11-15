@@ -17,8 +17,10 @@ export function getSubagentsConfigPath(): string {
 	return join(getSubagentsConfigDir(), "config.json");
 }
 
-export function getSubagentsConfigExamplePath(): string {
-	return join(PACKAGE_ROOT, "config.json.example");
+export function getSubagentsConfigExamplePath(
+	assetRoot = PACKAGE_ROOT,
+): string {
+	return join(assetRoot, "config.json.example");
 }
 
 export function getSubagentsPackageRoot(): string {

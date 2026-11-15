@@ -46,7 +46,7 @@ import {
 	modelScopeAssignment,
 	safeName,
 	shellComment,
-	SUBAGENTS_DIR,
+	DEFAULT_CHILD_ENTRY_PATH,
 	timestampForFile,
 } from "./launch-command.ts";
 import { shellExitFileFor } from "./completion.ts";
@@ -61,6 +61,7 @@ type SubagentSessionMode = "standalone" | "lineage-only" | "fork";
 
 export interface FreshPiLaunchRequest {
 	kind: "fresh";
+	childEntryPath?: string;
 	acquisitionSignal?: AbortSignal;
 	id?: string;
 	name: string;
@@ -109,6 +110,7 @@ export interface FreshPiLaunchRequest {
 
 export interface ResumePiLaunchRequest {
 	kind: "resume";
+	childEntryPath?: string;
 	acquisitionSignal?: AbortSignal;
 	id?: string;
 	name: string;
@@ -831,7 +833,7 @@ function buildPiCommand(
 		shellQuote(artifacts.sessionFile),
 		...(request.handoff
 			? []
-			: ["-e", shellQuote(join(SUBAGENTS_DIR, "child", "subagent-done.ts"))]),
+			: ["-e", shellQuote(request.childEntryPath ?? DEFAULT_CHILD_ENTRY_PATH)]),
 		"--model",
 		shellQuote(request.runtimePlan.model),
 		"--thinking",

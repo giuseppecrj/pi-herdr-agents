@@ -738,6 +738,7 @@ for (const mode of ["success", "focus-warning", "readiness-failure"] as const) {
 						.replace("PI_SUBAGENT_MODEL_SCOPE=", "")
 						.includes("PI_SUBAGENT_") &&
 					!command.includes("subagent-done.ts") &&
+					!command.includes("child/entry.") &&
 					!command.includes("__SUBAGENT_DONE_"),
 				command,
 			);
