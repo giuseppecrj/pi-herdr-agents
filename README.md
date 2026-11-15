@@ -370,4 +370,4 @@ This package builds on earlier open-source work by [HazAT/pi-interactive-subagen
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Copyright notice retained from the upstream lineage (`HazAT`).
+MIT, see [LICENSE](LICENSE).
