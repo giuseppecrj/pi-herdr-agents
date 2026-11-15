@@ -52,7 +52,9 @@ function expectedShellQuote(value: string): string {
 
 /** Compare checkouts after realpath: Windows short names and slash forms differ. */
 function assertSamePath(actual: string | undefined, expected: string): void {
-	assert.ok(typeof actual === "string");
+	if (actual === undefined) {
+		assert.fail("expected a path");
+	}
 	assert.equal(realpathSync(actual), realpathSync(expected));
 }
 
