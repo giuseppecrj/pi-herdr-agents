@@ -200,6 +200,7 @@ import {
 } from "../maestro/core/child-busy.ts";
 import {
 	interpretExitSidecar,
+	shellExitFileFor,
 	waitForCompletion,
 } from "../maestro/adapters/pi/completion.ts";
 import {
@@ -1441,7 +1442,9 @@ describe("host adapter migration", () => {
 			assert.equal(f.registrations(), 1);
 			assert.equal(f.closed.length, 1);
 		}));
-	it("confirms a stopped specialist's exit when a tall shell prompt follows the marker", async () =>
+	// Issue #143: without a process identity (macOS) a wrapped shell prompt
+	// pushed the on-screen marker out of the read, so the stop never confirmed.
+	it("confirms a stopped specialist's exit from the shell's post-exit record when the marker scrolled away", async () =>
 		withAdapterHost(async (f) => {
 			const child = await f.launch({
 				name: "watcher",
@@ -1451,8 +1454,16 @@ describe("host adapter migration", () => {
 				lifecycle: createLifecycle(1_000),
 			});
 			assert.ok(f.handle(child));
+			const record = shellExitFileFor(child.sessionFile);
+			const launchLine = f.commands.find((command: string) =>
+				command.includes(record),
+			);
+			assert.ok(launchLine, "the launch line writes the post-exit record");
+			assert.ok(
+				launchLine.indexOf("piha_exit=$?") < launchLine.indexOf(record),
+				"the record is written only after Pi returns",
+			);
 			child.stopState = "requested";
-			// Issue #143: a wrapped prompt in a narrow pane printed after the marker.
 			f.surface.appendScreen(child.surface, "__SUBAGENT_DONE_0__");
 			for (const line of [
 				"",
@@ -1462,9 +1473,11 @@ describe("host adapter migration", () => {
 				"➜",
 			])
 				f.surface.appendScreen(child.surface, line);
+			writeFileSync(record, "0\n");
 			await f.finish(child);
 			assert.equal(child.lifecycle.process.kind, "completed");
 			assert.equal(f.closed.length, 1);
+			assert.equal(existsSync(record), false, "the record is consumed");
 		}));
 	it("retains each owning adapter and watcher through reload while new launches use the new parent snapshot", async () =>
 		withAdapterHost(async (f) => {
@@ -10080,61 +10093,50 @@ describe("completion.ts", () => {
 		}
 	});
 
+	it("admits the shell's post-exit record unless the process is known alive", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "completion-shell-exit-"));
+		const sessionFile = join(dir, "child.jsonl");
+		const shellExitFile = shellExitFileFor(sessionFile);
+		try {
+			writeFileSync(shellExitFile, "3\n");
+			const options = {
+				intervalMs: 1,
+				sessionFile,
+				shellExitFile,
+				requireProcessExit: true,
+				paneDisappearanceGraceMs: 0,
+				readTerminalTail: async () => "",
+			};
+			const controller = new AbortController();
+			let checks = 0;
+			await assert.rejects(
+				waitForCompletion(controller.signal, {
+					...options,
+					inspectProcess: () => {
+						if (++checks === 3) controller.abort();
+						return "alive";
+					},
+				}),
+				/Aborted/,
+			);
+			assert.equal(existsSync(shellExitFile), true);
+			const result = await waitForCompletion(new AbortController().signal, {
+				...options,
+				inspectProcess: () => "unknown",
+			});
+			assert.deepEqual(result, { reason: "sentinel", exitCode: 3 });
+			assert.equal(existsSync(shellExitFile), false);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("returns the terminal sentinel exit code", async () => {
 		const result = await waitForCompletion(new AbortController().signal, {
 			intervalMs: 1,
 			readTerminalTail: async () => "output\n__SUBAGENT_DONE_17__\n",
 		});
 		assert.deepEqual(result, { reason: "sentinel", exitCode: 17 });
-	});
-
-	// Issue #143: on macOS no process identity is captured, so a persistent stop
-	// relies on this marker; a tall or wrapped shell prompt pushed it above the
-	// last five lines.
-	it("finds the shell's own-line marker above a tall shell prompt", async () => {
-		const result = await waitForCompletion(new AbortController().signal, {
-			intervalMs: 1,
-			requireProcessExit: true,
-			inspectProcess: () => "unknown",
-			readTerminalTail: async () =>
-				[
-					"To resume this session: pi --session 01a1e0c6",
-					"__SUBAGENT_DONE_0__",
-					"",
-					"shep on main on v29.8.2",
-					"(orbstack) took",
-					"5m 28.7s",
-					"➜",
-				].join("\n"),
-		});
-		assert.deepEqual(result, { reason: "sentinel", exitCode: 0 });
-	});
-
-	it("ignores a marker that Pi renders above the last five lines", async () => {
-		const controller = new AbortController();
-		let reads = 0;
-		await assert.rejects(
-			waitForCompletion(controller.signal, {
-				intervalMs: 1,
-				requireProcessExit: true,
-				inspectProcess: () => "unknown",
-				readTerminalTail: async () => {
-					if (++reads === 3) controller.abort();
-					// Pi indents what it renders; only the shell writes at column 0.
-					return [
-						" __SUBAGENT_DONE_0__",
-						" echo '__SUBAGENT_DONE_'$?'__'",
-						"────────",
-						"",
-						"────────",
-						"~/Projects/shep",
-						"gpt-6-astra > low",
-					].join("\n");
-				},
-			}),
-			/Aborted/,
-		);
-		assert.ok(reads >= 3);
 	});
 
 	it("prefers an error sidecar published during the terminal read", async () => {
