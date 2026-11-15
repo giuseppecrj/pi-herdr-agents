@@ -7,11 +7,13 @@ import {
 	DELEGATED_MARKER_RENEW_MS,
 	DELEGATED_MARKER_TTL_MS,
 	DelegatedMarkers,
-	herdrMarkerSessionReader,
-	herdrMarkerWriter,
 	type MarkerSessionReader,
 	type MarkerWriter,
 } from "../../maestro/runtime/delegated-marker.ts";
+import {
+	herdrMarkerSessionReader,
+	herdrMarkerWriter,
+} from "../../pi-extension/subagents/marker-transport.ts";
 import { RECONCILE_INTERVAL_MS } from "../../maestro/core/supervision.ts";
 import type {
 	PaneAgentSessionRead,

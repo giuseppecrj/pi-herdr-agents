@@ -1,4 +1,5 @@
 import "../isolated-agent-dir.ts";
+import { hostSurfaceBinding } from "../../pi-extension/subagents/host-surface.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createServer, type Socket } from "node:net";
@@ -1457,7 +1458,10 @@ test("Core native binding survives reload; changed endpoint/backend fails before
 			config,
 			JSON.stringify({ herdr: { backend: "core" }, panes }),
 		);
-		const options = sessionOptions(f, false);
+		const options = {
+			...sessionOptions(f, false),
+			hostSurface: hostSurfaceBinding,
+		};
 		const nativeEnv = {
 			HC_TERMINAL_ID: "t1",
 			HC_TERMINAL_SOCKET: f.socketPath,

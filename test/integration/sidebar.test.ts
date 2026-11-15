@@ -33,10 +33,12 @@ import {
 import {
 	DELEGATED_MARKER_RENEW_MS,
 	DelegatedMarkers,
-	herdrMarkerSessionReader,
-	herdrMarkerWriter,
 	type MarkerSessionReader,
 } from "../../maestro/runtime/delegated-marker.ts";
+import {
+	herdrMarkerSessionReader,
+	herdrMarkerWriter,
+} from "../../pi-extension/subagents/marker-transport.ts";
 import { linuxProcessProbe } from "../../maestro/adapters/pi/process-identity.ts";
 import {
 	isFiniteNumber,

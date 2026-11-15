@@ -26,10 +26,11 @@ import {
 	powerShellQuote,
 	type PaneShell,
 } from "../../maestro/core/script-launch.ts";
+import { createDefaultRunSession } from "../../maestro/runtime/pi-run-session.ts";
 import {
-	createDefaultRunSession,
 	createLaunchSurfaceProvider,
-} from "../../maestro/runtime/pi-run-session.ts";
+	hostSurfaceBinding,
+} from "../../pi-extension/subagents/host-surface.ts";
 import { writeSubagentSessionPolicy } from "../../maestro/adapters/pi/session.ts";
 import type { PiLaunchSnapshot } from "../../maestro/runtime/index.ts";
 import { createLaunchPlanner } from "../../pi-extension/subagents/launch.ts";
@@ -753,6 +754,7 @@ describe("launch composition on Windows", () => {
 					deniedTools: [],
 				});
 				const session = createDefaultRunSession({
+					hostSurface: hostSurfaceBinding,
 					configDir: dir,
 					configExamplePath: fileURLToPath(
 						new URL("../../config.json.example", import.meta.url),

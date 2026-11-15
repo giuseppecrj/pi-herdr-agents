@@ -10,6 +10,7 @@ import {
 	createDefaultRunSession,
 	type PiRunSessionInfrastructure,
 } from "../../maestro/runtime/index.ts";
+import { hostSurfaceBinding } from "./host-surface.ts";
 import { loadSupervisionConfig } from "../../maestro/core/config/supervision-config.ts";
 import {
 	buildAuthenticatedModelCatalog,
@@ -299,6 +300,7 @@ export default function subagentsExtension(
 		{
 			configDir: getAgentConfigDir(),
 			configExamplePath: getSubagentsConfigExamplePath(),
+			hostSurface: hostSurfaceBinding,
 			roles: [],
 			forcePolling: supervisionConfig.forcePolling,
 			outcomeLedger: outcomeLedgerConfig.enabled,

@@ -158,6 +158,23 @@ function isForbiddenEdge(root: string, reference: ModuleReference) {
 	const importer = classifyRepoPath(toRepoPath(root, reference.file));
 	const target = importedArea(root, reference);
 	const specifier = reference.specifier;
+	// H1 terminal composition is the only concrete bridge into the local engine.
+	const hostEdges = new Map<string, string[]>([
+		[
+			"pi-extension/subagents/host-surface.ts",
+			[
+				"../../maestro/surfaces/herdr/herdr-surface-provider.ts",
+				"../../maestro/surfaces/herdr/herdr-core-surface-provider.ts",
+				"../../maestro/adapters/pi/script-shell.ts",
+			],
+		],
+		[
+			"pi-extension/subagents/marker-transport.ts",
+			["../../maestro/surfaces/herdr/herdr-socket.ts"],
+		],
+	]);
+	if (hostEdges.get(toRepoPath(root, reference.file))?.includes(specifier))
+		return false;
 
 	if (importer === "other") return false;
 	if (target === "adapters/fake" || target === "surfaces/fake") {
@@ -183,7 +200,7 @@ function isForbiddenEdge(root: string, reference: ModuleReference) {
 			);
 		case "runtime":
 			return !(
-				["core", "adapters/pi", "surfaces/herdr", "runtime"].includes(target) ||
+				["core", "adapters/pi", "runtime"].includes(target) ||
 				isNodeBuiltin(specifier)
 			);
 		case "adapters/fake":
@@ -289,7 +306,7 @@ describe("maestro dependency rule", () => {
 		);
 	});
 
-	it("runtime imports core, adapters, surfaces", () => {
+	it("runtime imports core and adapters, never concrete surfaces", () => {
 		assertNoForbiddenImports("runtime dependency violations", (violation) =>
 			toRepoPath(repoRoot, violation.file).startsWith("maestro/runtime/"),
 		);
@@ -306,7 +323,7 @@ describe("maestro dependency rule", () => {
 		});
 	});
 
-	it("pi-extension never imports adapters or surfaces directly", () => {
+	it("pi-extension imports concrete providers only at the explicit host bridges", () => {
 		assertNoForbiddenImports(
 			"pi-extension dependency violations",
 			(violation) =>
