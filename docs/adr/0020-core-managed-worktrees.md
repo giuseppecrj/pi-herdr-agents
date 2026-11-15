@@ -6,8 +6,8 @@
 - **Would amend:** ADR-0018's managed-worktree deferral, not its execution or Desktop boundaries
 - **Baseline:** `64f03130ca4e7a8bb30cdd7125a1a47777398179` (`v3.11.0`)
 
-**Revision 2:** Addresses the independent Claude Opus review in
-`/tmp/coreworktree-review.md` of `1aae7b4`. Its verdict was “adopt with changes”.
+**Revision 2:** Addresses an independent Claude Opus review (2026-11-15)
+of `1aae7b4`. Its verdict was “adopt with changes”.
 Adds Git-locked checkouts, evidence-gated recovery and explicit consent to delete
 ignored files. Moves conversation handoff to PR 3. The questions remain for Giuseppe.
 
