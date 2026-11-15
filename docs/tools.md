@@ -363,7 +363,12 @@ shutdown. It does not prove process exit. The host retains lifetime ownership
 until a verified process identity has exited, the shell has emitted its post-exit
 marker, or pane absence confirms termination when no identity is known alive.
 A known-live identity prevents a stale marker or missing pane from establishing
-exit. Task events can still arrive while shutdown is pending.
+exit. The marker counts anywhere in the pane's last five lines, or alone on a
+line at column 0 anywhere on the visible screen, so a tall or wrapped shell
+prompt printed after it cannot hide it. Pi indents what it renders, so its own
+output does not match the second form. Without a captured process identity, as
+on macOS, the marker is the only exit evidence for an open pane. Task events can
+still arrive while shutdown is pending.
 
 A persistent specialist with a worktree holds that lease for its entire lifetime. It cannot be re-bound to another checkout. Otherwise it runs in an ordinary pane.
 

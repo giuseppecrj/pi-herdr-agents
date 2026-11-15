@@ -10,6 +10,14 @@ import {
 
 const ABORT_MESSAGE = "Aborted while waiting for subagent to finish";
 const TERMINAL_SENTINEL = /__SUBAGENT_DONE_(\d+)__/;
+// The launch line's `echo` writes the marker alone on a line at column 0 once
+// Pi exits. Pi indents everything it renders, so an own-line marker higher up
+// the screen is the shell's even after a tall or wrapped prompt follows it.
+const SHELL_SENTINEL_LINE = /^__SUBAGENT_DONE_(\d+)__\s*$/;
+/** Bottom lines where any marker counts, as before own-line matching. */
+const SENTINEL_TAIL_LINES = 5;
+/** Lines `readTerminalTail` should return: enough for any shell prompt. */
+export const TERMINAL_TAIL_LINES = 50;
 
 export interface CompletionResult {
 	reason: "done" | "ping" | "sentinel" | "error";
@@ -113,7 +121,13 @@ function readExitSidecar(
 }
 
 function terminalExitCode(screen: string): number | null {
-	const match = screen.match(TERMINAL_SENTINEL);
+	const lines = screen.replace(/\n+$/, "").split("\n");
+	const tail = lines.slice(-SENTINEL_TAIL_LINES).join("\n");
+	const match =
+		tail.match(TERMINAL_SENTINEL) ??
+		lines
+			.findLast((line) => SHELL_SENTINEL_LINE.test(line))
+			?.match(SHELL_SENTINEL_LINE);
 	return match ? Number.parseInt(match[1], 10) : null;
 }
 

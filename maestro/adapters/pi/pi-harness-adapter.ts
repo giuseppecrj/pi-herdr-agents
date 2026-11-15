@@ -52,7 +52,7 @@ import {
 	type PiRunningChild,
 } from "./launch.ts";
 import type { WorktreeOperations } from "../../core/worktree.ts";
-import { waitForCompletion } from "./completion.ts";
+import { TERMINAL_TAIL_LINES, waitForCompletion } from "./completion.ts";
 import { acceptLaunchRefusal } from "../../core/accept.ts";
 import { notifyLaunchRefusal } from "../../core/specialist-notice.ts";
 import {
@@ -564,7 +564,10 @@ export class PiHarnessAdapter implements HarnessAdapter {
 							// A caller-provided terminal can contain an earlier run's marker.
 							child.launchFailure && !child.ownsSurface && !child.worktree
 								? ""
-								: this.options.surface.readScreen(child.surface, 5),
+								: this.options.surface.readScreen(
+										child.surface,
+										TERMINAL_TAIL_LINES,
+									),
 						inspectPane: registration.inspectPane,
 						onLocalEvidence: () =>
 							this.options.onObservation?.(child, "local-evidence"),
