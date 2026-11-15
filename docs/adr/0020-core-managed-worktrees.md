@@ -152,7 +152,7 @@ The released API can be checked in the tagged primary sources:
 [OpenRPC schema](https://github.com/herdrdev/herdr-core/blob/v0.1.21/schema/hc.openrpc.json),
 [README](https://github.com/herdrdev/herdr-core/blob/v0.1.21/README.md), and
 [security](https://github.com/herdrdev/herdr-core/blob/v0.1.21/docs/security.md).
-The runtime schema inspected on the VM matched that tagged schema. Sources were
+The spike read the schema from the running 0.1.21 binary (`hc schema`). Sources were
 read as evidence. No downloaded source commands were executed and no local
 files or credentials were sent to them.
 
