@@ -55,6 +55,8 @@ const packageFiles = new Set(
 		execFileSync("npm", ["pack", "--dry-run", "--json"], {
 			cwd: root,
 			encoding: "utf8",
+			// npm is `npm.cmd` on Windows, which only a shell can start.
+			shell: process.platform === "win32",
 		}),
 	)[0].files.map(({ path }) => path),
 );
@@ -191,6 +193,7 @@ describe("pack-neutral package contents", () => {
 					{
 						cwd: dir,
 						encoding: "utf8",
+						shell: process.platform === "win32",
 					},
 				),
 			)[0].files.map(({ path }) => path);
