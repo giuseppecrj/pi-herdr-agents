@@ -1,0 +1,42 @@
+{
+	"registrations": [
+		{
+			"tools": [
+				"worktree_list",
+				"worktree_remove",
+				"subagents_write_task_models",
+				"subagent",
+				"subagent_send",
+				"subagent_stop",
+				"subagent_interrupt",
+				"subagent_cancel",
+				"subagents_list",
+				"subagent_resume"
+			],
+			"commands": ["subagents-init", "worktree", "subagent"],
+			"renderers": [
+				"subagent_result",
+				"subagent_status",
+				"subagent_notice",
+				"subagent_ping"
+			],
+			"handlers": [["session_start", 1], ["session_shutdown", 3]]
+		}
+	],
+	"result": {
+		"content": [
+			{
+				"type": "text",
+				"text": "No running subagent with id \"missing\"."
+			}
+		],
+		"details": {
+			"error": "No running subagent with id \"missing\"."
+		}
+	},
+	"refreshedConfig": true,
+	"ownerPreserved": true,
+	"rowsPreserved": true,
+	"timersDisposed": true,
+	"heldReleased": 1
+}

@@ -1,0 +1,223 @@
+{
+	"tools": [
+		{
+			"name": "worktree_list",
+			"renderCall": null,
+			"renderResult": null
+		},
+		{
+			"name": "worktree_remove",
+			"renderCall": null,
+			"renderResult": null
+		},
+		{
+			"name": "subagents_write_task_models",
+			"renderCall": null,
+			"renderResult": null
+		},
+		{
+			"name": "subagent",
+			"renderCall": [
+				["▸ <toolTitle>*(unnamed)*</toolTitle>                        "],
+				["▸ <toolTitle>*(unnamed)*</toolTitle>                        "],
+				[
+					"▸ <toolTitle>*scout*</toolTitle><dim> (reviewer)</dim><dim> ",
+					"in /tmp/with space</dim><dim> on feat/a (worktree)</dim>    ",
+					"<toolOutput>  first line</toolOutput><muted> (3             ",
+					"lines)</muted>                                              "
+				],
+				[
+					"▸ <toolTitle>*(unnamed)*</toolTitle>                        ",
+					"<toolOutput>xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+					"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…</toolO",
+					"utput>                                                      "
+				]
+			],
+			"renderResult": [
+				["<dim>fallback text</dim>                                    "],
+				[
+					"<accent>▸</accent> <toolTitle>*scout*</toolTitle><dim> —    ",
+					"provider/model · high · feat/a</dim>                        "
+				],
+				[
+					"<accent>▸</accent> <toolTitle>*(unnamed)*</toolTitle><dim> —",
+					"provider/model</dim>                                        "
+				],
+				[
+					"<accent>▸</accent> <toolTitle>*(unnamed)*</toolTitle><dim> —",
+					"started</dim>                                               "
+				]
+			]
+		},
+		{
+			"name": "subagent_send",
+			"renderCall": null,
+			"renderResult": null
+		},
+		{
+			"name": "subagent_stop",
+			"renderCall": null,
+			"renderResult": null
+		},
+		{
+			"name": "subagent_interrupt",
+			"renderCall": [
+				[
+					"<accent>▸</accent> <toolTitle>*id-1*</toolTitle><dim> —     ",
+					"interrupt turn</dim>                                        "
+				],
+				[
+					"<accent>▸</accent> <toolTitle>*named*</toolTitle><dim> —    ",
+					"interrupt turn</dim>                                        "
+				],
+				[
+					"<accent>▸</accent> <toolTitle>*(unknown)*</toolTitle><dim> —",
+					"interrupt turn</dim>                                        "
+				]
+			],
+			"renderResult": [
+				[
+					"<accent>▸</accent> <toolTitle>*n*</toolTitle><dim> —        ",
+					"interrupt requested</dim>                                   "
+				],
+				[
+					"<accent>▸</accent> <toolTitle>*i*</toolTitle><dim> —        ",
+					"interrupt requested</dim>                                   "
+				],
+				[
+					"<accent>▸</accent> <toolTitle>*subagent*</toolTitle><dim> — ",
+					"interrupt requested</dim>                                   "
+				],
+				["<dim>fallback text</dim>                                    "]
+			]
+		},
+		{
+			"name": "subagent_cancel",
+			"renderCall": [
+				[
+					"<accent>▸</accent> <toolTitle>*id-1*</toolTitle><dim> —     ",
+					"cancel run</dim>                                            "
+				],
+				[
+					"<accent>▸</accent> <toolTitle>*named*</toolTitle><dim> —    ",
+					"cancel run</dim>                                            "
+				],
+				[
+					"<accent>▸</accent> <toolTitle>*(unknown)*</toolTitle><dim> —",
+					"cancel run</dim>                                            "
+				]
+			],
+			"renderResult": [
+				[
+					"<accent>▸</accent> <toolTitle>*n*</toolTitle><dim> — cancel ",
+					"cancelled</dim>                                             "
+				],
+				[
+					"<accent>▸</accent> <toolTitle>*i*</toolTitle><dim> — cancel ",
+					"already_settled</dim>                                       "
+				],
+				[
+					"<accent>▸</accent> <toolTitle>*subagent*</toolTitle><dim> — ",
+					"cancel cancelled</dim>                                      "
+				],
+				["<dim>fallback text</dim>                                    "]
+			]
+		},
+		{
+			"name": "subagents_list",
+			"renderCall": null,
+			"renderResult": [
+				["<dim>No subagent definitions found.</dim>                   "],
+				[
+					"  <toolTitle>*pack-role*</toolTitle><accent>                ",
+					"(package:pack)</accent><dim> [provider/model]</dim><dim> —  ",
+					"line\\nbreak \\u0007</dim>                                    ",
+					"  <toolTitle>*project-role*</toolTitle><accent>             ",
+					"(project)</accent>                                          ",
+					"<warning>  ! bad role\\nfile</warning>                       "
+				]
+			]
+		},
+		{
+			"name": "subagent_resume",
+			"renderCall": [
+				[
+					"▸ <toolTitle>*Resume*</toolTitle><dim> — resuming           ",
+					"session</dim>                                               "
+				],
+				[
+					"▸ <toolTitle>*again*</toolTitle><dim> — resuming            ",
+					"session</dim>                                               "
+				]
+			],
+			"renderResult": [
+				[
+					"<accent>▸</accent> <toolTitle>*again*</toolTitle><dim> —    ",
+					"resumed</dim>                                               "
+				],
+				[
+					"<accent>▸</accent> <toolTitle>*Resume*</toolTitle><dim> —   ",
+					"resumed</dim>                                               "
+				],
+				["<dim>fallback text</dim>                                    "]
+			]
+		}
+	],
+	"child": {
+		"tools": [
+			{
+				"name": "caller_ping",
+				"description": "Send a help request to the parent agent and exit this session. The parent will be notified with your message and can resume this session with a response. Use when you're stuck, need clarification, or need the parent to take action.",
+				"parameters": {
+					"type": "object",
+					"required": ["message"],
+					"properties": {
+						"message": {
+							"description": "What you need help with",
+							"type": "string"
+						}
+					}
+				}
+			},
+			{
+				"name": "subagent_done",
+				"description": "Call this tool when you have completed your task. It will close this session and return your results to the main session. Your LAST assistant message before calling this becomes the summary returned to the caller.",
+				"parameters": {
+					"type": "object",
+					"properties": {}
+				}
+			}
+		],
+		"events": [
+			["before_agent_start", 2],
+			["session_start", 1],
+			["input", 1],
+			["agent_start", 1],
+			["agent_end", 1],
+			["agent_settled", 1],
+			["turn_start", 1],
+			["turn_end", 1],
+			["before_provider_request", 1],
+			["after_provider_response", 1],
+			["message_update", 1],
+			["tool_execution_start", 1],
+			["tool_call", 1],
+			["tool_execution_update", 1],
+			["tool_result", 1],
+			["tool_execution_end", 1],
+			["session_shutdown", 1]
+		],
+		"widgets": [
+			{
+				"name": "subagent-tools",
+				"options": {
+					"placement": "aboveEditor"
+				},
+				"lines": [
+					"[toolSuccessBg] *<accent>[h1-role]</accent>*<dim> — 2 tools</dim><dim> ·   [/toolSuccessBg]",
+					"[toolSuccessBg] </dim><error>2 denied</error>                              [/toolSuccessBg]"
+				]
+			}
+		]
+	}
+}

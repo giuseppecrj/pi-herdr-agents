@@ -1,0 +1,856 @@
+{
+	"parent": {
+		"exports": [
+			"__test__",
+			"cleanupSubagentsForShutdown",
+			"default",
+			"hasWorkingSubagents",
+			"selectCompletionApi",
+			"shouldAdvanceToFallback",
+			"shouldDeliverSubagentCompletion",
+			"shouldPreserveSubagentsOnShutdown"
+		],
+		"testSurface": [
+			"borderLine",
+			"buildSubagentRoutingGuidelines",
+			"deliverPersistentTaskEvent",
+			"discoverAgentCatalog",
+			"drainPersistentTaskEvents",
+			"evaluateNoProgressAdvisory",
+			"formatLivePersistentSpecialists",
+			"formatNoProgressAdvisoryLine",
+			"handleSubagentInterrupt",
+			"handleSubagentSend",
+			"handleSubagentStop",
+			"loadAgentDefaults",
+			"notifyPersistentCrash",
+			"observeRunningSubagent",
+			"persistentCapacityError",
+			"persistentSpecialistState",
+			"renderSubagentWidgetLines",
+			"requestSubagentInterrupt",
+			"resolveDenyTools",
+			"resolveEffectiveAutoExit",
+			"resolveEffectiveInteractive",
+			"resolveEffectiveSessionMode",
+			"resolveInterruptTarget",
+			"resolveLaunchBehavior",
+			"resolveResultPresentation",
+			"runningSubagents",
+			"sendSubagentResult",
+			"sessionModelRegistry",
+			"shouldAdvanceToFallback",
+			"shouldRetainSubagentSurface",
+			"updateWidget"
+		],
+		"tools": [
+			{
+				"name": "worktree_list",
+				"description": "List managed worktrees, including orphans from other sessions. Read-only.",
+				"parameters": {
+					"type": "object",
+					"properties": {}
+				}
+			},
+			{
+				"name": "worktree_remove",
+				"description": "Remove one managed worktree by exact path, branch, or workspace ID, only when the user asks. Its source repository must be inside cwd. Branches and commits are kept. A dirty worktree needs preserve: true, which commits the work first.",
+				"parameters": {
+					"type": "object",
+					"required": ["target"],
+					"properties": {
+						"target": {
+							"minLength": 1,
+							"type": "string"
+						},
+						"preserve": {
+							"type": "boolean"
+						}
+					}
+				}
+			},
+			{
+				"name": "subagents_write_task_models",
+				"description": "Validate task preferences, show exact before/after for user approval, then atomically replace models.tasks, models.tasksThinking and models.tasksMeta in the durable Pi agent config, preserving unrelated settings. Every call shows exact before/after for changed categories and requires user approval through a refusal-first selector (60-second timeout), even when another extension already approved it. No-UI, print/JSON and child sessions are refused without writing. Supported categories: coding, review, recon, qa, architecture, docs. Partial nonempty categories are accepted; omitted categories are removed. Rejects duplicate exact refs within a category. Review the active authenticated registry and existing preferences first. Optional expectedConfigRevision also binds the proposal's starting revision: it fails without replacing configuration when the config file no longer matches the revision the proposal was read from. Optional basis records what the ranking rests on; its kind must equal tasksMeta.method, and it is returned but not saved. Concurrent approvals refuse immediately rather than stack. The full replacement bytes and real directory are prepared before approval and rechecked before rename. New files disclose their minimal status/models seed. Cooperating writes use an advisory lock, not a filesystem authorization boundary. Returns normalized saved preferences, missing categories, the configRevision of the written file, and any basis; reload required.",
+				"parameters": {
+					"type": "object",
+					"required": ["tasks", "tasksMeta"],
+					"properties": {
+						"tasks": {
+							"additionalProperties": false,
+							"minProperties": 1,
+							"type": "object",
+							"properties": {
+								"coding": {
+									"minItems": 1,
+									"description": "Implementation workers",
+									"type": "array",
+									"items": {
+										"minLength": 1,
+										"type": "string"
+									}
+								},
+								"review": {
+									"minItems": 1,
+									"description": "Code reviewers",
+									"type": "array",
+									"items": {
+										"minLength": 1,
+										"type": "string"
+									}
+								},
+								"recon": {
+									"minItems": 1,
+									"description": "Reconnaissance scouts",
+									"type": "array",
+									"items": {
+										"minLength": 1,
+										"type": "string"
+									}
+								},
+								"qa": {
+									"minItems": 1,
+									"description": "Software and test runners",
+									"type": "array",
+									"items": {
+										"minLength": 1,
+										"type": "string"
+									}
+								},
+								"architecture": {
+									"minItems": 1,
+									"description": "Planning and diagnosis",
+									"type": "array",
+									"items": {
+										"minLength": 1,
+										"type": "string"
+									}
+								},
+								"docs": {
+									"minItems": 1,
+									"description": "Documentation workers",
+									"type": "array",
+									"items": {
+										"minLength": 1,
+										"type": "string"
+									}
+								}
+							}
+						},
+						"tasksThinking": {
+							"anyOf": [
+								{
+									"additionalProperties": false,
+									"description": "Category thinking, clamped per fallback candidate. Replaces the map when supplied ({} clears and removes it); omitted or null preserves thinking for retained categories. Entries require a submitted task category.",
+									"type": "object",
+									"properties": {
+										"coding": {
+											"anyOf": [
+												{
+													"const": "off",
+													"type": "string"
+												},
+												{
+													"const": "minimal",
+													"type": "string"
+												},
+												{
+													"const": "low",
+													"type": "string"
+												},
+												{
+													"const": "medium",
+													"type": "string"
+												},
+												{
+													"const": "high",
+													"type": "string"
+												},
+												{
+													"const": "xhigh",
+													"type": "string"
+												},
+												{
+													"const": "max",
+													"type": "string"
+												}
+											]
+										},
+										"review": {
+											"anyOf": [
+												{
+													"const": "off",
+													"type": "string"
+												},
+												{
+													"const": "minimal",
+													"type": "string"
+												},
+												{
+													"const": "low",
+													"type": "string"
+												},
+												{
+													"const": "medium",
+													"type": "string"
+												},
+												{
+													"const": "high",
+													"type": "string"
+												},
+												{
+													"const": "xhigh",
+													"type": "string"
+												},
+												{
+													"const": "max",
+													"type": "string"
+												}
+											]
+										},
+										"recon": {
+											"anyOf": [
+												{
+													"const": "off",
+													"type": "string"
+												},
+												{
+													"const": "minimal",
+													"type": "string"
+												},
+												{
+													"const": "low",
+													"type": "string"
+												},
+												{
+													"const": "medium",
+													"type": "string"
+												},
+												{
+													"const": "high",
+													"type": "string"
+												},
+												{
+													"const": "xhigh",
+													"type": "string"
+												},
+												{
+													"const": "max",
+													"type": "string"
+												}
+											]
+										},
+										"qa": {
+											"anyOf": [
+												{
+													"const": "off",
+													"type": "string"
+												},
+												{
+													"const": "minimal",
+													"type": "string"
+												},
+												{
+													"const": "low",
+													"type": "string"
+												},
+												{
+													"const": "medium",
+													"type": "string"
+												},
+												{
+													"const": "high",
+													"type": "string"
+												},
+												{
+													"const": "xhigh",
+													"type": "string"
+												},
+												{
+													"const": "max",
+													"type": "string"
+												}
+											]
+										},
+										"architecture": {
+											"anyOf": [
+												{
+													"const": "off",
+													"type": "string"
+												},
+												{
+													"const": "minimal",
+													"type": "string"
+												},
+												{
+													"const": "low",
+													"type": "string"
+												},
+												{
+													"const": "medium",
+													"type": "string"
+												},
+												{
+													"const": "high",
+													"type": "string"
+												},
+												{
+													"const": "xhigh",
+													"type": "string"
+												},
+												{
+													"const": "max",
+													"type": "string"
+												}
+											]
+										},
+										"docs": {
+											"anyOf": [
+												{
+													"const": "off",
+													"type": "string"
+												},
+												{
+													"const": "minimal",
+													"type": "string"
+												},
+												{
+													"const": "low",
+													"type": "string"
+												},
+												{
+													"const": "medium",
+													"type": "string"
+												},
+												{
+													"const": "high",
+													"type": "string"
+												},
+												{
+													"const": "xhigh",
+													"type": "string"
+												},
+												{
+													"const": "max",
+													"type": "string"
+												}
+											]
+										}
+									}
+								},
+								{
+									"type": "null"
+								}
+							]
+						},
+						"tasksMeta": {
+							"type": "object",
+							"required": ["generatedAt", "method"],
+							"properties": {
+								"generatedAt": {
+									"type": "string"
+								},
+								"method": {
+									"anyOf": [
+										{
+											"const": "research",
+											"type": "string"
+										},
+										{
+											"const": "registry-only",
+											"type": "string"
+										}
+									]
+								}
+							}
+						},
+						"expectedConfigRevision": {
+							"description": "Revision of the config the proposal was read from: \"sha256:\" plus 64 lowercase hex digits of the exact file bytes, or \"missing\" when the file is absent. A mismatch fails without writing; re-read, re-propose, and re-approve. Omit to propose against the current config; user approval still binds the exact snapshot shown.",
+							"anyOf": [
+								{
+									"const": "missing",
+									"type": "string"
+								},
+								{
+									"pattern": "^sha256:[0-9a-f]{64}$",
+									"type": "string"
+								}
+							]
+						},
+						"basis": {
+							"description": "What the ranking rests on, as submitted by the proposer and not independently verified: {\"kind\":\"registry-only\"}, or {\"kind\":\"research\"} with the http(s) sources consulted in this run, how each informed the ranking, and the remaining uncertainty. kind must equal tasksMeta.method. Not saved. Omit for a legacy write.",
+							"anyOf": [
+								{
+									"additionalProperties": false,
+									"type": "object",
+									"required": ["kind"],
+									"properties": {
+										"kind": {
+											"const": "registry-only",
+											"type": "string"
+										}
+									}
+								},
+								{
+									"additionalProperties": false,
+									"type": "object",
+									"required": ["kind", "sources", "uncertainty"],
+									"properties": {
+										"kind": {
+											"const": "research",
+											"type": "string"
+										},
+										"sources": {
+											"minItems": 1,
+											"type": "array",
+											"items": {
+												"additionalProperties": false,
+												"type": "object",
+												"required": ["url", "influence"],
+												"properties": {
+													"url": {
+														"minLength": 1,
+														"type": "string"
+													},
+													"influence": {
+														"minLength": 1,
+														"type": "string"
+													}
+												}
+											}
+										},
+										"uncertainty": {
+											"minLength": 1,
+											"type": "string"
+										}
+									}
+								}
+							]
+						}
+					}
+				}
+			},
+			{
+				"name": "subagent",
+				"description": "Launch a Pi subagent in a legacy Herdr pane or local Core terminal. Managed worktrees require legacy Herdr; Core runs in the background without Desktop Agents tabs or sidebar integration. Use an ordinary child for read-only work and a single writer, and worktrees only for parallel writers. A worktree starts from the committed HEAD, without uncommitted parent changes, and is retained after the run for parent review. To inspect one, use an ordinary child with cwd set to its path. The call returns at once and the result arrives later as a new message. Do not poll or guess the result; end the turn or do other independent work.",
+				"parameters": {
+					"type": "object",
+					"required": ["name", "task"],
+					"properties": {
+						"name": {
+							"description": "Short label shown in the widget and legacy pane title.",
+							"type": "string"
+						},
+						"task": {
+							"description": "Task/prompt for the sub-agent",
+							"type": "string"
+						},
+						"agent": {
+							"description": "Role definition to load defaults from (see subagents_list). Omit for a bare agent.",
+							"type": "string"
+						},
+						"systemPrompt": {
+							"description": "Role/system-prompt text for a bare spawn. Named agents keep their definition body.",
+							"type": "string"
+						},
+						"model": {
+							"description": "Exact authenticated provider/model-id, a comma-separated fallback list, or task:<category> as the whole value. Worktree launches take one model: a task: category uses its first candidate, and fallback lists are rejected. For ordinary review, prefer a different authenticated model family. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback.",
+							"type": "string"
+						},
+						"thinking": {
+							"description": "Pi thinking level, within the chosen model's supported range. Overrides task-category thinking (clamped per candidate), then role thinking, then parent. Use low for mechanical work, medium for ordinary work, and high+ for hard work.",
+							"anyOf": [
+								{
+									"const": "off",
+									"type": "string"
+								},
+								{
+									"const": "minimal",
+									"type": "string"
+								},
+								{
+									"const": "low",
+									"type": "string"
+								},
+								{
+									"const": "medium",
+									"type": "string"
+								},
+								{
+									"const": "high",
+									"type": "string"
+								},
+								{
+									"const": "xhigh",
+									"type": "string"
+								},
+								{
+									"const": "max",
+									"type": "string"
+								}
+							]
+						},
+						"skills": {
+							"description": "Comma-separated skills (overrides agent default)",
+							"type": "string"
+						},
+						"tools": {
+							"description": "Comma-separated tools (overrides agent default)",
+							"type": "string"
+						},
+						"cwd": {
+							"description": "Working directory. With `worktree`, the source repository; the child then starts at the new worktree root.",
+							"type": "string"
+						},
+						"worktree": {
+							"description": "New managed Git worktree (legacy Herdr only, not Core). Omit or pass null for an ordinary child in cwd.",
+							"anyOf": [
+								{
+									"type": "object",
+									"required": ["branch"],
+									"properties": {
+										"branch": {
+											"minLength": 1,
+											"description": "Unique new branch name.",
+											"type": "string"
+										},
+										"base": {
+											"description": "Git revision to branch from. Defaults to the committed HEAD.",
+											"type": "string"
+										}
+									}
+								},
+								{
+									"type": "null"
+								}
+							]
+						},
+						"fork": {
+							"description": "`true` copies this conversation into the child; `false` starts it fresh. Omit to use the role's session-mode.",
+							"type": "boolean"
+						},
+						"persistent": {
+							"description": "Keep the child alive between tasks. Send later tasks with subagent_send.",
+							"type": "boolean"
+						},
+						"notify": {
+							"description": "Persistent only. Give the specialist caller_notify, so it can wake you between tasks when something changes (at most 50 notices, rate-limited). Default false.",
+							"type": "boolean"
+						},
+						"accept": {
+							"description": "Optional acceptance check. The result reports `Check: <verdict>`: accepted, rejected, error, skipped, or none. Only for auto-exit, non-persistent children.",
+							"type": "object",
+							"required": ["run"],
+							"properties": {
+								"run": {
+									"minLength": 1,
+									"description": "Shell command run with `sh -c`; exit 0 passes. The child runs it and retries on failure. The host then reruns it in the child's checkout, and that run decides the verdict.",
+									"type": "string"
+								},
+								"maxRetries": {
+									"minimum": 0,
+									"maximum": 5,
+									"description": "Extra child turns after a failed check. Default 1.",
+									"type": "integer"
+								},
+								"timeoutSec": {
+									"minimum": 1,
+									"maximum": 3600,
+									"description": "Per-run timeout in seconds. Default 600. A timeout gives verdict `error`.",
+									"type": "integer"
+								},
+								"paths": {
+									"description": "Check files, such as tests. The result lists any the child changed, without affecting the verdict.",
+									"type": "array",
+									"items": {
+										"minLength": 1,
+										"type": "string"
+									}
+								}
+							}
+						},
+						"interactive": {
+							"description": "True when the user drives the child in its own pane. Interactive children do not wake the parent on stall or recovery. Defaults to the role's `interactive` setting, else the opposite of `auto-exit`.",
+							"type": "boolean"
+						}
+					}
+				}
+			},
+			{
+				"name": "subagent_send",
+				"description": "Deliver one follow-up task to an idle persistent specialist. Busy specialists reject tasks; no queue is kept.",
+				"parameters": {
+					"type": "object",
+					"required": ["message"],
+					"properties": {
+						"id": {
+							"description": "Exact persistent specialist logical ID",
+							"type": "string"
+						},
+						"name": {
+							"description": "Exact unambiguous persistent specialist name",
+							"type": "string"
+						},
+						"message": {
+							"description": "The next task",
+							"type": "string"
+						}
+					}
+				}
+			},
+			{
+				"name": "subagent_stop",
+				"description": "Stop a persistent specialist after its active task finishes.",
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"description": "Exact persistent specialist logical ID",
+							"type": "string"
+						},
+						"name": {
+							"description": "Exact unambiguous persistent specialist name",
+							"type": "string"
+						}
+					}
+				}
+			},
+			{
+				"name": "subagent_interrupt",
+				"description": "Send Escape to a running subagent's active turn. The subagent keeps running, and this call delivers no result.",
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"description": "Exact running subagent id",
+							"type": "string"
+						},
+						"name": {
+							"description": "Exact running subagent display name",
+							"type": "string"
+						}
+					}
+				}
+			},
+			{
+				"name": "subagent_cancel",
+				"description": "Cancel a running non-persistent subagent, including an interrupted one. The host stops its process and delivers exactly one cancelled result, with no model fallback, retry, or recovery. Do not poll for it. A legacy pane closes; Core confirms exit and removes its terminal record after delivery. A worktree child keeps the workspace, checkout, commits, and manifest. Returns confirmed, requested (launch still in flight), unconfirmed (still running; call again), or already-terminal. Persistent specialists are rejected; use subagent_stop.",
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"description": "Exact running subagent id",
+							"type": "string"
+						},
+						"name": {
+							"description": "Exact unambiguous running subagent display name",
+							"type": "string"
+						}
+					}
+				}
+			},
+			{
+				"name": "subagents_list",
+				"description": "List subagent role definitions, live persistent specialists, and the supervision mode.",
+				"parameters": {
+					"type": "object",
+					"properties": {}
+				}
+			},
+			{
+				"name": "subagent_resume",
+				"description": "Resume a saved subagent session in a new legacy Herdr pane or local Core terminal. Use it to continue a cancelled run or send follow-up work. It does not reattach a retained worktree; continue that work in the existing workspace. The call returns at once and the result arrives later as a message. Do not poll for it.",
+				"parameters": {
+					"type": "object",
+					"required": ["sessionPath"],
+					"properties": {
+						"sessionPath": {
+							"description": "Path to the session .jsonl file to resume",
+							"type": "string"
+						},
+						"name": {
+							"description": "Display name for the run (and legacy Herdr tab). Default: 'Resume'",
+							"type": "string"
+						},
+						"message": {
+							"description": "Message to send after resuming.",
+							"type": "string"
+						},
+						"autoExit": {
+							"description": "Exit after the response. Defaults to true; set false to leave the session open for the user.",
+							"type": "boolean"
+						}
+					}
+				}
+			}
+		],
+		"commands": [
+			{
+				"name": "subagents-init",
+				"description": "Draft task-category model preferences from the live registry; optional arguments set ranking preferences"
+			},
+			{
+				"name": "worktree",
+				"description": "Fork into a worktree, list retained worktrees, or explicitly remove one"
+			},
+			{
+				"name": "subagent",
+				"description": "Spawn a subagent: /subagent <agent> <task>; list agents: /subagent list"
+			}
+		],
+		"renderers": [
+			"subagent_result",
+			"subagent_status",
+			"subagent_notice",
+			"subagent_ping"
+		],
+		"shortcuts": [],
+		"events": [["session_start", 1], ["session_shutdown", 3]]
+	},
+	"child": {
+		"exports": [
+			"__test__",
+			"cleanupSubagentsForShutdown",
+			"default",
+			"hasWorkingSubagents",
+			"selectCompletionApi",
+			"shouldAdvanceToFallback",
+			"shouldDeliverSubagentCompletion",
+			"shouldPreserveSubagentsOnShutdown"
+		],
+		"testSurface": [
+			"borderLine",
+			"buildSubagentRoutingGuidelines",
+			"deliverPersistentTaskEvent",
+			"discoverAgentCatalog",
+			"drainPersistentTaskEvents",
+			"evaluateNoProgressAdvisory",
+			"formatLivePersistentSpecialists",
+			"formatNoProgressAdvisoryLine",
+			"handleSubagentInterrupt",
+			"handleSubagentSend",
+			"handleSubagentStop",
+			"loadAgentDefaults",
+			"notifyPersistentCrash",
+			"observeRunningSubagent",
+			"persistentCapacityError",
+			"persistentSpecialistState",
+			"renderSubagentWidgetLines",
+			"requestSubagentInterrupt",
+			"resolveDenyTools",
+			"resolveEffectiveAutoExit",
+			"resolveEffectiveInteractive",
+			"resolveEffectiveSessionMode",
+			"resolveInterruptTarget",
+			"resolveLaunchBehavior",
+			"resolveResultPresentation",
+			"runningSubagents",
+			"sendSubagentResult",
+			"sessionModelRegistry",
+			"shouldAdvanceToFallback",
+			"shouldRetainSubagentSurface",
+			"updateWidget"
+		],
+		"tools": [
+			{
+				"name": "subagent_send",
+				"description": "Deliver one follow-up task to an idle persistent specialist. Busy specialists reject tasks; no queue is kept.",
+				"parameters": {
+					"type": "object",
+					"required": ["message"],
+					"properties": {
+						"id": {
+							"description": "Exact persistent specialist logical ID",
+							"type": "string"
+						},
+						"name": {
+							"description": "Exact unambiguous persistent specialist name",
+							"type": "string"
+						},
+						"message": {
+							"description": "The next task",
+							"type": "string"
+						}
+					}
+				}
+			},
+			{
+				"name": "subagent_stop",
+				"description": "Stop a persistent specialist after its active task finishes.",
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"description": "Exact persistent specialist logical ID",
+							"type": "string"
+						},
+						"name": {
+							"description": "Exact unambiguous persistent specialist name",
+							"type": "string"
+						}
+					}
+				}
+			},
+			{
+				"name": "subagent_interrupt",
+				"description": "Send Escape to a running subagent's active turn. The subagent keeps running, and this call delivers no result.",
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"description": "Exact running subagent id",
+							"type": "string"
+						},
+						"name": {
+							"description": "Exact running subagent display name",
+							"type": "string"
+						}
+					}
+				}
+			},
+			{
+				"name": "subagent_cancel",
+				"description": "Cancel a running non-persistent subagent, including an interrupted one. The host stops its process and delivers exactly one cancelled result, with no model fallback, retry, or recovery. Do not poll for it. A legacy pane closes; Core confirms exit and removes its terminal record after delivery. A worktree child keeps the workspace, checkout, commits, and manifest. Returns confirmed, requested (launch still in flight), unconfirmed (still running; call again), or already-terminal. Persistent specialists are rejected; use subagent_stop.",
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"description": "Exact running subagent id",
+							"type": "string"
+						},
+						"name": {
+							"description": "Exact unambiguous running subagent display name",
+							"type": "string"
+						}
+					}
+				}
+			},
+			{
+				"name": "subagents_list",
+				"description": "List subagent role definitions, live persistent specialists, and the supervision mode.",
+				"parameters": {
+					"type": "object",
+					"properties": {}
+				}
+			}
+		],
+		"commands": [
+			{
+				"name": "worktree",
+				"description": "Fork this session into a worktree; use /worktree list to inspect them"
+			},
+			{
+				"name": "subagent",
+				"description": "Spawn a subagent: /subagent <agent> <task>; list agents: /subagent list"
+			}
+		],
+		"renderers": [
+			"subagent_result",
+			"subagent_status",
+			"subagent_notice",
+			"subagent_ping"
+		],
+		"shortcuts": [],
+		"events": [["session_start", 1], ["session_shutdown", 1]]
+	}
+}
