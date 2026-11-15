@@ -132,7 +132,7 @@ Socket-directory privacy validation is also new work. Current selection checks
 platform, terminal address and an absolute socket path, not directory permissions
 (`maestro/core/config/herdr-config.ts:56-78`).
 
-**Fact, external:** `/tmp/core-spike/REPORT.md`, sections D, E, F and H, reports
+**Fact, external:** a private spike report (2026-11-14), sections D, E, F and H, records
 real Pi 1.5.2, host 3.11.0 and Core 0.1.21 on a private Linux VM:
 
 - Ordinary children, persistent tasks, automatic delivery and confirmed cancel
@@ -152,7 +152,7 @@ The released API can be checked in the tagged primary sources:
 [OpenRPC schema](https://github.com/herdrdev/herdr-core/blob/v0.1.21/schema/hc.openrpc.json),
 [README](https://github.com/herdrdev/herdr-core/blob/v0.1.21/README.md), and
 [security](https://github.com/herdrdev/herdr-core/blob/v0.1.21/docs/security.md).
-The inspected runtime schema is `/tmp/core-spike/schema.json`. Sources were
+The runtime schema inspected on the VM matched that tagged schema. Sources were
 read as evidence. No downloaded source commands were executed and no local
 files or credentials were sent to them.
 
@@ -166,7 +166,7 @@ There is no native Git-worktree or legacy workspace API.
 
 **Fact, API:** The tagged schema's `Terminal.reason` includes `spawn_pending`.
 A timed-out initial spawn may already be running. See the tagged API's “Events”
-section and `/tmp/core-spike/sources/schema/README.md:165-169`.
+section (README lines 165-169 at v0.1.21).
 `ListResult.terminals` also includes connected machines as `machine/tN`.
 `Terminal.screen` can be `inexact` after a Core crash. These fields are not
 retained by the current host parser, which accepts only local terminal addresses
