@@ -663,6 +663,11 @@ function prepareChildSession(
 		persistent: resolved.request.behavior.persistent,
 		logicalId: resolved.request.behavior.logicalId ?? resolved.id,
 		generationId: resolved.request.behavior.generationId,
+		agent: resolved.request.handoff ? null : (resolved.request.agent ?? null),
+		selfSpawn:
+			!resolved.request.handoff &&
+			Boolean(resolved.request.agent) &&
+			Boolean(resolved.request.behavior.selfSpawn),
 		worktree: surface.worktree
 			? {
 					path: surface.worktree.path,
