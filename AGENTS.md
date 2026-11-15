@@ -8,7 +8,7 @@ These instructions apply to humans and coding agents changing `pi-herdr-agents`.
 
 The package is a pack-neutral execution host: it ships no agent roles and no planning or review workflows. Its only skill is `pi-herdr-agents`, a general operating guide for the host; do not add methodology or workflow skills here. Roles come from project or global definitions and separately installed role packs. Do not add bundled roles, a privileged default pack, or name-keyed workflow behavior; see [ADR-0013](docs/adr/0013-pack-neutral-execution-host.md).
 
-The extension is fire-and-forget: `subagent` returns an acknowledgement, and completion is delivered to the parent automatically. Never add polling guidance that tells callers to sleep, tail sessions, or repeatedly check status.
+The extension is fire-and-forget: `subagent` returns an acknowledgement, and completion is delivered to the parent automatically. Never add polling guidance that tells callers to sleep, tail sessions, or repeatedly check status. The one sanctioned loop is a watcher: a persistent specialist launched with `notify: true` that owns its timer and wakes the parent through `caller_notify` ([ADR-0019](docs/adr/0019-specialist-notices.md)).
 
 ## Read these first
 
@@ -91,7 +91,7 @@ Read [`docs/worktree-subagents.md`](docs/worktree-subagents.md) before changing 
 
 When behavior changes, update every affected surface in the same commit:
 
-- public tool parameters or lifecycle → run `npm run docs:tools` to regenerate the marked blocks in `docs/tools.md` and `test/fixtures/tool-schema/current.json`, edit the prose by hand, plus the `README.md` summary when everyday use changes
+- public tool parameters or lifecycle → run `npm run docs:tools` to regenerate the marked blocks in `docs/tools.md` and `test/fixtures/tool-schema/current.json`, edit the prose by hand, plus the `README.md` summary when everyday use changes and the operating guide in `skills/pi-herdr-agents/SKILL.md` when agent behavior changes
 - report envelope, host evidence, or tool-schema compatibility → `docs/delegation-outcome-contract.md`
 - configuration keys, model routing, or task-model init events → `docs/configuration.md`, plus the `README.md` summary when everyday use changes
 - role-pack protocol or role frontmatter → `docs/roles.md`
