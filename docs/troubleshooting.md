@@ -84,6 +84,10 @@ A failed Git handoff reports unknown state. Inspect the retained checkout before
 integration or cleanup. Explicit cleanup Git commands still run synchronously
 with their existing timeouts.
 
+## A child fails before its session starts
+
+When a child Pi exits before its session starts, the result reads `Sub-agent exited with code N before its session started. Last output:` followed by the last lines the child printed (at most 12). The host masks values that look like keys or tokens. A common cause is an extension that fails to load, for example a malformed section in `config.json`; the output names the file and the key. Fix the cause and launch again. To check by hand, run `pi` in the same directory. Omitted `config.json` sections are not a cause: each one keeps its default ([Configuration file](configuration.md#configuration-file)).
+
 ## A child is stalled or makes no progress
 
 The widget shows `stalled` when pane inspection fails or the pane disappears without a completion record. Time alone never makes a run stalled. A no-progress advisory warns once per episode and never interrupts, kills, retries, or restarts a child. Interrupt the child with `subagent_interrupt`, end an ordinary run with `subagent_cancel`, or stop a persistent specialist with `subagent_stop`. See [In-progress status updates](tools.md#in-progress-status-updates) and [Supervision transport](configuration.md#supervision-transport).

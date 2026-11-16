@@ -315,6 +315,9 @@ Durable config: `$PI_CODING_AGENT_DIR/herdr-agents/config.json` (default
 `~/.pi/agent/herdr-agents/config.json`); never the package root. Copy the
 package's `config.json.example` or run `/subagents-init`. Run `/reload` after
 changes. Without a real file, only non-model settings fall back to the example.
+Every section is optional; an omitted one keeps its default, and a malformed one
+stops every new Pi from loading the extension. Save task models through the
+writer, never by rewriting the file; a hand edit must keep every other key.
 
 | Key | Purpose |
 | --- | --- |

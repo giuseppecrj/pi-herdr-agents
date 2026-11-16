@@ -75,6 +75,6 @@
     "typescript": "5.9.3"
   },
   "dependencies": {
-    "@nubl/maestro": "0.1.1"
+    "@nubl/maestro": "0.1.2"
   }
 }
