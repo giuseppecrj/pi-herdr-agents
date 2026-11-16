@@ -49,6 +49,11 @@ If `config.json` is absent, backend, status, role, pane, spawning, persistent-sp
 Model routing does not read the example: no model overrides apply until a real
 `config.json` exists.
 
+When `config.json` exists, every section is optional. An omitted section or key
+keeps the default shown above, so a file that holds only `models` is valid. A
+section that is present but malformed, such as `"status": "on"`, stops the
+extension from loading with an error that names the file and the key.
+
 `config.json` is durable user state under the Pi agent directory and is loaded
 when the extension starts. Run `/reload` after changing it, except that changing
 the selected backend or Core endpoint requires restarting Pi. Package-root
@@ -298,8 +303,9 @@ behind the displayed preferences and re-checks them under the write lock. Change
 are rejected, including unrelated settings and whitespace. Re-read, re-propose
 and obtain fresh approval. The complete replacement bytes are computed before
 the selector and compared again before publication. A missing config is seeded
-only with required `status.enabled: true` and the proposed `models`, not the
-packaged example. This avoids silently adding model defaults, agent overrides,
+only with `status.enabled: true` and the proposed `models`, not the
+packaged example. An existing config keeps every other top-level key and value.
+The published file is owner-only (mode `0600`), whatever its previous mode. This avoids silently adding model defaults, agent overrides,
 or spawning settings. The selector states that a new file will be created,
 lists every top-level key, and discloses the status setting beyond the task rows.
 Symlinked directories are supported: the selector shows the resolved real path
