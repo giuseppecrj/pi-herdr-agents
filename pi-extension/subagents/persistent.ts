@@ -66,7 +66,7 @@ export function persistentSpecialistState(
 	return "idle";
 }
 
-interface SubagentSendDetails {
+export interface SubagentSendDetails {
 	error?: string;
 	id?: string;
 	task?: string;
@@ -154,7 +154,7 @@ function sendPersistentStopFailure(
 	);
 }
 
-interface SubagentStopDetails {
+export interface SubagentStopDetails {
 	error?: string;
 	id?: string;
 	name?: string;
