@@ -6,15 +6,23 @@ import { test } from "node:test";
 test("migrated launch/query and Git preflight/handoff production paths contain no synchronous subprocess calls", () => {
 	const source = (path: string) =>
 		readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
-	for (const path of [
-		"maestro/surfaces/herdr/herdr-pane.ts",
-		"maestro/surfaces/herdr/herdr-surface-provider.ts",
-		"maestro/adapters/pi/pi-harness-adapter.ts",
-		"maestro/adapters/pi/launch.ts",
-		"maestro/adapters/pi/launch-resume.ts",
+	// H3: the Pi launch and Git handoff paths live in @nubl/maestro; scan the
+	// installed emitted modules the host actually loads.
+	const installed = (specifier: string) =>
+		readFileSync(new URL(import.meta.resolve(specifier)), "utf8");
+	for (const [path, text] of [
+		...[
+			"maestro/surfaces/herdr/herdr-pane.ts",
+			"maestro/surfaces/herdr/herdr-surface-provider.ts",
+		].map((path) => [path, source(path)]),
+		...[
+			"@nubl/maestro/adapters/pi/pi-harness-adapter",
+			"@nubl/maestro/adapters/pi/launch",
+			"@nubl/maestro/adapters/pi/launch-resume",
+		].map((specifier) => [specifier, installed(specifier)]),
 	])
 		assert.doesNotMatch(
-			source(path),
+			text,
 			/\b(?:execSync|execFileSync|spawnSync|herdrExec)\s*\(/,
 			path,
 		);
@@ -29,8 +37,10 @@ test("migrated launch/query and Git preflight/handoff production paths contain n
 		"",
 	);
 	assert.doesNotMatch(withoutDiagnostic, /\bherdrExec\s*\(/);
-	const git = source("maestro/runtime/worktree-operations.ts").split(
+	const git = installed("@nubl/maestro/runtime/worktree-operations").split(
 		"const CLEANUP_TIMEOUT_MS",
-	)[0];
-	assert.doesNotMatch(git, /\b(?:execFileSync|spawnSync|execSync)\s*\(/);
+	);
+	assert.equal(git.length, 2, "worktree-operations cleanup marker");
+	assert.ok(git[0].includes("export async function"), "handoff code scanned");
+	assert.doesNotMatch(git[0], /\b(?:execFileSync|spawnSync|execSync)\s*\(/);
 });
