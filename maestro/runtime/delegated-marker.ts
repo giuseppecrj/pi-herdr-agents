@@ -1,10 +1,10 @@
-import {
-	readPaneAgentSession,
-	reportPaneToken,
-	type PaneAgentSessionRead,
-	type PaneTokenOutcome,
-	type PaneTokenWrite,
-} from "../surfaces/herdr/herdr-socket.ts";
+/** Structural transport results; the terminal host supplies socket callbacks. */
+export type PaneTokenOutcome = "answered" | "pane-missing" | "failed";
+export type PaneAgentSessionRead =
+	| { kind: "session"; path?: string }
+	| { kind: "none" }
+	| { kind: "pane-missing" }
+	| { kind: "failed"; reason: string };
 
 /** The pane token the Pi Herdr Agents Sidebar plugin reads. */
 export const DELEGATED_MARKER_TOKEN = "piha_delegated_v1";
@@ -38,29 +38,6 @@ export type MarkerWriter = (write: {
 export type MarkerSessionReader = (
 	paneId: string,
 ) => Promise<PaneAgentSessionRead>;
-
-export function herdrMarkerWriter(socketPath: string): MarkerWriter {
-	return ({ paneId, seq, live }) => {
-		const write: PaneTokenWrite = {
-			paneId,
-			source: DELEGATED_MARKER_SOURCE,
-			seq,
-			token: DELEGATED_MARKER_TOKEN,
-			value: null,
-		};
-		if (live) {
-			write.value = DELEGATED_MARKER_VALUE;
-			write.ttlMs = DELEGATED_MARKER_TTL_MS;
-		}
-		return reportPaneToken(socketPath, write);
-	};
-}
-
-export function herdrMarkerSessionReader(
-	socketPath: string,
-): MarkerSessionReader {
-	return (paneId) => readPaneAgentSession(socketPath, paneId);
-}
 
 type MarkerState =
 	| { kind: "pending" }

@@ -5,12 +5,12 @@ import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import * as subagentsModule from "../../pi-extension/subagents/index.ts";
-import { inspectNoProgressSessionTail } from "../../maestro/adapters/pi/session.ts";
+import { inspectNoProgressSessionTail } from "@nubl/maestro/adapters/pi/session";
 import {
 	createLifecycle,
 	observePaneInspection,
 	projectLifecycle,
-} from "../../maestro/core/lifecycle.ts";
+} from "@nubl/maestro/core/lifecycle";
 
 function activeChild(sessionFile: string, interactive = false) {
 	return {

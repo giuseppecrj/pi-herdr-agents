@@ -4,17 +4,17 @@ import {
 	writeWorktreeManifest,
 	createWorktreeOperations,
 	createWorktreeCleanupOperations,
-} from "../maestro/runtime/worktree-operations.ts";
+} from "@nubl/maestro/runtime/worktree-operations";
 import {
 	encodeHostValue,
 	HOST_PATH_CHARS,
 	shellArgument,
-} from "../maestro/core/host-text.ts";
+} from "@nubl/maestro/core/host-text";
 import { createWidgetController } from "../pi-extension/subagents/widgets.ts";
 import {
 	registerWorktreeCommand,
 	registerWorktreeTools,
-} from "../pi-extension/subagents/worktree-tools.ts";
+} from "@nubl/maestro/pi/subagents/worktree-tools";
 import {
 	hostLine,
 	hostText,
@@ -24,8 +24,8 @@ import {
 	sendParentMessage,
 	sessionFields,
 	worktreeHandoffFields,
-} from "../pi-extension/subagents/presentation.ts";
-import { buildSubagentToolAllowlist } from "../maestro/adapters/pi/launch-command.ts";
+} from "@nubl/maestro/pi/subagents/presentation";
+import { buildSubagentToolAllowlist } from "@nubl/maestro/adapters/pi/launch-command";
 import "./isolated-agent-dir.ts";
 import { createMockExtensionApi } from "./helpers/mock-extension-api.ts";
 import {
@@ -35,7 +35,7 @@ import {
 import {
 	ENCODED_TOOL_ERRORS,
 	withEncodedToolErrors,
-} from "../pi-extension/subagents/tool-boundary.ts";
+} from "@nubl/maestro/pi/subagents/tool-boundary";
 import { describe, it, before, after, type TestContext } from "node:test";
 import { cleanupFixture } from "./worktree-cleanup-fixture.ts";
 import assert from "node:assert/strict";
@@ -56,7 +56,7 @@ import {
 	getSubagentsConfigPath,
 	getSubagentsConfigExamplePath,
 	getSubagentsPackageRoot,
-} from "../pi-extension/subagents/config-path.ts";
+} from "@nubl/maestro/pi/subagents/config-path";
 import { hostname, tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -74,7 +74,7 @@ import {
 	isPlainObject,
 	isRecord,
 	isString,
-} from "../maestro/core/config/type-guards.ts";
+} from "@nubl/maestro/core/config/type-guards";
 import rolePackExample from "../examples/role-pack/extension.ts";
 import {
 	cleanupSubagentsForShutdown,
@@ -106,7 +106,7 @@ import {
 	writePersistentTaskInbox,
 	consumePersistentTaskInbox,
 	type SessionEntry,
-} from "../maestro/adapters/pi/session.ts";
+} from "@nubl/maestro/adapters/pi/session";
 
 import { isHerdrAvailable } from "../maestro/surfaces/herdr/herdr-cli.ts";
 import { waitForProcessesExit } from "../maestro/surfaces/herdr/herdr-pane.ts";
@@ -120,37 +120,37 @@ import {
 	resolveModelDefault,
 	TaskModelConfigWriteError,
 	writeTaskModelConfig,
-} from "../maestro/core/config/model-config.ts";
+} from "@nubl/maestro/core/config/model-config";
 import {
 	TASK_MODEL_INIT_APPROVAL_EVENT,
 	TASK_MODEL_INIT_START_EVENT,
-} from "../maestro/core/config/task-model-init.ts";
+} from "@nubl/maestro/core/config/task-model-init";
 import {
 	loadRoleConfig,
 	parseRoleConfig,
-} from "../maestro/core/config/role-config.ts";
+} from "@nubl/maestro/core/config/role-config";
 import {
 	createSubagentPaneFactory,
 	loadPaneConfig,
 	parsePaneConfig,
-} from "../maestro/core/config/pane-config.ts";
+} from "@nubl/maestro/core/config/pane-config";
 import {
 	loadPersistentConfig,
 	parsePersistentConfig,
-} from "../maestro/core/config/persistent-config.ts";
+} from "@nubl/maestro/core/config/persistent-config";
 import {
 	loadSupervisionConfig,
 	parseSupervisionConfig,
-} from "../maestro/core/config/supervision-config.ts";
+} from "@nubl/maestro/core/config/supervision-config";
 import {
 	loadGuidelinesConfig,
 	parseGuidelinesConfig,
-} from "../maestro/core/config/guidelines-config.ts";
-import { FileWakeRegistry } from "../maestro/core/wake.ts";
+} from "@nubl/maestro/core/config/guidelines-config";
+import { FileWakeRegistry } from "@nubl/maestro/core/wake";
 import {
 	POLLING_INTERVAL_MS,
 	SupervisionCoordinator,
-} from "../maestro/core/supervision.ts";
+} from "@nubl/maestro/core/supervision";
 import {
 	advanceStatusState,
 	capStatusLines,
@@ -163,22 +163,22 @@ import {
 	observeStatus,
 	loadStatusConfig,
 	parseStatusConfig,
-} from "../maestro/core/status.ts";
+} from "@nubl/maestro/core/status";
 import {
 	createSubagentActivityRecorder,
 	getSubagentActivityFile,
 	readSubagentActivityFile,
-} from "../maestro/adapters/pi/activity-file.ts";
-import type { SubagentActivityState } from "../maestro/core/types.ts";
-import type { TaskPreferences } from "../maestro/core/config/task-model-types.ts";
-import type { WorktreeHandoff } from "../maestro/core/worktree.ts";
-import type { RunningSubagent } from "../pi-extension/subagents/state.ts";
+} from "@nubl/maestro/adapters/pi/activity-file";
+import type { SubagentActivityState } from "@nubl/maestro/core/types";
+import type { TaskPreferences } from "@nubl/maestro/core/config/task-model-types";
+import type { WorktreeHandoff } from "@nubl/maestro/core/worktree";
+import type { RunningSubagent } from "@nubl/maestro/pi/subagents/state";
 import {
 	type AdoptedRow,
 	isNormalized,
 	normalizeAdoptedRows,
-} from "../pi-extension/subagents/observation.ts";
-import { projectActivity } from "../maestro/core/activity.ts";
+} from "@nubl/maestro/pi/subagents/observation";
+import { projectActivity } from "@nubl/maestro/core/activity";
 import subagentDoneExtension, {
 	shouldMarkUserTookOver,
 	shouldAutoExitOnAgentEnd,
@@ -187,22 +187,22 @@ import subagentDoneExtension, {
 	buildPersistentTaskEvent,
 	isPersistentStopDirective,
 } from "../maestro/adapters/pi/child/subagent-done.ts";
-import { hasUndeliveredChildren } from "../maestro/core/undelivered-children.ts";
+import { hasUndeliveredChildren } from "@nubl/maestro/core/undelivered-children";
 import {
 	createDoneNudge,
 	DONE_NUDGE_DELAY_MS,
 	DONE_NUDGE_MESSAGE,
-} from "../maestro/adapters/pi/child/done-nudge.ts";
+} from "@nubl/maestro/adapters/pi/child/done-nudge";
 import {
 	CHILD_BUSY_CHANNEL,
 	isChildBusy,
 	type ChildBusyProbe,
-} from "../maestro/core/child-busy.ts";
+} from "@nubl/maestro/core/child-busy";
 import {
 	interpretExitSidecar,
 	shellExitFileFor,
 	waitForCompletion,
-} from "../maestro/adapters/pi/completion.ts";
+} from "@nubl/maestro/adapters/pi/completion";
 import {
 	createLifecycle,
 	formatLifecycleTransitionLine,
@@ -216,23 +216,23 @@ import {
 	projectLifecycle,
 	type CompletionDelivery,
 	type SubagentLifecycle,
-} from "../maestro/core/lifecycle.ts";
-import { launchPiSubagent } from "../maestro/adapters/pi/launch.ts";
-import { launchOperationsFromSurface } from "../maestro/adapters/pi/launch-operations.ts";
+} from "@nubl/maestro/core/lifecycle";
+import { launchPiSubagent } from "@nubl/maestro/adapters/pi/launch";
+import { launchOperationsFromSurface } from "@nubl/maestro/adapters/pi/launch-operations";
 import { HerdrSurfaceProvider } from "../maestro/surfaces/herdr/herdr-surface-provider.ts";
 import {
 	createDefaultRunSession,
 	type PiPersistentIO,
 	type PiRunSession,
 	type PiRunRecord,
-} from "../maestro/runtime/index.ts";
+} from "@nubl/maestro/runtime";
 import {
 	assertModelInScope,
 	buildAuthenticatedModelCatalog,
-} from "../maestro/core/routing.ts";
-import { wrapPiModelRegistry } from "../maestro/adapters/pi/model-registry.ts";
-import { FakeSurfaceProvider } from "../maestro/surfaces/fake/fake-surface-provider.ts";
-import { AcquisitionUncertainError } from "../maestro/core/surface-provider.ts";
+} from "@nubl/maestro/core/routing";
+import { wrapPiModelRegistry } from "@nubl/maestro/adapters/pi/model-registry";
+import { FakeSurfaceProvider } from "@nubl/maestro/testing";
+import { AcquisitionUncertainError } from "@nubl/maestro/core/surface-provider";
 
 // Tool-registration behavior is environment-sensitive for child subagents.
 // Isolate the unit suite from inherited parent/child capability variables.
@@ -5936,10 +5936,9 @@ describe("conditional task model config writes", () => {
 			const proposalRevision = readConfigRevision(configPath);
 			const readyPath = join(dir, "ready");
 			const releasePath = join(dir, "release");
-			const moduleUrl = new URL(
-				"../maestro/core/config/model-config.ts",
-				import.meta.url,
-			).href;
+			const moduleUrl = import.meta.resolve(
+				"@nubl/maestro/core/config/model-config",
+			);
 			const script = `
 				import { existsSync, renameSync, writeFileSync } from "node:fs";
 				import { writeTaskModelConfig } from ${JSON.stringify(moduleUrl)};

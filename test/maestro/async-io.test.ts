@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { __herdrTest__ } from "../../maestro/surfaces/herdr/herdr.ts";
 import { HerdrSurfaceProvider } from "../../maestro/surfaces/herdr/herdr-surface-provider.ts";
-import { FakeHarnessAdapter } from "../../maestro/adapters/fake/fake-harness-adapter.ts";
-import { createRunSession } from "../../maestro/runtime/run-session.ts";
+import { FakeHarnessAdapter } from "@nubl/maestro/testing";
+import { createRunSession } from "@nubl/maestro/runtime/run-session";
 import {
 	waitForHerdrShellReady,
 	waitForHerdrPaneAbsence,
@@ -50,7 +50,7 @@ test("readiness queries consume remaining budget and neither late readiness nor 
 	);
 	assert.equal(queries, 1, "no final probe after the budget is exhausted");
 });
-import type { Role, Task } from "../../maestro/core/types.ts";
+import type { Role, Task } from "@nubl/maestro/core/types";
 
 const role: Role = {
 	name: "worker",

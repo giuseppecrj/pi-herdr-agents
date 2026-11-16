@@ -2,9 +2,9 @@ import "../clean-host-env.ts";
 import assert from "node:assert/strict";
 import { getEventListeners } from "node:events";
 import { describe, it } from "node:test";
-import { FakeHarnessAdapter } from "../../maestro/adapters/fake/fake-harness-adapter.ts";
-import type { SpawnOptions } from "../../maestro/core/harness-adapter.ts";
-import type { AgentHandle } from "../../maestro/core/types.ts";
+import { FakeHarnessAdapter } from "@nubl/maestro/testing";
+import type { SpawnOptions } from "@nubl/maestro/core/harness-adapter";
+import type { AgentHandle } from "@nubl/maestro/core/types";
 import { registerHarnessAdapterConformance } from "./harness-adapter.conformance.ts";
 
 const WAIT_TIMEOUT_MS = 250;

@@ -20,37 +20,37 @@ import { socketPath as testSocketPath } from "../socket-path.ts";
 import {
 	createWorktreeOperations,
 	readWorktreeManifest,
-} from "../../maestro/runtime/worktree-operations.ts";
-import * as runtime from "../../maestro/runtime/index.ts";
+} from "@nubl/maestro/runtime/worktree-operations";
+import * as runtime from "@nubl/maestro/runtime";
 import type {
 	DefaultRunSessionOptions,
 	PiLaunchInput,
 	PiRunRecord,
 	PiCompletedMetadata,
-} from "../../maestro/runtime/pi-run-session-types.ts";
-import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
-import { launchOperationsFromSurface } from "../../maestro/adapters/pi/launch-operations.ts";
-import { discoverAgentCatalog } from "../../maestro/core/roles/discovery.ts";
+} from "@nubl/maestro/runtime/pi-run-session-types";
+import { FakeSurfaceProvider } from "@nubl/maestro/testing";
+import { launchOperationsFromSurface } from "@nubl/maestro/adapters/pi/launch-operations";
+import { discoverAgentCatalog } from "@nubl/maestro/core/roles/discovery";
 import {
 	appendPersistentTaskEvent,
 	readPersistentDeliveryLedger,
 	getNewEntries,
 	writeSubagentSessionPolicy,
-} from "../../maestro/adapters/pi/session.ts";
+} from "@nubl/maestro/adapters/pi/session";
 import {
 	createLifecycle,
 	markCompleted,
 	markCompletionDetected,
 	markDelivery,
 	markInterruptRequested,
-} from "../../maestro/core/lifecycle.ts";
-import { createSubagentActivityRecorder } from "../../maestro/adapters/pi/activity-file.ts";
-import { FileWakeRegistry } from "../../maestro/core/wake.ts";
-import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
+} from "@nubl/maestro/core/lifecycle";
+import { createSubagentActivityRecorder } from "@nubl/maestro/adapters/pi/activity-file";
+import { FileWakeRegistry } from "@nubl/maestro/core/wake";
+import { SupervisionCoordinator } from "@nubl/maestro/core/supervision";
 import {
 	AcquisitionUncertainError,
 	isAcquisitionUncertainError,
-} from "../../maestro/core/surface-provider.ts";
+} from "@nubl/maestro/core/surface-provider";
 import { runScriptInPane } from "../../maestro/surfaces/herdr/terminal.ts";
 import { skipWorktreesOnWindows } from "../helpers/windows-scope.ts";
 
@@ -738,6 +738,7 @@ for (const mode of ["success", "focus-warning", "readiness-failure"] as const) {
 						.replace("PI_SUBAGENT_MODEL_SCOPE=", "")
 						.includes("PI_SUBAGENT_") &&
 					!command.includes("subagent-done.ts") &&
+					!command.includes("child/entry.") &&
 					!command.includes("__SUBAGENT_DONE_"),
 				command,
 			);

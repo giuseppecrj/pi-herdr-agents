@@ -23,7 +23,7 @@ import {
 import {
 	DELEGATED_MARKER_TOKEN,
 	DELEGATED_MARKER_VALUE,
-} from "../maestro/runtime/delegated-marker.ts";
+} from "@nubl/maestro/runtime/delegated-marker";
 import {
 	replyError,
 	replyResult,

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { describe, it, type TestContext } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { seedSubagentSessionFile } from "../../maestro/adapters/pi/session.ts";
+import { seedSubagentSessionFile } from "@nubl/maestro/adapters/pi/session";
 
 function fixture(t: TestContext) {
 	const dir = mkdtempSync(join(tmpdir(), "audit-fork-"));

@@ -6,14 +6,14 @@ import { createEventBus } from "@earendil-works/pi-coding-agent";
 import {
 	startTaskModelInit,
 	type TaskModelInitInput,
-} from "../../maestro/runtime/task-model-init.ts";
+} from "@nubl/maestro/runtime/task-model-init";
 import {
 	collectApprovalOffers,
 	openApprovalOffer,
 	selectApprovalRoute,
 	type TaskModelBrief,
 	type TaskModelRegistryProjector,
-} from "../../maestro/core/config/task-model-init.ts";
+} from "@nubl/maestro/core/config/task-model-init";
 
 const REVISION = `sha256:${"ab".repeat(32)}`;
 const ONE_MODEL = [{ provider: "p", id: "m", reasoning: false }];

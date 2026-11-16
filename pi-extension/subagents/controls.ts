@@ -12,7 +12,7 @@ import {
 	jsonArgument,
 } from "../../maestro/core/host-text.ts";
 
-interface SubagentInterruptDetails {
+export interface SubagentInterruptDetails {
 	error?: string;
 	id?: string;
 	name?: string;

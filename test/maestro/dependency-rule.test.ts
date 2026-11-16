@@ -141,10 +141,25 @@ function classifyRepoPath(repoPath: string): RepoArea {
 	return "other";
 }
 
+/** H2: moved modules come from @nubl/maestro; keep their original layer. */
+function packageArea(specifier: string): RepoArea | undefined {
+	const subpath = /^@nubl\/maestro\/(.+)$/.exec(specifier)?.[1];
+	if (!subpath) return undefined;
+	if (subpath.startsWith("core/")) return "core";
+	if (subpath.startsWith("adapters/pi/") || subpath === "pi/child")
+		return "adapters/pi";
+	if (subpath === "runtime" || subpath.startsWith("runtime/")) return "runtime";
+	if (subpath === "testing") return "adapters/fake";
+	if (subpath === "pi" || subpath.startsWith("pi/")) return "pi-extension";
+	return "other";
+}
+
 function importedArea(
 	root: string,
 	reference: ModuleReference,
 ): RepoArea | "external" {
+	const fromPackage = packageArea(reference.specifier);
+	if (fromPackage) return fromPackage;
 	if (!isRelativeSpecifier(reference.specifier)) return "external";
 	const resolved = path.resolve(
 		path.dirname(reference.file),
@@ -158,6 +173,29 @@ function isForbiddenEdge(root: string, reference: ModuleReference) {
 	const importer = classifyRepoPath(toRepoPath(root, reference.file));
 	const target = importedArea(root, reference);
 	const specifier = reference.specifier;
+	// H1 terminal composition is the only concrete bridge into the local engine.
+	const hostEdges = new Map<string, string[]>([
+		[
+			"pi-extension/subagents/host-surface.ts",
+			[
+				"../../maestro/surfaces/herdr/herdr-surface-provider.ts",
+				"../../maestro/surfaces/herdr/herdr-core-surface-provider.ts",
+				"@nubl/maestro/adapters/pi/script-shell",
+			],
+		],
+		[
+			"pi-extension/subagents/marker-transport.ts",
+			["../../maestro/surfaces/herdr/herdr-socket.ts"],
+		],
+		["pi-extension/subagents/child.ts", ["@nubl/maestro/pi/child"]],
+		["pi-extension/subagents/child-widget.ts", ["@nubl/maestro/pi/child"]],
+		[
+			"maestro/adapters/pi/child/subagent-done.ts",
+			["../../../../pi-extension/subagents/child.ts"],
+		],
+	]);
+	if (hostEdges.get(toRepoPath(root, reference.file))?.includes(specifier))
+		return false;
 
 	if (importer === "other") return false;
 	if (target === "adapters/fake" || target === "surfaces/fake") {
@@ -183,7 +221,7 @@ function isForbiddenEdge(root: string, reference: ModuleReference) {
 			);
 		case "runtime":
 			return !(
-				["core", "adapters/pi", "surfaces/herdr", "runtime"].includes(target) ||
+				["core", "adapters/pi", "runtime"].includes(target) ||
 				isNodeBuiltin(specifier)
 			);
 		case "adapters/fake":
@@ -289,7 +327,7 @@ describe("maestro dependency rule", () => {
 		);
 	});
 
-	it("runtime imports core, adapters, surfaces", () => {
+	it("runtime imports core and adapters, never concrete surfaces", () => {
 		assertNoForbiddenImports("runtime dependency violations", (violation) =>
 			toRepoPath(repoRoot, violation.file).startsWith("maestro/runtime/"),
 		);
@@ -306,7 +344,7 @@ describe("maestro dependency rule", () => {
 		});
 	});
 
-	it("pi-extension never imports adapters or surfaces directly", () => {
+	it("pi-extension imports concrete providers only at the explicit host bridges", () => {
 		assertNoForbiddenImports(
 			"pi-extension dependency violations",
 			(violation) =>

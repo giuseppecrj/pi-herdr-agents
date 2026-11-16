@@ -6,22 +6,22 @@ import {
 	markCompletionDetected,
 	markCompleted,
 	markFailed,
-} from "../../maestro/core/lifecycle.ts";
-import type { Task } from "../../maestro/core/types.ts";
+} from "@nubl/maestro/core/lifecycle";
+import type { Task } from "@nubl/maestro/core/types";
 import type {
 	PiCompletedMetadata,
 	PiLedgerEntry,
 	PiRunRecord,
 	PiSettlementIO,
-} from "../../maestro/runtime/index.ts";
-import { createDelivery } from "../../pi-extension/subagents/delivery.ts";
-import { createPersistentControls } from "../../pi-extension/subagents/persistent.ts";
+} from "@nubl/maestro/runtime";
+import { createDelivery } from "@nubl/maestro/pi/subagents/delivery";
+import { createPersistentControls } from "@nubl/maestro/pi/subagents/persistent";
 import {
 	bindLiveApi,
 	releaseHeldDeliveries,
 	type RunningSubagent,
 	type SubagentRuntime,
-} from "../../pi-extension/subagents/state.ts";
+} from "@nubl/maestro/pi/subagents/state";
 import { createMockExtensionApi } from "../helpers/mock-extension-api.ts";
 
 const STOP_WAIT = 10;

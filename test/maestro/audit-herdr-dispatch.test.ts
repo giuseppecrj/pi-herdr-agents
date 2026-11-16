@@ -1,7 +1,7 @@
 import "../clean-host-env.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AcquisitionUncertainError } from "../../maestro/core/surface-provider.ts";
+import { AcquisitionUncertainError } from "@nubl/maestro/core/surface-provider";
 import { HerdrClientError } from "../../maestro/surfaces/herdr/herdr-cli.ts";
 import {
 	__herdrTest__,

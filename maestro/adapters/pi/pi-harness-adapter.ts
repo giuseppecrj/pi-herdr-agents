@@ -85,6 +85,7 @@ export interface PiSpawnOptions extends SpawnOptions {
 	};
 }
 export interface PiHarnessAdapterOptions {
+	childEntryPath?: string;
 	surface: SurfaceProvider;
 	paneConfig: PaneConfig;
 	modelRegistry: ModelRegistryAdapter;
@@ -208,6 +209,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 		const taskId = opts.launchIdentity?.taskId ?? randomUUID();
 		const child = await this.acquireChild({
 			kind: "fresh",
+			childEntryPath: this.options.childEntryPath,
 			acquisitionSignal: opts.acquisitionSignal,
 			id,
 			name: opts.name,
@@ -272,6 +274,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
 			);
 		const child = await this.acquireChild({
 			kind: "resume",
+			childEntryPath: this.options.childEntryPath,
 			acquisitionSignal: opts.acquisitionSignal,
 			name: opts.name,
 			sessionFile: opts.sessionId,

@@ -8,16 +8,16 @@ import { test } from "node:test";
 import {
 	createAcceptRunner,
 	runAcceptCommand,
-} from "../../maestro/adapters/pi/accept-runner.ts";
+} from "@nubl/maestro/adapters/pi/accept-runner";
 import {
 	terminateAcceptChecks,
 	trackAcceptCheck,
-} from "../../maestro/adapters/pi/accept-groups.ts";
+} from "@nubl/maestro/adapters/pi/accept-groups";
 import {
 	killProcessTree,
 	signalProcessTree,
 	type ProcessTreeOptions,
-} from "../../maestro/adapters/pi/process-tree.ts";
+} from "@nubl/maestro/adapters/pi/process-tree";
 
 function alive(pid: number): boolean {
 	try {

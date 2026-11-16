@@ -4,8 +4,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { createLaunchPlanner } from "../../pi-extension/subagents/launch.ts";
-import type { SubagentRuntime } from "../../pi-extension/subagents/state.ts";
+import { createLaunchPlanner } from "@nubl/maestro/pi/subagents/launch";
+import type { SubagentRuntime } from "@nubl/maestro/pi/subagents/state";
 import { createMockExtensionApi } from "../helpers/mock-extension-api.ts";
 
 const models = [

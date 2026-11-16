@@ -37,7 +37,7 @@ import {
 import {
 	createLinuxProcessEnvironmentReader,
 	createLinuxProcessProbe,
-} from "../../../../maestro/adapters/pi/process-identity.ts";
+} from "@nubl/maestro/adapters/pi/process-identity";
 import { requestHerdrSocket } from "../../../../maestro/surfaces/herdr/herdr-socket.ts";
 import {
 	createLabRoot,

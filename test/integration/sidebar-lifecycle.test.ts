@@ -59,9 +59,9 @@ import {
 } from "./sidebar-fixture.ts";
 import { inspectPane } from "../../maestro/surfaces/herdr/terminal.ts";
 import { requestHerdrSocket } from "../../maestro/surfaces/herdr/herdr-socket.ts";
-import { DELEGATED_MARKER_SOURCE } from "../../maestro/runtime/delegated-marker.ts";
+import { DELEGATED_MARKER_SOURCE } from "@nubl/maestro/runtime/delegated-marker";
 import { resetProviderRequests } from "./fake-provider.ts";
-import { isRecord, isString } from "../../maestro/core/config/type-guards.ts";
+import { isRecord, isString } from "@nubl/maestro/core/config/type-guards";
 
 interface ListedPane {
 	pane: string;

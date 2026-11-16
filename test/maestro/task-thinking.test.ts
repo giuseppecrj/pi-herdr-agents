@@ -8,17 +8,17 @@ import {
 	parseModelConfig,
 	readConfigRevision,
 	writeTaskModelConfig,
-} from "../../maestro/core/config/model-config.ts";
-import type { TaskThinkingPreferences } from "../../maestro/core/config/task-model-types.ts";
+} from "@nubl/maestro/core/config/model-config";
+import type { TaskThinkingPreferences } from "@nubl/maestro/core/config/task-model-types";
 import {
 	THINKING_LEVELS,
 	buildAuthenticatedModelCatalog,
 	buildScopedModelCatalog,
 	resolveRuntimePlans,
 	type RuntimeRequest,
-} from "../../maestro/core/routing.ts";
-import { wrapPiModelRegistry } from "../../pi-extension/subagents/model-registry.ts";
-import { buildSubagentRoutingGuidelines } from "../../pi-extension/subagents/catalog.ts";
+} from "@nubl/maestro/core/routing";
+import { wrapPiModelRegistry } from "@nubl/maestro/pi/subagents/model-registry";
+import { buildSubagentRoutingGuidelines } from "@nubl/maestro/pi/subagents/catalog";
 
 const models = [
 	{

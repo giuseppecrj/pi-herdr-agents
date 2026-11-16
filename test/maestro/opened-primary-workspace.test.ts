@@ -6,8 +6,8 @@ import {
 	openedPrimaryWorkspaceClaims,
 	rememberOpenedPrimaryWorkspace,
 	type PrimaryWorkspaceClaim,
-} from "../../maestro/core/opened-primary-workspace.ts";
-import { removeContainedWorktree } from "../../maestro/core/worktree-cleanup.ts";
+} from "@nubl/maestro/core/opened-primary-workspace";
+import { removeContainedWorktree } from "@nubl/maestro/core/worktree-cleanup";
 import { HerdrSurfaceProvider } from "../../maestro/surfaces/herdr/herdr-surface-provider.ts";
 import {
 	__herdrTest__,

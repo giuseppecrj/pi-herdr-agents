@@ -1,4 +1,3 @@
-import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	formatInheritedModelScope,
@@ -11,7 +10,16 @@ import {
 } from "../../core/delegation-depth.ts";
 import { shellQuote } from "../../core/shell.ts";
 
-export const SUBAGENTS_DIR = dirname(fileURLToPath(import.meta.url));
+/**
+ * The protocol-only child entry beside this module: `entry.js` when emitted,
+ * `entry.ts` when run from source. A terminal host passes its own wrapper.
+ */
+export const DEFAULT_CHILD_ENTRY_PATH = fileURLToPath(
+	new URL(
+		import.meta.url.endsWith(".ts") ? "./child/entry.ts" : "./child/entry.js",
+		import.meta.url,
+	),
+);
 
 /**
  * `--models <refs>` for a scoped parent, or nothing when unscoped. Pi reads

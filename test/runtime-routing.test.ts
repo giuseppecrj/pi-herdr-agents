@@ -13,9 +13,9 @@ import {
 	type ParentRuntime,
 	type RoutingModel,
 	type RuntimeRequest,
-} from "../maestro/core/routing.ts";
-import { wrapPiModelRegistry } from "../maestro/adapters/pi/model-registry.ts";
-import { wrapPiModelRegistry as wrapHostModelRegistry } from "../pi-extension/subagents/model-registry.ts";
+} from "@nubl/maestro/core/routing";
+import { wrapPiModelRegistry } from "@nubl/maestro/adapters/pi/model-registry";
+import { wrapPiModelRegistry as wrapHostModelRegistry } from "@nubl/maestro/pi/subagents/model-registry";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 
@@ -83,7 +83,7 @@ function resolve(request: RuntimeRequest = {}, defaults: RuntimeRequest = {}) {
 const registryFactories = [
 	[
 		"core",
-		(source: import("../maestro/core/routing.ts").RoutingRegistrySource) =>
+		(source: import("@nubl/maestro/core/routing").RoutingRegistrySource) =>
 			createModelRegistryAdapter(source, {
 				supportedThinkingLevels: () => ["off", "low"],
 				clampThinkingLevel: (_model, level) => level,
@@ -233,14 +233,14 @@ it("Task15 core attaches only capabilities without losing their receiver or eage
 		marker: "private caller property",
 		supportedThinkingLevels(
 			candidate: RoutingModel,
-		): import("../maestro/core/types.ts").ThinkingLevel[] {
+		): import("@nubl/maestro/core/types").ThinkingLevel[] {
 			assert.equal(this, capabilities);
 			calls.push(candidate);
 			return ["max"];
 		},
 		clampThinkingLevel(
 			candidate: RoutingModel,
-			level: import("../maestro/core/types.ts").ThinkingLevel,
+			level: import("@nubl/maestro/core/types").ThinkingLevel,
 		) {
 			assert.equal(this, capabilities);
 			calls.push(candidate);
@@ -267,8 +267,8 @@ describe("Task15 SDK boundary equivalence", () => {
 	it("uses real sparse/null SDK levels, upward clamp and nonreasoning off", () => {
 		const cases: [
 			RoutingModel,
-			import("../maestro/core/types.ts").ThinkingLevel[],
-			import("../maestro/core/types.ts").ThinkingLevel,
+			import("@nubl/maestro/core/types").ThinkingLevel[],
+			import("@nubl/maestro/core/types").ThinkingLevel,
 		][] = [
 			[
 				model("p", "sparse", {

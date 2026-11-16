@@ -21,30 +21,31 @@ import {
 	PI_LAUNCH_SESSION_ENV,
 	type PiLaunchOperations,
 	type WorktreeSurfaceForLaunch,
-} from "../maestro/adapters/pi/launch-operations.ts";
+} from "@nubl/maestro/adapters/pi/launch-operations";
 import {
 	AcquiredPiLaunchError,
 	launchPiSubagent,
 	launchPiWorktreeHandoff,
 	type FreshPiLaunchRequest,
 	type ResumePiLaunchRequest,
-} from "../maestro/adapters/pi/launch.ts";
+} from "@nubl/maestro/adapters/pi/launch";
+import { DEFAULT_CHILD_ENTRY_PATH } from "@nubl/maestro/adapters/pi/launch-command";
 import { HerdrClientError } from "../maestro/surfaces/herdr/herdr-cli.ts";
 import { runScriptInPane } from "../maestro/surfaces/herdr/terminal.ts";
-import { createWorktreeOperations } from "../maestro/runtime/worktree-operations.ts";
-import { createSubagentPaneFactory } from "../maestro/core/config/pane-config.ts";
-import { FakeSurfaceProvider } from "../maestro/surfaces/fake/fake-surface-provider.ts";
-import type { SurfaceProvider } from "../maestro/core/surface-provider.ts";
+import { createWorktreeOperations } from "@nubl/maestro/runtime/worktree-operations";
+import { createSubagentPaneFactory } from "@nubl/maestro/core/config/pane-config";
+import { FakeSurfaceProvider } from "@nubl/maestro/testing";
+import type { SurfaceProvider } from "@nubl/maestro/core/surface-provider";
 import {
 	AcquisitionUncertainError,
 	isAcquisitionUncertainError,
 	WorktreeProvisioningError,
-} from "../maestro/core/surface-provider.ts";
+} from "@nubl/maestro/core/surface-provider";
 import {
 	findStoredSessionModel,
 	readSubagentSessionPolicy,
 	writeSubagentSessionPolicy,
-} from "../maestro/adapters/pi/session.ts";
+} from "@nubl/maestro/adapters/pi/session";
 
 function expectedShellQuote(value: string): string {
 	return `'${value.replaceAll("'", "'\\''")}'`;
@@ -1642,6 +1643,58 @@ describe("Pi launch", () => {
 					name,
 				);
 			}
+		});
+	});
+
+	it("loads the explicit child entry path, quoted, in fresh and resumed launches", async () => {
+		await withFixture(async ({ root, project, sessionDir, request }) => {
+			const commands: string[] = [];
+			const operations: PiLaunchOperations = {
+				createPane: () => "pane-entry",
+				createWorktree: () => {
+					throw new Error("unexpected worktree creation");
+				},
+				waitForShellReady: async () => {},
+				runScript: (_surface, value, options) => {
+					commands.push(value);
+					return options.scriptPath;
+				},
+				closePane: () => {},
+			};
+			const wrapper = join(root, "host wrapper", "child entry's.ts");
+			const sessionFile = join(root, "child.jsonl");
+			writeFileSync(
+				sessionFile,
+				JSON.stringify({ type: "session", id: "child", cwd: project }) + "\n",
+			);
+			writePublicResumePolicy(sessionFile);
+			const resume: ResumePiLaunchRequest = {
+				kind: "resume",
+				id: "resume-entry",
+				name: "Resume worker",
+				sessionFile,
+				parent: { sessionId: "parent", sessionDir },
+			};
+			await launchPiSubagent(
+				{ ...request, childEntryPath: wrapper },
+				operations,
+			);
+			await launchPiSubagent(
+				{ ...resume, childEntryPath: wrapper },
+				operations,
+			);
+			await launchPiSubagent({ ...request, id: "child-default" }, operations);
+			await launchPiSubagent({ ...resume, id: "resume-default" }, operations);
+			// The quoted path is one whole argument: a space or the command end follows.
+			const loads = (command: string, path: string) =>
+				[" ", ";"].some((next) =>
+					command.includes(` -e ${expectedShellQuote(path)}${next}`),
+				);
+			assert.equal(commands.length, 4);
+			for (const command of commands.slice(0, 2))
+				assert.ok(loads(command, wrapper), command);
+			for (const command of commands.slice(2))
+				assert.ok(loads(command, DEFAULT_CHILD_ENTRY_PATH), command);
 		});
 	});
 

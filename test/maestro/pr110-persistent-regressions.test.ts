@@ -10,36 +10,36 @@ import {
 	markCompletionDetected,
 	markFailed,
 	observePaneInspection,
-} from "../../maestro/core/lifecycle.ts";
-import type { CompletionResult } from "../../maestro/core/types.ts";
-import type { WorktreeHandoff } from "../../maestro/core/worktree.ts";
-import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
-import { createDefaultRunSession } from "../../maestro/runtime/pi-run-session.ts";
-import { createPiPersistentIO } from "../../maestro/runtime/pi-persistent-io.ts";
-import { createWorktreeOperations } from "../../maestro/runtime/worktree-operations.ts";
+} from "@nubl/maestro/core/lifecycle";
+import type { CompletionResult } from "@nubl/maestro/core/types";
+import type { WorktreeHandoff } from "@nubl/maestro/core/worktree";
+import { SupervisionCoordinator } from "@nubl/maestro/core/supervision";
+import { createDefaultRunSession } from "@nubl/maestro/runtime/pi-run-session";
+import { createPiPersistentIO } from "@nubl/maestro/runtime/pi-persistent-io";
+import { createWorktreeOperations } from "@nubl/maestro/runtime/worktree-operations";
 import type {
 	DefaultRunSessionOptions,
 	PiLaunchInput,
 	PiPersistentIO,
 	PiRunRecord,
-} from "../../maestro/runtime/pi-run-session-types.ts";
+} from "@nubl/maestro/runtime/pi-run-session-types";
 import {
 	appendPersistentTaskEvent,
 	readPersistentDeliveryLedger,
-} from "../../maestro/adapters/pi/session.ts";
-import { launchOperationsFromSurface } from "../../maestro/adapters/pi/launch-operations.ts";
-import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
+} from "@nubl/maestro/adapters/pi/session";
+import { launchOperationsFromSurface } from "@nubl/maestro/adapters/pi/launch-operations";
+import { FakeSurfaceProvider } from "@nubl/maestro/testing";
 import {
 	createPersistentControls,
 	persistentSpecialistState,
-} from "../../pi-extension/subagents/persistent.ts";
-import { createDelivery } from "../../pi-extension/subagents/delivery.ts";
+} from "@nubl/maestro/pi/subagents/persistent";
+import { createDelivery } from "@nubl/maestro/pi/subagents/delivery";
 import {
 	bindLiveApi,
 	releaseHeldDeliveries,
 	type RunningSubagent,
 	type SubagentRuntime,
-} from "../../pi-extension/subagents/state.ts";
+} from "@nubl/maestro/pi/subagents/state";
 import { createMockExtensionApi } from "../helpers/mock-extension-api.ts";
 import { fileURLToPath } from "node:url";
 

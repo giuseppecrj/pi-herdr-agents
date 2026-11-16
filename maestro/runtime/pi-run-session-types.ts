@@ -33,6 +33,7 @@ import type {
 } from "../core/routing.ts";
 import type { PaneConfig } from "../core/config/pane-config.ts";
 import type { MarkerSessionReader, MarkerWriter } from "./delegated-marker.ts";
+import type { HostSurfaceBinding } from "./host-surface-binding.ts";
 import type {
 	RunSession,
 	RunObservation,
@@ -298,13 +299,20 @@ export interface PiRunSessionInfrastructure {
 	processProbe?: ProcessIdentityProbe;
 	/** The parent accept re-check's command runner; tests inject it. */
 	acceptRunner?: AcceptRunner;
-	/** Sidebar marker transport; defaults to this pane's Herdr socket. */
+	/** Sidebar marker transport; no ambient discovery when injected. */
 	markerWriter?: MarkerWriter;
-	/** Sidebar marker session evidence; defaults to this pane's Herdr socket. */
+	/** Sidebar marker session evidence; no ambient discovery when injected. */
 	markerSessionReader?: MarkerSessionReader;
 }
 // pi-herdr-agents extension
 export interface DefaultRunSessionOptions {
+	/**
+	 * The terminal host's provider and marker composition. Required unless
+	 * `infrastructure` supplies the closed test composition.
+	 */
+	hostSurface?: HostSurfaceBinding;
+	/** Child reporter extension each launch loads; defaults to the protocol-only entry. */
+	childEntryPath?: string;
 	/** Test injection consumes the actual Stage 3 seams, not replacement launch logic. */
 	infrastructure?: PiRunSessionInfrastructure;
 	configDir: string;

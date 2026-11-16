@@ -1,9 +1,9 @@
 import { spawn, execFileSync } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
 import { join, posix, win32 } from "node:path";
-import { isString } from "../../core/config/type-guards.ts";
-import { Deadline } from "../../core/deadline.ts";
-import { gitEnvironment } from "../../core/git-environment.ts";
+import { isString } from "@nubl/maestro/core/config/type-guards";
+import { Deadline } from "@nubl/maestro/core/deadline";
+import { gitEnvironment } from "@nubl/maestro/core/git-environment";
 
 export const HERDR_RPC_TIMEOUT_MS = 10_000;
 export const HERDR_PLACEMENT_TIMEOUT_MS = 30_000;

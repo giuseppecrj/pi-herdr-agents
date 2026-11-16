@@ -10,20 +10,20 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createLifecycle, markDelivery } from "../../maestro/core/lifecycle.ts";
-import { createPiPersistentIO } from "../../maestro/runtime/pi-persistent-io.ts";
-import { createWorktreeOperations } from "../../maestro/runtime/worktree-operations.ts";
+import { createLifecycle, markDelivery } from "@nubl/maestro/core/lifecycle";
+import { createPiPersistentIO } from "@nubl/maestro/runtime/pi-persistent-io";
+import { createWorktreeOperations } from "@nubl/maestro/runtime/worktree-operations";
 import type {
 	PiRunRecord,
 	PiPersistentEvent,
 	PiPersistentIO,
-} from "../../maestro/runtime/index.ts";
+} from "@nubl/maestro/runtime";
 import {
 	appendPersistentTaskEvent,
 	getPersistentDeliveryLedgerFile,
-} from "../../maestro/adapters/pi/session.ts";
-import { createPersistentControls } from "../../pi-extension/subagents/persistent.ts";
-import { createDelivery } from "../../pi-extension/subagents/delivery.ts";
+} from "@nubl/maestro/adapters/pi/session";
+import { createPersistentControls } from "@nubl/maestro/pi/subagents/persistent";
+import { createDelivery } from "@nubl/maestro/pi/subagents/delivery";
 import {
 	bindLiveApi,
 	readGlobalSlot,
@@ -31,13 +31,13 @@ import {
 	RUNTIME_KEY,
 	type RunningSubagent,
 	type SubagentRuntime,
-} from "../../pi-extension/subagents/state.ts";
+} from "@nubl/maestro/pi/subagents/state";
 import { createMockExtensionApi } from "../helpers/mock-extension-api.ts";
-import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
-import { launchOperationsFromSurface } from "../../maestro/adapters/pi/launch-operations.ts";
-import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
-import { MODEL_SCOPE_ENV } from "../../maestro/core/routing.ts";
-import { DELEGATION_DEPTH_ENV } from "../../maestro/core/delegation-depth.ts";
+import { FakeSurfaceProvider } from "@nubl/maestro/testing";
+import { launchOperationsFromSurface } from "@nubl/maestro/adapters/pi/launch-operations";
+import { SupervisionCoordinator } from "@nubl/maestro/core/supervision";
+import { MODEL_SCOPE_ENV } from "@nubl/maestro/core/routing";
+import { DELEGATION_DEPTH_ENV } from "@nubl/maestro/core/delegation-depth";
 
 function specialist(t: TestContext, busy = false) {
 	const dir = mkdtempSync(join(tmpdir(), "audit-persistent-"));

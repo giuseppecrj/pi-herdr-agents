@@ -5,16 +5,16 @@ import {
 	isNonEmptyString,
 	isPlainObject,
 	isString,
-} from "../../core/config/type-guards.ts";
-import { Deadline } from "../../core/deadline.ts";
+} from "@nubl/maestro/core/config/type-guards";
+import { Deadline } from "@nubl/maestro/core/deadline";
 import {
 	isCompletePrimaryWorkspaceClaim,
 	rememberOpenedPrimaryWorkspace,
 	type OpenedPrimaryWorkspaceReport,
 	type PrimaryWorkspaceClaim,
 	type ReleasedPrimaryWorkspaceClaim,
-} from "../../core/opened-primary-workspace.ts";
-import { realpathWithoutOpening } from "../../core/realpath-without-opening.ts";
+} from "@nubl/maestro/core/opened-primary-workspace";
+import { realpathWithoutOpening } from "@nubl/maestro/core/realpath-without-opening";
 import {
 	AcquisitionUncertainError,
 	isAcquisitionUncertainError,
@@ -22,7 +22,7 @@ import {
 	type AcquisitionControl,
 	type RecoveredWorktreeProvisioning,
 	type UncertainAcquisition,
-} from "../../core/surface-provider.ts";
+} from "@nubl/maestro/core/surface-provider";
 import {
 	herdrExec,
 	herdrExecAsync,

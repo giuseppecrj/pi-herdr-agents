@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe as nodeDescribe, it as nodeIt } from "node:test";
-import type { SurfaceProvider } from "../../maestro/core/surface-provider.ts";
+import type { SurfaceProvider } from "@nubl/maestro/core/surface-provider";
 
 interface TestRunner {
 	describe: typeof nodeDescribe;

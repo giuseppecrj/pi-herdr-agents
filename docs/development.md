@@ -9,10 +9,23 @@ entry point. Pi is the sole real harness. Legacy Herdr and local Herdr Core
 provide execution; Desktop presentation is separate and not yet implemented.
 Fakes are for conformance tests only.
 
-- `pi-extension/subagents/index.ts` — Pi composition root: loads config,
-  adopts the reload-surviving runtime, builds the per-load controllers, and
-  registers session handlers, tools, commands, and renderers in order. It also
-  holds the `__test__` surface.
+- `pi-extension/subagents/index.ts` — the terminal entry Pi loads. It calls
+  `createPiExtension` once per module load with the terminal host's hooks:
+  `hostSurfaceBinding` (`host-surface.ts`), the presentation hooks (widgets,
+  message renderers and `tool-renderers.ts`), the child wrapper path and the
+  package root for `config.json.example`. It re-exports the `__test__` surface.
+- `pi-extension/subagents/extension.ts` — `createPiExtension`, the Pi
+  composition factory: loads config, adopts the reload-surviving runtime,
+  builds the per-load controllers, and registers session handlers, tools,
+  commands, and renderers in order. Terminal UI comes only through
+  `PiPresentationHooks` (`presentation-hooks.ts`).
+- `pi-extension/subagents/host-surface.ts`, `marker-transport.ts` — the
+  terminal host's runtime composition: legacy/Core binding selection, the
+  owning provider, the per-launch legacy pane provider with that launch's
+  shell trust, and the Herdr socket sidebar-marker reader and writer.
+- `pi-extension/subagents/child.ts`, `child-widget.ts` — the terminal child
+  wrapper: the child protocol plus its tools widget. Launches load it through
+  the unchanged `maestro/adapters/pi/child/subagent-done.ts` path.
 - `pi-extension/subagents/state.ts`, `catalog.ts`, `presentation.ts` — run-state
   types and reload slots; the role catalog, `subagent` parameters, and launch
   policy; the parent message model, its one serializer, and the child-report
@@ -32,9 +45,11 @@ Fakes are for conformance tests only.
   re-import it and its config and timers must not be shared.
 - `pi-extension/subagents/launch-tools.ts`, `control-tools.ts`,
   `worktree-tools.ts`, `task-models.ts`, `renderers.ts` — `register*`
-  functions for the public tools, commands, and message renderers.
+  functions for the public tools, commands, and message renderers. Tool
+  terminal callbacks live in `tool-renderers.ts` and are injected.
 - `pi-extension/subagents/model-registry.ts`, `config-path.ts` — permanent
-  host-local SDK capability glue and configuration-path conventions.
+  host-local SDK capability glue and configuration-path conventions; the
+  example path takes an explicit asset root.
 - `maestro/core/` — seam interfaces/types, activity and lifecycle projection,
   status, routing, wake-ups, and supervision; `undelivered-children.ts` is the
   shared registry-slot key and the check the child protocol uses to defer
@@ -42,8 +57,9 @@ Fakes are for conformance tests only.
 - `maestro/core/roles/discovery.ts`, `maestro/core/config/` — role discovery,
   config loaders with injected directories, and task-model init prompt logic.
 - `maestro/core/config/herdr-config.ts` — strict backend configuration and
-  pure native-context selection; `maestro/runtime/herdr-backend.ts` composes
-  the selected provider, with the binding retained by `pi-run-session.ts`.
+  pure native-context selection; the terminal host's `HostSurfaceBinding`
+  (`maestro/runtime/host-surface-binding.ts`) resolves it and composes the
+  selected provider, with the binding retained by `pi-run-session.ts`.
 - `maestro/core/worktree.ts`, `maestro/core/worktree-cleanup.ts` — manifest
   schema/state, handoff types, and cleanup eligibility/formatting.
 - `maestro/core/realpath-without-opening.ts` — lstat/stat/readlink realpath for
@@ -63,9 +79,12 @@ Fakes are for conformance tests only.
   normalization for child text.
 - `maestro/adapters/pi/` — Pi launch, completion, session I/O, activity files,
   model SDK glue, and registry projection behind `PiHarnessAdapter`;
-  `child/subagent-done.ts` implements the child protocol (including the
+  `child/protocol.ts` implements the child protocol (including the
   opt-in persistent `caller_notify`, bounded by `maestro/core/specialist-notice.ts`,
-  [ADR-0019](adr/0019-specialist-notices.md)), and
+  [ADR-0019](adr/0019-specialist-notices.md)) with an injected widget hook;
+  `child/entry.ts` is the protocol-only entry, the launch default when no
+  child entry path is passed; `child/subagent-done.ts` forwards to the
+  terminal wrapper and keeps the path existing launches use; and
   `child/declared-skills.ts` injects the declared skills the child's own Pi
   loaded on its first run (names come from `maestro/core/declared-skills.ts`).
   Launch is split into `launch.ts` (fresh transaction), `launch-resume.ts`
@@ -103,7 +122,8 @@ Fakes are for conformance tests only.
   identity, termination confirmation and record removal.
 - `maestro/runtime/` — run ownership, controls/retries, observation,
   delivery-gated cleanup, Pi composition, worktree operations/handoff,
-  task-model init composition, and sidebar markers (`delegated-marker.ts`).
+  task-model init composition, and sidebar markers (`delegated-marker.ts`,
+  whose transport callbacks the terminal host injects).
   `pi-run-session.ts` composes the Pi run session; its public contract types
   live in `pi-run-session-types.ts` and its persistent-specialist inbox and
   ledger I/O in `pi-persistent-io.ts`.

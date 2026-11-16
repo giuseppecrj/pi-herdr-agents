@@ -18,14 +18,14 @@ import {
 	formatDeclaredSkillsEnv,
 	parseDeclaredSkills,
 	parseDeclaredSkillsEnv,
-} from "../../maestro/core/declared-skills.ts";
+} from "@nubl/maestro/core/declared-skills";
 import {
 	createDeclaredSkillsInjector,
 	registerDeclaredSkills,
 	SKILL_FILE_MAX_BYTES,
 	SKILLS_TOTAL_MAX_BYTES,
 	type SkillFileSystem,
-} from "../../maestro/adapters/pi/child/declared-skills.ts";
+} from "@nubl/maestro/adapters/pi/child/declared-skills";
 
 function withDir(run: (dir: string) => Promise<void> | void) {
 	const dir = mkdtempSync(join(tmpdir(), "declared-skills-"));

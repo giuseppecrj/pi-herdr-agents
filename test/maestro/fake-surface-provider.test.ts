@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
+import { FakeSurfaceProvider } from "@nubl/maestro/testing";
 import {
 	hasStandaloneScreenLine,
 	registerSurfaceProviderConformance,

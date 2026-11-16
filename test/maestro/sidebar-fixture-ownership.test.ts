@@ -41,7 +41,7 @@ import {
 	type Inventory,
 	type LaunchRecord,
 } from "../integration/sidebar-fixture.ts";
-import type { JsonObject } from "../../maestro/core/config/type-guards.ts";
+import type { JsonObject } from "@nubl/maestro/core/config/type-guards";
 
 const REPO = "/tmp/pi-integ-own";
 const BRANCH = "integration/sidebar-abc";

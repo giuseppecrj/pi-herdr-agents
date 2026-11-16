@@ -21,7 +21,7 @@ import {
 	modelScopeAssignment,
 	safeName,
 	shellComment,
-	SUBAGENTS_DIR,
+	DEFAULT_CHILD_ENTRY_PATH,
 	timestampForFile,
 } from "./launch-command.ts";
 import type { PiLaunchOperations } from "./launch-operations.ts";
@@ -153,7 +153,7 @@ export async function launchResumedPiSubagent(
 			...scopeArgs,
 			...(toolAllowlist ? ["--tools", shellQuote(toolAllowlist)] : []),
 			"-e",
-			shellQuote(join(SUBAGENTS_DIR, "child", "subagent-done.ts")),
+			shellQuote(request.childEntryPath ?? DEFAULT_CHILD_ENTRY_PATH),
 			...(messageFile ? [shellQuote(`@${messageFile}`)] : []),
 		].join(" ");
 		const launchScriptFile = join(

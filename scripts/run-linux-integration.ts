@@ -5,7 +5,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { assertPrivateDir } from "../.pi/skills/verify-pi-herdr-agents/scripts/path-guards.ts";
 import { setTimeout as delay } from "node:timers/promises";
-import { isRecord, isString } from "../maestro/core/config/type-guards.ts";
+import { isRecord, isString } from "@nubl/maestro/core/config/type-guards";
 import { coreResults, coreSession } from "../test/integration/core-parent.ts";
 
 assert.equal(

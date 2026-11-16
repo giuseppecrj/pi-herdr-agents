@@ -9,7 +9,7 @@ import {
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
-import { isRecord, isString } from "../../maestro/core/config/type-guards.ts";
+import { isRecord, isString } from "@nubl/maestro/core/config/type-guards";
 import { CoreLab, findLabBinary } from "./herdr-core-lab.ts";
 import {
 	captureCoreEvidence,

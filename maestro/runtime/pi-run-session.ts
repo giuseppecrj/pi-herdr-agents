@@ -32,7 +32,6 @@ import {
 	inspectNoProgressSessionTail,
 	type AttributedSummary,
 } from "../adapters/pi/session.ts";
-import { createHerdrProvider, resolveHerdrBinding } from "./herdr-backend.ts";
 import {
 	assertManagedWorktreesSupported,
 	managedWorktreeRefusal,
@@ -42,7 +41,6 @@ import {
 	type HerdrBinding,
 } from "../core/config/herdr-config.ts";
 import { createPiScriptShellResolver } from "../adapters/pi/script-shell.ts";
-import { HerdrSurfaceProvider } from "../surfaces/herdr/herdr-surface-provider.ts";
 import { readSubagentActivityFile } from "../adapters/pi/activity-file.ts";
 import { projectActivity } from "../core/activity.ts";
 import {
@@ -63,12 +61,7 @@ import {
 	type ResolvedRuntimePlan,
 } from "../core/routing.ts";
 import { loadPaneConfig } from "../core/config/pane-config.ts";
-import {
-	DelegatedMarkers,
-	herdrMarkerSessionReader,
-	herdrMarkerWriter,
-	type DelegatedMarker,
-} from "./delegated-marker.ts";
+import { DelegatedMarkers, type DelegatedMarker } from "./delegated-marker.ts";
 import {
 	createRunSession,
 	type RunSession,
@@ -169,21 +162,18 @@ function temporarySurfaceRelease(
 }
 
 function createDelegatedMarkers(
-	infrastructure: PiRunSessionInfrastructure | undefined,
+	options: DefaultRunSessionOptions,
 ): DelegatedMarkers | undefined {
-	// Injected infrastructure never falls back to the ambient Herdr socket.
-	if (infrastructure) {
-		const write = infrastructure.markerWriter;
-		const readSession = infrastructure.markerSessionReader;
-		return write && readSession
-			? new DelegatedMarkers({ write, readSession })
-			: undefined;
-	}
-	const socketPath = process.env.HERDR_SOCKET_PATH;
-	return socketPath
+	const transport = options.infrastructure
+		? {
+				write: options.infrastructure.markerWriter,
+				readSession: options.infrastructure.markerSessionReader,
+			}
+		: options.hostSurface!.markers?.();
+	return transport?.write && transport.readSession
 		? new DelegatedMarkers({
-				write: herdrMarkerWriter(socketPath),
-				readSession: herdrMarkerSessionReader(socketPath),
+				write: transport.write,
+				readSession: transport.readSession,
 			})
 		: undefined;
 }
@@ -216,25 +206,6 @@ function resumeResultReader(
 	});
 }
 
-/**
- * The Herdr provider one launch types its script through. On Windows it
- * resolves bash from the launching session's own settings and trust decision;
- * a snapshot without them is untrusted.
- */
-export function createLaunchSurfaceProvider(
-	snapshot: PiLaunchSnapshot,
-): HerdrSurfaceProvider {
-	return new HerdrSurfaceProvider({
-		paneConfig: snapshot.paneConfig,
-		resolveScriptShell: createPiScriptShellResolver(
-			snapshot.scriptShell ?? {
-				cwd: snapshot.parent.cwd,
-				projectTrusted: false,
-			},
-		),
-	});
-}
-
 // pi-herdr-agents extension
 export function createDefaultRunSession(
 	options: DefaultRunSessionOptions,
@@ -256,10 +227,12 @@ export function createDefaultRunSession(
 		throw new Error(
 			"Pi owning provider and launch operations must use the same native execution binding",
 		);
+	if (!options.infrastructure && !options.hostSurface)
+		throw new Error("Pi run session requires a host surface binding");
 	// Injected infrastructure is a closed world: never inspect ambient Core sockets.
 	const binding: HerdrBinding = options.infrastructure
 		? { backend: "legacy" }
-		: resolveHerdrBinding(
+		: options.hostSurface!.resolve(
 				options.configDir,
 				options.configExamplePath,
 				options.platform,
@@ -296,7 +269,7 @@ export function createDefaultRunSession(
 		// this explicitly injected registry. Injected infrastructure already owns one.
 		const provider =
 			options.infrastructure?.surfaceProvider ??
-			createHerdrProvider(
+			options.hostSurface!.createProvider(
 				binding,
 				loadPaneConfig(
 					join(options.configDir, "herdr-agents"),
@@ -524,7 +497,7 @@ export function createDefaultRunSession(
 		state.binding.backend === "legacy" &&
 		!state.infrastructure.surfaceProvider.nativeExecution
 	)
-		state.markers ??= createDelegatedMarkers(options.infrastructure);
+		state.markers ??= createDelegatedMarkers(options);
 	const acceptChecks = (state.acceptChecks ??= {
 		label: "parent run session",
 	});
@@ -578,7 +551,7 @@ export function createDefaultRunSession(
 				launchOperationsFromSurface(
 					state.binding.backend === "core"
 						? state.infrastructure.surfaceProvider
-						: createLaunchSurfaceProvider(snapshot),
+						: state.options.hostSurface!.createLaunchProvider(snapshot),
 					snapshot.paneConfig,
 				)),
 			worktree: state.worktreeOperations,
@@ -586,6 +559,7 @@ export function createDefaultRunSession(
 	}
 	function adapter(snapshot: PiLaunchSnapshot): PiHarnessAdapter {
 		return new PiHarnessAdapter({
+			childEntryPath: state.options.childEntryPath,
 			surface: state.infrastructure.surfaceProvider,
 			paneConfig: snapshot.paneConfig,
 			modelRegistry: snapshot.modelRegistry,

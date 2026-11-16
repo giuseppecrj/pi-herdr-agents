@@ -4,7 +4,7 @@ import {
 	isString,
 	type JsonObject,
 	type JsonValue,
-} from "../../maestro/core/config/type-guards.ts";
+} from "@nubl/maestro/core/config/type-guards";
 import type { ToolSchemaSnapshot } from "./tool-schema-capture.ts";
 
 type SchemaNode = JsonObject;

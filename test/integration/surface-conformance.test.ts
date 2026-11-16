@@ -9,7 +9,7 @@ import type {
 	CreateWorktreeSurfaceOptions,
 	SurfaceProvider,
 	WorktreeSurface,
-} from "../../maestro/core/surface-provider.ts";
+} from "@nubl/maestro/core/surface-provider";
 import { HerdrSurfaceProvider } from "../../maestro/surfaces/herdr/herdr-surface-provider.ts";
 import { registerSurfaceProviderConformance } from "../maestro/surface-provider.conformance.ts";
 import {

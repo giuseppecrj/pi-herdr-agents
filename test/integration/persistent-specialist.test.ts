@@ -22,7 +22,7 @@ import {
 	type TestEnv,
 } from "./harness.ts";
 import { resetProviderRequests } from "./fake-provider.ts";
-import { isString } from "../../maestro/core/config/type-guards.ts";
+import { isString } from "@nubl/maestro/core/config/type-guards";
 
 function workspacePanes(workspaceId: string): string[] {
 	const result = JSON.parse(

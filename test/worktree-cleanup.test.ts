@@ -18,18 +18,18 @@ import { join } from "node:path";
 import {
 	readWorktreeManifest,
 	writeWorktreeManifest,
-} from "../maestro/runtime/worktree-operations.ts";
+} from "@nubl/maestro/runtime/worktree-operations";
 import { __herdrTest__ } from "../maestro/surfaces/herdr/herdr.ts";
 import {
 	cleanupBlockers,
 	listContainedWorktrees,
 	removeContainedWorktree,
 	formatWorktreeInventory,
-} from "../maestro/core/worktree-cleanup.ts";
+} from "@nubl/maestro/core/worktree-cleanup";
 import {
 	createWorktreeCleanupOperations as buildCleanupOperations,
 	__worktreeCleanupTest__,
-} from "../maestro/runtime/worktree-operations.ts";
+} from "@nubl/maestro/runtime/worktree-operations";
 import { HerdrSurfaceProvider } from "../maestro/surfaces/herdr/herdr-surface-provider.ts";
 
 const provider = new HerdrSurfaceProvider({

@@ -20,30 +20,30 @@ import {
 	type AcceptOutcome,
 	type AcceptRequest,
 	changedCheckFiles,
-} from "../../maestro/core/accept.ts";
+} from "@nubl/maestro/core/accept";
 import {
 	renderParentMessage,
 	resolveCancelledPresentation,
 	resolveResultPresentation,
 	splitChildReport,
-} from "../../pi-extension/subagents/presentation.ts";
+} from "@nubl/maestro/pi/subagents/presentation";
 import {
 	acceptCheckEnv,
 	readAcceptSpecFile,
 	runAcceptCommand,
 	type AcceptRunner,
-} from "../../maestro/adapters/pi/accept-runner.ts";
-import { createChildAcceptLoop } from "../../maestro/adapters/pi/child/accept-check.ts";
+} from "@nubl/maestro/adapters/pi/accept-runner";
+import { createChildAcceptLoop } from "@nubl/maestro/adapters/pi/child/accept-check";
 import { buildCompletionSidecar } from "../../maestro/adapters/pi/child/subagent-done.ts";
-import { interpretExitSidecar } from "../../maestro/adapters/pi/completion.ts";
-import { launchPiSubagent } from "../../maestro/adapters/pi/launch.ts";
-import { launchOperationsFromSurface } from "../../maestro/adapters/pi/launch-operations.ts";
-import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
-import { parseOutcomeLedgerConfig } from "../../maestro/core/config/outcome-ledger-config.ts";
-import { SubagentParams } from "../../pi-extension/subagents/catalog.ts";
+import { interpretExitSidecar } from "@nubl/maestro/adapters/pi/completion";
+import { launchPiSubagent } from "@nubl/maestro/adapters/pi/launch";
+import { launchOperationsFromSurface } from "@nubl/maestro/adapters/pi/launch-operations";
+import { FakeSurfaceProvider } from "@nubl/maestro/testing";
+import { parseOutcomeLedgerConfig } from "@nubl/maestro/core/config/outcome-ledger-config";
+import { SubagentParams } from "@nubl/maestro/pi/subagents/catalog";
 import * as subagentsModule from "../../pi-extension/subagents/index.ts";
 import { createMockExtensionApi } from "../helpers/mock-extension-api.ts";
-import { isString } from "../../maestro/core/config/type-guards.ts";
+import { isString } from "@nubl/maestro/core/config/type-guards";
 
 describe("accept parameter", () => {
 	it("applies defaults and validates bounds", () => {

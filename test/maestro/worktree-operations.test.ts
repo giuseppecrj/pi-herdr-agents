@@ -4,20 +4,20 @@ import { test } from "node:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
+import { FakeSurfaceProvider } from "@nubl/maestro/testing";
 import {
 	mergeWorktreeManifest,
 	worktreeResultState,
-} from "../../maestro/core/worktree.ts";
+} from "@nubl/maestro/core/worktree";
 import {
 	listContainedWorktrees,
 	removeContainedWorktree,
-} from "../../maestro/core/worktree-cleanup.ts";
+} from "@nubl/maestro/core/worktree-cleanup";
 import {
 	createWorktreeCleanupOperations,
 	readWorktreeManifest,
 	writeWorktreeManifest,
-} from "../../maestro/runtime/worktree-operations.ts";
+} from "@nubl/maestro/runtime/worktree-operations";
 import { cleanupFixture } from "../worktree-cleanup-fixture.ts";
 
 function deferred() {

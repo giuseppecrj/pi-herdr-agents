@@ -33,18 +33,20 @@ import {
 import {
 	DELEGATED_MARKER_RENEW_MS,
 	DelegatedMarkers,
+	type MarkerSessionReader,
+} from "@nubl/maestro/runtime/delegated-marker";
+import {
 	herdrMarkerSessionReader,
 	herdrMarkerWriter,
-	type MarkerSessionReader,
-} from "../../maestro/runtime/delegated-marker.ts";
-import { linuxProcessProbe } from "../../maestro/adapters/pi/process-identity.ts";
+} from "../../pi-extension/subagents/marker-transport.ts";
+import { linuxProcessProbe } from "@nubl/maestro/adapters/pi/process-identity";
 import {
 	isFiniteNumber,
 	isRecord,
 	isString,
 	type JsonObject,
-} from "../../maestro/core/config/type-guards.ts";
-import { shellQuote } from "../../maestro/core/shell.ts";
+} from "@nubl/maestro/core/config/type-guards";
+import { shellQuote } from "@nubl/maestro/core/shell";
 
 const PLUGIN_DIR = resolve(
 	fileURLToPath(new URL("../../plugins/sidebar", import.meta.url)),

@@ -32,7 +32,7 @@ import {
 	isNativeToolSearch,
 	type ToolSearchCandidate,
 	trackDeferredTools,
-} from "../../pi-extension/subagents/deferred-tools.ts";
+} from "@nubl/maestro/pi/subagents/deferred-tools";
 
 // The extension reads its durable config when the module loads; point it at
 // an empty agent home first.

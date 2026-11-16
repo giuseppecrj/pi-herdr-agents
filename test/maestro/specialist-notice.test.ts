@@ -5,30 +5,30 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Value } from "@sinclair/typebox/value";
-import { createLifecycle } from "../../maestro/core/lifecycle.ts";
+import { createLifecycle } from "@nubl/maestro/core/lifecycle";
 import {
 	NOTICE_CAP,
 	NOTICE_CHILD_INTERVAL_MS,
 	NOTICE_PARENT_INTERVAL_MS,
-} from "../../maestro/core/specialist-notice.ts";
+} from "@nubl/maestro/core/specialist-notice";
 import {
 	appendPersistentTaskEvent,
 	readPersistentDeliveryLedger,
 	readPersistentTaskEvents,
-} from "../../maestro/adapters/pi/session.ts";
-import { buildSubagentToolAllowlist } from "../../maestro/adapters/pi/launch-command.ts";
-import { launchPiSubagent } from "../../maestro/adapters/pi/launch.ts";
+} from "@nubl/maestro/adapters/pi/session";
+import { buildSubagentToolAllowlist } from "@nubl/maestro/adapters/pi/launch-command";
+import { launchPiSubagent } from "@nubl/maestro/adapters/pi/launch";
 import subagentDoneExtension from "../../maestro/adapters/pi/child/subagent-done.ts";
-import { createPiPersistentIO } from "../../maestro/runtime/pi-persistent-io.ts";
-import { createWorktreeOperations } from "../../maestro/runtime/worktree-operations.ts";
-import type { PiRunRecord } from "../../maestro/runtime/pi-run-session-types.ts";
-import { createDelivery } from "../../pi-extension/subagents/delivery.ts";
-import { SubagentParams } from "../../pi-extension/subagents/catalog.ts";
+import { createPiPersistentIO } from "@nubl/maestro/runtime/pi-persistent-io";
+import { createWorktreeOperations } from "@nubl/maestro/runtime/worktree-operations";
+import type { PiRunRecord } from "@nubl/maestro/runtime/pi-run-session-types";
+import { createDelivery } from "@nubl/maestro/pi/subagents/delivery";
+import { SubagentParams } from "@nubl/maestro/pi/subagents/catalog";
 import {
 	createPersistentControls,
 	persistentSpecialistState,
-} from "../../pi-extension/subagents/persistent.ts";
-import type { RunningSubagent } from "../../pi-extension/subagents/state.ts";
+} from "@nubl/maestro/pi/subagents/persistent";
+import type { RunningSubagent } from "@nubl/maestro/pi/subagents/state";
 import * as subagentsModule from "../../pi-extension/subagents/index.ts";
 import { createMockExtensionApi } from "../helpers/mock-extension-api.ts";
 

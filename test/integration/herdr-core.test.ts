@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
-import { isRecord, isString } from "../../maestro/core/config/type-guards.ts";
+import { isRecord, isString } from "@nubl/maestro/core/config/type-guards";
 import { CoreLab, coreLabRequest, findLabBinary } from "./herdr-core-lab.ts";
 import {
 	captureCoreEvidence,

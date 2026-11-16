@@ -3,20 +3,20 @@ import assert from "node:assert/strict";
 import { getEventListeners } from "node:events";
 import { it } from "node:test";
 import { runInNewContext } from "node:vm";
-import { FakeHarnessAdapter } from "../../maestro/adapters/fake/fake-harness-adapter.ts";
+import { FakeHarnessAdapter } from "@nubl/maestro/testing";
 import {
 	AcquisitionUncertainError,
 	isAcquisitionUncertainError,
 	type UncertainAcquisition,
-} from "../../maestro/core/surface-provider.ts";
+} from "@nubl/maestro/core/surface-provider";
 import type {
 	AgentHandle,
 	CompletionEvidence,
 	Role,
 	RunResult,
 	Task,
-} from "../../maestro/core/types.ts";
-import { createRunSession } from "../../maestro/runtime/run-session.ts";
+} from "@nubl/maestro/core/types";
+import { createRunSession } from "@nubl/maestro/runtime/run-session";
 
 const turn = () => new Promise<void>((resolve) => setImmediate(resolve));
 const role: Role = {

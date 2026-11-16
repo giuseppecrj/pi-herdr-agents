@@ -1,7 +1,7 @@
 import "../clean-host-env.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { Deadline } from "../../maestro/core/deadline.ts";
+import { Deadline } from "@nubl/maestro/core/deadline";
 
 test("deadlines reject unlimited/invalid timers, use a monotonic clock and never extend a parent", () => {
 	for (const value of [0, -1, NaN, Infinity, 2 ** 31])

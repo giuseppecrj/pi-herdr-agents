@@ -6,8 +6,8 @@ import {
 	childDelegationDepth,
 	decideDelegation,
 	parseDelegationDepth,
-} from "../../maestro/core/delegation-depth.ts";
-import { parseSpawningConfig } from "../../maestro/core/config/spawning-config.ts";
+} from "@nubl/maestro/core/delegation-depth";
+import { parseSpawningConfig } from "@nubl/maestro/core/config/spawning-config";
 
 describe("delegation depth", () => {
 	it("treats an absent variable as a top-level session at depth 0", () => {

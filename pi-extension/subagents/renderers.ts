@@ -4,13 +4,13 @@ import { Box, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import {
 	isFiniteNumber,
 	isString,
-} from "../../maestro/core/config/type-guards.ts";
-import { displayLines, encodeHostValue } from "../../maestro/core/host-text.ts";
+} from "@nubl/maestro/core/config/type-guards";
+import { displayLines, encodeHostValue } from "@nubl/maestro/core/host-text";
 import {
 	formatElapsed,
 	resumeCommandLine,
 	splitChildReport,
-} from "./presentation.ts";
+} from "@nubl/maestro/pi/subagents/presentation";
 
 /**
  * The human view of a delivered message: host lines unprefixed, the child's

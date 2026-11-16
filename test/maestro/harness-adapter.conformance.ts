@@ -3,12 +3,12 @@ import { describe as nodeDescribe, it as nodeIt } from "node:test";
 import type {
 	HarnessAdapter,
 	SpawnOptions,
-} from "../../maestro/core/harness-adapter.ts";
+} from "@nubl/maestro/core/harness-adapter";
 import type {
 	AgentHandle,
 	AgentState,
 	Worktree,
-} from "../../maestro/core/types.ts";
+} from "@nubl/maestro/core/types";
 
 interface TestRunner {
 	describe: typeof nodeDescribe;

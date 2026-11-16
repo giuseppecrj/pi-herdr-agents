@@ -154,7 +154,10 @@ function taskModelApprovalMessage(prepared: PreparedTaskModelWrite): string {
 /** The subagents_write_task_models tool (parent sessions only). */
 export function registerTaskModelTool(
 	pi: ExtensionAPI,
-	{ shouldRegister }: { shouldRegister: (name: string) => boolean },
+	{
+		shouldRegister,
+		configExamplePath,
+	}: { shouldRegister: (name: string) => boolean; configExamplePath?: string },
 ): void {
 	if (!process.env.PI_SUBAGENT_ID && shouldRegister(DIRECT_WRITER_TOOL)) {
 		let pendingApproval:
@@ -309,7 +312,8 @@ export function registerTaskModelTool(
 					if (Object.hasOwn(params, "expectedConfigRevision"))
 						options.expectedConfigRevision = params.expectedConfigRevision;
 					const configPath = getSubagentsConfigPath();
-					const examplePath = getSubagentsConfigExamplePath();
+					const examplePath =
+						configExamplePath ?? getSubagentsConfigExamplePath();
 					const isAuthenticatedCandidate = (candidate: string) => {
 						const parsed = parseExactModelRef(candidate);
 						const model =

@@ -5,10 +5,7 @@ import {
 } from "node:http";
 import { once } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
-import {
-	isPlainObject,
-	isString,
-} from "../../maestro/core/config/type-guards.ts";
+import { isPlainObject, isString } from "@nubl/maestro/core/config/type-guards";
 
 interface ChatMessage {
 	role?: string;

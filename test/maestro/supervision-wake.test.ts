@@ -5,8 +5,8 @@ import { mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
-import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
-import { FileWakeRegistry } from "../../maestro/core/wake.ts";
+import { SupervisionCoordinator } from "@nubl/maestro/core/supervision";
+import { FileWakeRegistry } from "@nubl/maestro/core/wake";
 
 const never = () => new AbortController().signal;
 

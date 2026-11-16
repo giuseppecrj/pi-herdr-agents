@@ -18,8 +18,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
-import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
-import { waitForCompletion } from "../../maestro/adapters/pi/completion.ts";
+import { SupervisionCoordinator } from "@nubl/maestro/core/supervision";
+import { waitForCompletion } from "@nubl/maestro/adapters/pi/completion";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "../..");

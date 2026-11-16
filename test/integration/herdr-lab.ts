@@ -22,8 +22,8 @@ import {
 import {
 	createLinuxProcessEnvironmentReader,
 	createLinuxProcessProbe,
-} from "../../maestro/adapters/pi/process-identity.ts";
-import type { JsonObject } from "../../maestro/core/config/type-guards.ts";
+} from "@nubl/maestro/adapters/pi/process-identity";
+import type { JsonObject } from "@nubl/maestro/core/config/type-guards";
 
 const LAB_PREFIX = "piha-herdr-lab-";
 const POLL_MS = 100;
