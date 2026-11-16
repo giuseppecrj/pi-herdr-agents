@@ -6,13 +6,13 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { createDefaultRunSession } from "../../maestro/runtime/pi-run-session.ts";
-import type { DefaultRunSessionOptions } from "../../maestro/runtime/pi-run-session-types.ts";
-import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
-import { launchOperationsFromSurface } from "../../maestro/adapters/pi/launch-operations.ts";
-import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
-import { DEFAULT_CHILD_ENTRY_PATH } from "../../maestro/adapters/pi/launch-command.ts";
-import { getSubagentsConfigExamplePath } from "../../pi-extension/subagents/config-path.ts";
+import { createDefaultRunSession } from "@nubl/maestro/runtime/pi-run-session";
+import type { DefaultRunSessionOptions } from "@nubl/maestro/runtime/pi-run-session-types";
+import { FakeSurfaceProvider } from "@nubl/maestro/testing";
+import { launchOperationsFromSurface } from "@nubl/maestro/adapters/pi/launch-operations";
+import { SupervisionCoordinator } from "@nubl/maestro/core/supervision";
+import { DEFAULT_CHILD_ENTRY_PATH } from "@nubl/maestro/adapters/pi/launch-command";
+import { getSubagentsConfigExamplePath } from "@nubl/maestro/pi/subagents/config-path";
 import { hostSurfaceBinding } from "../../pi-extension/subagents/host-surface.ts";
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
@@ -172,7 +172,8 @@ test("H1 injected tool renderers and the child widget hook render exactly as bef
 		probe(
 			"test/fixtures/h1-presentation-probe.ts",
 			repo,
-			"maestro/adapters/pi/child/entry.ts",
+			// H2: the installed package's protocol-only launch entry.
+			relative(repo, DEFAULT_CHILD_ENTRY_PATH),
 		),
 	);
 	assert.deepEqual(protocolOnly.child, { ...expected.child, widgets: [] });
@@ -193,8 +194,12 @@ test("H1 protocol-only child entry imports no terminal host, Herdr or pi-tui mod
 		}
 	};
 	visit(DEFAULT_CHILD_ENTRY_PATH);
-	const local = [...seen].map((file) => relative(repo, file));
-	assert.ok(local.includes("maestro/adapters/pi/child/protocol.ts"));
+	// H2: the default child entry is the installed package's emitted entry.
+	const dist = fileURLToPath(
+		new URL("dist/", import.meta.resolve("@nubl/maestro/package.json")),
+	);
+	const local = [...seen].map((file) => relative(dist, file));
+	assert.ok(local.includes("maestro/adapters/pi/child/protocol.js"));
 	assert.deepEqual(
 		local.filter(
 			(file) =>
@@ -210,11 +215,15 @@ test("H1 protocol-only child entry imports no terminal host, Herdr or pi-tui mod
 });
 
 test("H1 child/config resource defaults use module locations and preserve spaces", () => {
-	// Source runs resolve the source entry; emitted JS resolves entry.js beside it.
+	// Source runs resolve the source entry; emitted JS resolves entry.js beside
+	// it. H2 loads the installed package's emitted launch command.
 	assert.equal(
 		DEFAULT_CHILD_ENTRY_PATH,
 		fileURLToPath(
-			new URL("../../maestro/adapters/pi/child/entry.ts", import.meta.url),
+			new URL(
+				"./child/entry.js",
+				import.meta.resolve("@nubl/maestro/adapters/pi/launch-command"),
+			),
 		),
 	);
 	assert.ok(existsSync(DEFAULT_CHILD_ENTRY_PATH));

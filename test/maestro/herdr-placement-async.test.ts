@@ -8,10 +8,10 @@ import {
 	sendHerdrCommand,
 	closeHerdrSurface,
 } from "../../maestro/surfaces/herdr/herdr.ts";
-import { AcquisitionUncertainError } from "../../maestro/core/surface-provider.ts";
-import { Deadline } from "../../maestro/core/deadline.ts";
+import { AcquisitionUncertainError } from "@nubl/maestro/core/surface-provider";
+import { Deadline } from "@nubl/maestro/core/deadline";
 
-import type { JsonObject } from "../../maestro/core/config/type-guards.ts";
+import type { JsonObject } from "@nubl/maestro/core/config/type-guards";
 
 const json = (result: JsonObject) => JSON.stringify({ result });
 function deferred() {

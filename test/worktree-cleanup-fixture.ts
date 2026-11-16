@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import type {
 	CleanupGitState,
 	WorktreeCleanupOperations,
-} from "../maestro/core/worktree-cleanup.ts";
+} from "@nubl/maestro/core/worktree-cleanup";
 
 export function cleanupFixture() {
 	const calls: string[] = [];

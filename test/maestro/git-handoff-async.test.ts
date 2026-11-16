@@ -8,8 +8,8 @@ import {
 	captureWorktreeHandoff,
 	resolveGitCommit,
 	resolveWorktreeProvisionCwd,
-} from "../../maestro/runtime/worktree-operations.ts";
-import type { WorktreeLaunch } from "../../maestro/core/worktree.ts";
+} from "@nubl/maestro/runtime/worktree-operations";
+import type { WorktreeLaunch } from "@nubl/maestro/core/worktree";
 import { worktreesUnsupportedOnWindows } from "../helpers/windows-scope.ts";
 
 const sha = "a".repeat(40);

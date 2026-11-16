@@ -108,10 +108,9 @@ describe("accept check shutdown ownership", {
 	});
 
 	it("an owner that aborts its check and exits at once leaves no group behind", async () => {
-		const runner = new URL(
-			"../../maestro/adapters/pi/accept-runner.ts",
-			import.meta.url,
-		).href;
+		const runner = import.meta.resolve(
+			"@nubl/maestro/adapters/pi/accept-runner",
+		);
 		// The owner exits before the SIGKILL grace could run out.
 		const code = `
 import { existsSync, readFileSync } from "node:fs";

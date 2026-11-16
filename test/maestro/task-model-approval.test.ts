@@ -25,11 +25,11 @@ import {
 	prepareTaskModelWrite,
 	readConfigRevision,
 	writeTaskModelConfig,
-} from "../../maestro/core/config/model-config.ts";
+} from "@nubl/maestro/core/config/model-config";
 import {
 	TASK_MODEL_INIT_APPROVAL_EVENT,
 	type OfferCallback,
-} from "../../maestro/core/config/task-model-init.ts";
+} from "@nubl/maestro/core/config/task-model-init";
 import { createMockExtensionApi } from "../helpers/mock-extension-api.ts";
 
 const YES = "Yes, save";

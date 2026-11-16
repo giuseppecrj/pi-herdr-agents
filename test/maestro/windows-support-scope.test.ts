@@ -16,22 +16,22 @@ import {
 	readGlobalSlot,
 	RUNTIME_KEY,
 	type SubagentRuntime,
-} from "../../pi-extension/subagents/state.ts";
+} from "@nubl/maestro/pi/subagents/state";
 import {
 	HERDR_CORE_UNSUPPORTED_ON_WINDOWS,
 	MANAGED_WORKTREES_UNSUPPORTED_ON_WINDOWS,
 	assertManagedWorktreesSupported,
 	managedWorktreeRefusal,
-} from "../../maestro/core/platform-support.ts";
-import { selectHerdrBinding } from "../../maestro/core/config/herdr-config.ts";
-import type { WorktreeOperations } from "../../maestro/core/worktree.ts";
-import type { PiWorktreeHandoffInput } from "../../maestro/runtime/index.ts";
-import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
-import { launchOperationsFromSurface } from "../../maestro/adapters/pi/launch-operations.ts";
-import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
+} from "@nubl/maestro/core/platform-support";
+import { selectHerdrBinding } from "@nubl/maestro/core/config/herdr-config";
+import type { WorktreeOperations } from "@nubl/maestro/core/worktree";
+import type { PiWorktreeHandoffInput } from "@nubl/maestro/runtime";
+import { FakeSurfaceProvider } from "@nubl/maestro/testing";
+import { launchOperationsFromSurface } from "@nubl/maestro/adapters/pi/launch-operations";
+import { SupervisionCoordinator } from "@nubl/maestro/core/supervision";
 import { createMockExtensionApi } from "../helpers/mock-extension-api.ts";
-import { createDefaultRunSession } from "../../maestro/runtime/pi-run-session.ts";
-import type { Role, Task } from "../../maestro/core/types.ts";
+import { createDefaultRunSession } from "@nubl/maestro/runtime/pi-run-session";
+import type { Role, Task } from "@nubl/maestro/core/types";
 
 // Windows support scope: ordinary subagents on legacy Herdr only. Managed
 // worktrees and Herdr Core are refused before any effect. The platform is

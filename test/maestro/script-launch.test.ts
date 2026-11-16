@@ -18,22 +18,22 @@ import {
 	piHasProjectTrustGating,
 	piScriptShellDeps,
 	resolveProjectTrusted,
-} from "../../maestro/adapters/pi/script-shell.ts";
+} from "@nubl/maestro/adapters/pi/script-shell";
 import {
 	buildScriptLaunchCommand,
 	classifyPaneShell,
 	isWslBashLauncher,
 	powerShellQuote,
 	type PaneShell,
-} from "../../maestro/core/script-launch.ts";
-import { createDefaultRunSession } from "../../maestro/runtime/pi-run-session.ts";
+} from "@nubl/maestro/core/script-launch";
+import { createDefaultRunSession } from "@nubl/maestro/runtime/pi-run-session";
 import {
 	createLaunchSurfaceProvider,
 	hostSurfaceBinding,
 } from "../../pi-extension/subagents/host-surface.ts";
-import { writeSubagentSessionPolicy } from "../../maestro/adapters/pi/session.ts";
-import type { PiLaunchSnapshot } from "../../maestro/runtime/index.ts";
-import { createLaunchPlanner } from "../../pi-extension/subagents/launch.ts";
+import { writeSubagentSessionPolicy } from "@nubl/maestro/adapters/pi/session";
+import type { PiLaunchSnapshot } from "@nubl/maestro/runtime";
+import { createLaunchPlanner } from "@nubl/maestro/pi/subagents/launch";
 import { __herdrTest__ } from "../../maestro/surfaces/herdr/herdr.ts";
 import { HerdrSurfaceProvider } from "../../maestro/surfaces/herdr/herdr-surface-provider.ts";
 import { runScriptInPane } from "../../maestro/surfaces/herdr/terminal.ts";

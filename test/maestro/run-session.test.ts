@@ -3,18 +3,18 @@ import assert from "node:assert/strict";
 import { getEventListeners } from "node:events";
 import { describe, it } from "node:test";
 import { queryObjects } from "node:v8";
-import { FakeHarnessAdapter } from "../../maestro/adapters/fake/fake-harness-adapter.ts";
+import { FakeHarnessAdapter } from "@nubl/maestro/testing";
 import type {
 	ResumeOptions,
 	SpawnOptions,
-} from "../../maestro/core/harness-adapter.ts";
+} from "@nubl/maestro/core/harness-adapter";
 import type {
 	AgentHandle,
 	CompletionEvidence,
 	Role,
 	RunResult,
 	Task,
-} from "../../maestro/core/types.ts";
+} from "@nubl/maestro/core/types";
 import {
 	createRunSession,
 	defaultRetainSurface,
@@ -23,8 +23,8 @@ import {
 	type RunObservation,
 	type RunSessionHooks,
 	type RunSessionOptions,
-} from "../../maestro/runtime/index.ts";
-import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
+} from "@nubl/maestro/runtime";
+import { FakeSurfaceProvider } from "@nubl/maestro/testing";
 
 const ABORT = "Aborted while waiting for subagent to finish";
 const role: Role = {

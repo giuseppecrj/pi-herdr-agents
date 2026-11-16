@@ -11,7 +11,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import * as subagentsModule from "../../pi-extension/subagents/index.ts";
-import { hostText } from "../../pi-extension/subagents/presentation.ts";
+import { hostText } from "@nubl/maestro/pi/subagents/presentation";
 import {
 	mkdtempSync,
 	mkdirSync,
@@ -21,16 +21,16 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { waitForCompletion } from "../../maestro/adapters/pi/completion.ts";
+import { waitForCompletion } from "@nubl/maestro/adapters/pi/completion";
 import {
 	POLLING_INTERVAL_MS,
 	RECONCILE_INTERVAL_MS,
 	SupervisionCoordinator,
-} from "../../maestro/core/supervision.ts";
+} from "@nubl/maestro/core/supervision";
 import {
 	appendPersistentTaskEvent,
 	readPersistentTaskEvents,
-} from "../../maestro/adapters/pi/session.ts";
+} from "@nubl/maestro/adapters/pi/session";
 
 const RECONCILE_BUDGET_MS = RECONCILE_INTERVAL_MS + 700;
 

@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { createLifecycle } from "../../maestro/core/lifecycle.ts";
+import { createLifecycle } from "@nubl/maestro/core/lifecycle";
 import {
 	readGlobalSlot,
 	RUNTIME_KEY,
 	WIDGET_INTERVAL_KEY,
 	STATUS_INTERVAL_KEY,
 	type SubagentRuntime,
-} from "../../pi-extension/subagents/state.ts";
+} from "@nubl/maestro/pi/subagents/state";
 
 // Run in a fresh process. No daily configuration, authentication or Herdr sockets.
 const root = mkdtempSync(join(tmpdir(), "piha-h1-reload-"));

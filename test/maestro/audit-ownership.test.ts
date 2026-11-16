@@ -11,23 +11,23 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { PiHarnessAdapter } from "../../maestro/adapters/pi/pi-harness-adapter.ts";
-import { launchOperationsFromSurface } from "../../maestro/adapters/pi/launch-operations.ts";
-import { waitForCompletion } from "../../maestro/adapters/pi/completion.ts";
+import { PiHarnessAdapter } from "@nubl/maestro/adapters/pi/pi-harness-adapter";
+import { launchOperationsFromSurface } from "@nubl/maestro/adapters/pi/launch-operations";
+import { waitForCompletion } from "@nubl/maestro/adapters/pi/completion";
 import {
 	createWorktreeOperations,
 	readWorktreeManifest,
-} from "../../maestro/runtime/worktree-operations.ts";
+} from "@nubl/maestro/runtime/worktree-operations";
 import {
 	getSubagentSessionPolicyFile,
 	readPersistentDeliveryLedger,
 	readSubagentSessionPolicy,
 	writeSubagentSessionPolicy,
-} from "../../maestro/adapters/pi/session.ts";
-import type { SpawnOptions } from "../../maestro/core/harness-adapter.ts";
-import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
-import { AcquisitionUncertainError } from "../../maestro/core/surface-provider.ts";
-import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
+} from "@nubl/maestro/adapters/pi/session";
+import type { SpawnOptions } from "@nubl/maestro/core/harness-adapter";
+import { SupervisionCoordinator } from "@nubl/maestro/core/supervision";
+import { AcquisitionUncertainError } from "@nubl/maestro/core/surface-provider";
+import { FakeSurfaceProvider } from "@nubl/maestro/testing";
 import { runScriptInPane } from "../../maestro/surfaces/herdr/terminal.ts";
 
 function fixture() {

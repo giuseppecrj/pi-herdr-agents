@@ -4,12 +4,12 @@ import type {
 	NativeExecution,
 	NativeExecutionInspection,
 	SurfaceProvider,
-} from "../../core/surface-provider.ts";
+} from "@nubl/maestro/core/surface-provider";
 import {
 	AcquisitionUncertainError,
 	isAcquisitionUncertainError,
-} from "../../core/surface-provider.ts";
-import type { SurfaceHandle, PaneInspection } from "../../core/types.ts";
+} from "@nubl/maestro/core/surface-provider";
+import type { SurfaceHandle, PaneInspection } from "@nubl/maestro/core/types";
 import {
 	CoreRpcError,
 	HerdrCoreClient,

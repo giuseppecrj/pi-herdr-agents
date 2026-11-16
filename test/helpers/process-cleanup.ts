@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
-import { parseProcessStat } from "../../maestro/adapters/pi/process-identity.ts";
+import { parseProcessStat } from "@nubl/maestro/adapters/pi/process-identity";
 
 /**
  * Whether a Linux PID has exited, even if nothing has reaped it yet. A killed

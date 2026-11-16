@@ -1,30 +1,30 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { SupervisionConfig } from "../../maestro/core/config/supervision-config.ts";
-import { encodeHostValue } from "../../maestro/core/host-text.ts";
+import type { SupervisionConfig } from "@nubl/maestro/core/config/supervision-config";
+import { encodeHostValue } from "@nubl/maestro/core/host-text";
 import {
 	capStatusLines,
 	formatElapsedDuration,
 	formatStatusAggregate,
 	normalizeStatusName,
 	type StatusConfig,
-} from "../../maestro/core/status.ts";
+} from "@nubl/maestro/core/status";
 import {
 	formatLifecycleTransitionLine,
 	lifecycleTransition,
 	projectLifecycle,
-} from "../../maestro/core/lifecycle.ts";
+} from "@nubl/maestro/core/lifecycle";
 import {
 	WIDGET_INTERVAL_KEY,
 	STATUS_INTERVAL_KEY,
 	writeGlobalSlot,
 	type RunningSubagent,
 	type SubagentRuntime,
-} from "./state.ts";
+} from "@nubl/maestro/pi/subagents/state";
 import {
 	type Observation,
 	formatNoProgressAdvisoryLine,
-} from "./observation.ts";
+} from "@nubl/maestro/pi/subagents/observation";
 
 // ── Widget management ──
 

@@ -1,15 +1,12 @@
 import { Text } from "@earendil-works/pi-tui";
-import {
-	isPlainObject,
-	isString,
-} from "../../maestro/core/config/type-guards.ts";
+import { isPlainObject, isString } from "@nubl/maestro/core/config/type-guards";
 import {
 	encodeHostValue,
 	HOST_ERROR_CHARS,
-} from "../../maestro/core/host-text.ts";
-import { getFirstText } from "./presentation.ts";
-import type { SubagentCancelDetails } from "./controls.ts";
-import type { PiToolRenderers } from "./presentation-hooks.ts";
+} from "@nubl/maestro/core/host-text";
+import { getFirstText } from "@nubl/maestro/pi/subagents/presentation";
+import type { SubagentCancelDetails } from "@nubl/maestro/pi/subagents/controls";
+import type { PiToolRenderers } from "@nubl/maestro/pi/subagents/presentation-hooks";
 
 interface PartialWorktreeArgs {
 	branch?: unknown;

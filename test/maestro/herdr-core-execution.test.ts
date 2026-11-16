@@ -22,19 +22,19 @@ import {
 	loadHerdrConfig,
 	selectHerdrBinding,
 	assertSameHerdrBinding,
-} from "../../maestro/core/config/herdr-config.ts";
+} from "@nubl/maestro/core/config/herdr-config";
 import {
 	AcquisitionUncertainError,
 	isAcquisitionUncertainError,
-} from "../../maestro/core/surface-provider.ts";
+} from "@nubl/maestro/core/surface-provider";
 import {
 	launchPiSubagent,
 	AcquiredPiLaunchError,
 	type FreshPiLaunchRequest,
 	type PiLaunchRequest,
-} from "../../maestro/adapters/pi/launch.ts";
-import { launchOperationsFromSurface } from "../../maestro/adapters/pi/launch-operations.ts";
-import { waitForCompletion } from "../../maestro/adapters/pi/completion.ts";
+} from "@nubl/maestro/adapters/pi/launch";
+import { launchOperationsFromSurface } from "@nubl/maestro/adapters/pi/launch-operations";
+import { waitForCompletion } from "@nubl/maestro/adapters/pi/completion";
 import {
 	createLifecycle,
 	lifecycleTransition,
@@ -42,22 +42,22 @@ import {
 	projectLifecycle,
 	type LifecycleProjection,
 	type LifecycleTransition,
-} from "../../maestro/core/lifecycle.ts";
+} from "@nubl/maestro/core/lifecycle";
 import {
 	getNewEntries,
 	readPersistentDeliveryLedger,
 	writeSubagentSessionPolicy,
 	getSubagentSessionPolicyFile,
-} from "../../maestro/adapters/pi/session.ts";
-import { createDefaultRunSession } from "../../maestro/runtime/pi-run-session.ts";
+} from "@nubl/maestro/adapters/pi/session";
+import { createDefaultRunSession } from "@nubl/maestro/runtime/pi-run-session";
 import type {
 	DefaultRunSessionOptions,
 	PiLaunchInput,
 	PiRunSession,
 	PiCompletedMetadata,
-} from "../../maestro/runtime/pi-run-session-types.ts";
-import { FileWakeRegistry } from "../../maestro/core/wake.ts";
-import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
+} from "@nubl/maestro/runtime/pi-run-session-types";
+import { FileWakeRegistry } from "@nubl/maestro/core/wake";
+import { SupervisionCoordinator } from "@nubl/maestro/core/supervision";
 import { socketPath as fixtureSocketPath } from "../socket-path.ts";
 import { skipCoreOnWindows } from "../helpers/windows-scope.ts";
 

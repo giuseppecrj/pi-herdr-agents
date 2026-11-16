@@ -10,7 +10,7 @@ import {
 	DELEGATED_MARKER_TTL_MS,
 	type MarkerWriter,
 	type MarkerSessionReader,
-} from "../../maestro/runtime/delegated-marker.ts";
+} from "@nubl/maestro/runtime/delegated-marker";
 
 export function herdrMarkerWriter(socketPath: string): MarkerWriter {
 	return ({ paneId, seq, live }) => {

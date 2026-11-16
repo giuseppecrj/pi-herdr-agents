@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, type TestContext } from "node:test";
-import { captureSurfacePiProcessIdentity } from "../../maestro/adapters/pi/launch-operations.ts";
+import { captureSurfacePiProcessIdentity } from "@nubl/maestro/adapters/pi/launch-operations";
 import {
 	createLinuxProcessProbe,
 	judgeProcessIdentity,
@@ -25,7 +25,7 @@ import {
 	type PiProcessIdentityRecord,
 	type ProcessIdentityProbe,
 	type ProcessStat,
-} from "../../maestro/adapters/pi/process-identity.ts";
+} from "@nubl/maestro/adapters/pi/process-identity";
 
 const linux = process.platform === "linux";
 const HOST = { bootId: "boot-a", pidNamespace: "pid:[4026531836]" };
@@ -129,8 +129,7 @@ async function captureDrains(file: string, stall: "record" | "herdr") {
 			"-e",
 			DRAINING_CAPTURE_CHILD,
 			"--",
-			new URL("../../maestro/adapters/pi/launch-operations.ts", import.meta.url)
-				.href,
+			import.meta.resolve("@nubl/maestro/adapters/pi/launch-operations"),
 			file,
 			stall,
 		],

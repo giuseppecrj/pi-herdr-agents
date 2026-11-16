@@ -1,7 +1,7 @@
 import {
 	getSubagentsConfigDir,
 	getSubagentsConfigExamplePath,
-} from "../../pi-extension/subagents/config-path.ts";
+} from "@nubl/maestro/pi/subagents/config-path";
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -18,15 +18,15 @@ import {
 	launchPiSubagent as launchWithOperations,
 	type FreshPiLaunchRequest,
 	type PiLaunchRequest,
-} from "../../maestro/adapters/pi/launch.ts";
+} from "@nubl/maestro/adapters/pi/launch";
 import {
 	launchOperationsFromSurface,
 	type PiLaunchOperations,
-} from "../../maestro/adapters/pi/launch-operations.ts";
+} from "@nubl/maestro/adapters/pi/launch-operations";
 import {
 	readWorktreeManifest,
 	createWorktreeOperations,
-} from "../../maestro/runtime/worktree-operations.ts";
+} from "@nubl/maestro/runtime/worktree-operations";
 import { HerdrSurfaceProvider } from "../../maestro/surfaces/herdr/herdr-surface-provider.ts";
 
 function launchPiSubagent(
@@ -53,9 +53,9 @@ import {
 	runScriptInPane,
 	shellQuote,
 } from "../../maestro/surfaces/herdr/terminal.ts";
-import { loadPaneConfig } from "../../maestro/core/config/pane-config.ts";
+import { loadPaneConfig } from "@nubl/maestro/core/config/pane-config";
 import subagentsExtension from "../../pi-extension/subagents/index.ts";
-import { isNonEmptyString } from "../../maestro/core/config/type-guards.ts";
+import { isNonEmptyString } from "@nubl/maestro/core/config/type-guards";
 import {
 	createEventBus,
 	SessionManager,
@@ -204,10 +204,9 @@ for (const backend of getAvailableBackends()) {
 				).result.root_pane;
 				const script = join(env.dir, "moved-parent.mjs");
 				const report = join(env.dir, "moved-parent.json");
-				const launchUrl = new URL(
-					"../../maestro/adapters/pi/launch.ts",
-					import.meta.url,
-				).href;
+				const launchUrl = import.meta.resolve(
+					"@nubl/maestro/adapters/pi/launch",
+				);
 				// Execute inside the original terminal: do not manufacture inherited
 				// Herdr identity in the runner. The same process moves, then launches.
 				writeFileSync(
@@ -216,10 +215,10 @@ for (const backend of getAvailableBackends()) {
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { launchPiSubagent } from ${JSON.stringify(launchUrl)};
-import { launchOperationsFromSurface } from ${JSON.stringify(new URL("../../maestro/adapters/pi/launch-operations.ts", import.meta.url).href)};
+import { launchOperationsFromSurface } from ${JSON.stringify(import.meta.resolve("@nubl/maestro/adapters/pi/launch-operations"))};
 import { HerdrSurfaceProvider } from ${JSON.stringify(new URL("../../maestro/surfaces/herdr/herdr-surface-provider.ts", import.meta.url).href)};
-import { loadPaneConfig } from ${JSON.stringify(new URL("../../maestro/core/config/pane-config.ts", import.meta.url).href)};
-import { getSubagentsConfigDir, getSubagentsConfigExamplePath } from ${JSON.stringify(new URL("../../pi-extension/subagents/config-path.ts", import.meta.url).href)};
+import { loadPaneConfig } from ${JSON.stringify(import.meta.resolve("@nubl/maestro/core/config/pane-config"))};
+import { getSubagentsConfigDir, getSubagentsConfigExamplePath } from ${JSON.stringify(import.meta.resolve("@nubl/maestro/pi/subagents/config-path"))};
 const cli = (...args) => JSON.parse(execFileSync("herdr", args, { encoding: "utf8" })).result;
 const result = {};
 try {

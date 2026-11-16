@@ -6,12 +6,12 @@ import {
 	POLLING_INTERVAL_MS,
 	RECONCILE_INTERVAL_MS,
 	SupervisionCoordinator,
-} from "../../maestro/core/supervision.ts";
-import { FileWakeRegistry } from "../../maestro/core/wake.ts";
-import { createDefaultRunSession } from "../../maestro/runtime/pi-run-session.ts";
-import type { DefaultRunSessionOptions } from "../../maestro/runtime/pi-run-session-types.ts";
-import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
-import { launchOperationsFromSurface } from "../../maestro/adapters/pi/launch-operations.ts";
+} from "@nubl/maestro/core/supervision";
+import { FileWakeRegistry } from "@nubl/maestro/core/wake";
+import { createDefaultRunSession } from "@nubl/maestro/runtime/pi-run-session";
+import type { DefaultRunSessionOptions } from "@nubl/maestro/runtime/pi-run-session-types";
+import { FakeSurfaceProvider } from "@nubl/maestro/testing";
+import { launchOperationsFromSurface } from "@nubl/maestro/adapters/pi/launch-operations";
 
 function options(
 	supervision: SupervisionCoordinator,

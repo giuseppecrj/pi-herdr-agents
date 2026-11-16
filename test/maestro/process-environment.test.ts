@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 import {
 	createLinuxProcessEnvironmentReader,
 	readLinuxProcessEnvironment,
-} from "../../maestro/adapters/pi/process-identity.ts";
+} from "@nubl/maestro/adapters/pi/process-identity";
 
 const linux = process.platform === "linux";
 const errno = (code: string) =>

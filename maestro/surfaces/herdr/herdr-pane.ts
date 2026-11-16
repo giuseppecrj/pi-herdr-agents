@@ -2,14 +2,14 @@ import {
 	isFiniteNumber,
 	isPlainObject,
 	isString,
-} from "../../core/config/type-guards.ts";
+} from "@nubl/maestro/core/config/type-guards";
 import { herdrExecAsync, parseHerdrJson } from "./herdr-cli.ts";
-import { Deadline } from "../../core/deadline.ts";
+import { Deadline } from "@nubl/maestro/core/deadline";
 
 export type {
 	PaneInspection,
 	SurfaceAgentStatus as HerdrAgentStatus,
-} from "../../core/types.ts";
+} from "@nubl/maestro/core/types";
 
 export type PaneInspectionResult =
 	| {

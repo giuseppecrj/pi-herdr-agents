@@ -10,23 +10,23 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { PiHarnessAdapter } from "../../maestro/adapters/pi/pi-harness-adapter.ts";
+import { PiHarnessAdapter } from "@nubl/maestro/adapters/pi/pi-harness-adapter";
 import {
 	isExpectedPiProcess,
 	launchOperationsFromSurface,
-} from "../../maestro/adapters/pi/launch-operations.ts";
-import { createWorktreeOperations } from "../../maestro/runtime/worktree-operations.ts";
-import type { SpawnOptions } from "../../maestro/core/harness-adapter.ts";
+} from "@nubl/maestro/adapters/pi/launch-operations";
+import { createWorktreeOperations } from "@nubl/maestro/runtime/worktree-operations";
+import type { SpawnOptions } from "@nubl/maestro/core/harness-adapter";
 import {
 	WorktreeProvisioningError,
 	type CreateWorktreeSurfaceOptions,
-} from "../../maestro/core/surface-provider.ts";
+} from "@nubl/maestro/core/surface-provider";
 import { HerdrSurfaceProvider } from "../../maestro/surfaces/herdr/herdr-surface-provider.ts";
-import { FileWakeRegistry } from "../../maestro/core/wake.ts";
-import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
-import { readSubagentActivityFile } from "../../maestro/adapters/pi/activity-file.ts";
+import { FileWakeRegistry } from "@nubl/maestro/core/wake";
+import { SupervisionCoordinator } from "@nubl/maestro/core/supervision";
+import { readSubagentActivityFile } from "@nubl/maestro/adapters/pi/activity-file";
 import { getProviderRequests } from "./fake-provider.ts";
-import { getNewEntries } from "../../maestro/adapters/pi/session.ts";
+import { getNewEntries } from "@nubl/maestro/adapters/pi/session";
 import {
 	registerHarnessAdapterConformance,
 	type HarnessAdapterFixture,

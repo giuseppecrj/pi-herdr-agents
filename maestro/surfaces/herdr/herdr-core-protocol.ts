@@ -1,6 +1,6 @@
 import { createConnection } from "node:net";
-import { Deadline } from "../../core/deadline.ts";
-import { AcquisitionUncertainError } from "../../core/surface-provider.ts";
+import { Deadline } from "@nubl/maestro/core/deadline";
+import { AcquisitionUncertainError } from "@nubl/maestro/core/surface-provider";
 
 const REQUIRED_METHODS = [
 	"terminal.run",

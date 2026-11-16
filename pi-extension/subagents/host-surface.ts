@@ -3,15 +3,15 @@ import {
 	loadHerdrConfig,
 	selectHerdrBinding,
 	type HerdrBinding,
-} from "../../maestro/core/config/herdr-config.ts";
-import type { PaneConfig } from "../../maestro/core/config/pane-config.ts";
-import type { SurfaceProvider } from "../../maestro/core/surface-provider.ts";
-import type { ScriptShellResolver } from "../../maestro/core/script-launch.ts";
+} from "@nubl/maestro/core/config/herdr-config";
+import type { PaneConfig } from "@nubl/maestro/core/config/pane-config";
+import type { SurfaceProvider } from "@nubl/maestro/core/surface-provider";
+import type { ScriptShellResolver } from "@nubl/maestro/core/script-launch";
 import { HerdrSurfaceProvider } from "../../maestro/surfaces/herdr/herdr-surface-provider.ts";
 import { HerdrCoreSurfaceProvider } from "../../maestro/surfaces/herdr/herdr-core-surface-provider.ts";
-import { createPiScriptShellResolver } from "../../maestro/adapters/pi/script-shell.ts";
-import type { PiLaunchSnapshot } from "../../maestro/runtime/pi-run-session-types.ts";
-import type { HostSurfaceBinding } from "../../maestro/runtime/host-surface-binding.ts";
+import { createPiScriptShellResolver } from "@nubl/maestro/adapters/pi/script-shell";
+import type { PiLaunchSnapshot } from "@nubl/maestro/runtime/pi-run-session-types";
+import type { HostSurfaceBinding } from "@nubl/maestro/runtime/host-surface-binding";
 import {
 	herdrMarkerWriter,
 	herdrMarkerSessionReader,

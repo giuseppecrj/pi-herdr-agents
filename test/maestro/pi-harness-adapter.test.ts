@@ -13,32 +13,32 @@ import { describe, it, type TestContext } from "node:test";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { cleanupTestProcess } from "../helpers/process-cleanup.ts";
-import { PiHarnessAdapter } from "../../maestro/adapters/pi/pi-harness-adapter.ts";
+import { PiHarnessAdapter } from "@nubl/maestro/adapters/pi/pi-harness-adapter";
 import {
 	captureSurfacePiProcessIdentity,
 	launchOperationsFromSurface,
-} from "../../maestro/adapters/pi/launch-operations.ts";
+} from "@nubl/maestro/adapters/pi/launch-operations";
 import type {
 	PiProcessIdentity,
 	ProcessIdentityProbe,
 	ProcessStat,
-} from "../../maestro/adapters/pi/process-identity.ts";
+} from "@nubl/maestro/adapters/pi/process-identity";
 import {
 	createWorktreeOperations,
 	readWorktreeManifest,
-} from "../../maestro/runtime/worktree-operations.ts";
-import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
-import { createSubagentActivityRecorder } from "../../maestro/adapters/pi/activity-file.ts";
-import { FileWakeRegistry } from "../../maestro/core/wake.ts";
-import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
+} from "@nubl/maestro/runtime/worktree-operations";
+import { FakeSurfaceProvider } from "@nubl/maestro/testing";
+import { createSubagentActivityRecorder } from "@nubl/maestro/adapters/pi/activity-file";
+import { FileWakeRegistry } from "@nubl/maestro/core/wake";
+import { SupervisionCoordinator } from "@nubl/maestro/core/supervision";
 import {
 	readSubagentSessionPolicy,
 	writeSubagentSessionPolicy,
 	appendPersistentTaskEvent,
 	consumePersistentTaskInbox,
 	readPersistentDeliveryLedger,
-} from "../../maestro/adapters/pi/session.ts";
-import type { SpawnOptions } from "../../maestro/core/harness-adapter.ts";
+} from "@nubl/maestro/adapters/pi/session";
+import type { SpawnOptions } from "@nubl/maestro/core/harness-adapter";
 
 /** A path is literal text in an expected pattern: `\\` and `.` must not be syntax. */
 const escapeRegExp = (value: string) =>
@@ -80,7 +80,7 @@ function fixture() {
 		available: () => [],
 		hasConfiguredAuth: () => true,
 		supportedThinkingLevels:
-			(): import("../../maestro/core/types.ts").ThinkingLevel[] => [
+			(): import("@nubl/maestro/core/types").ThinkingLevel[] => [
 				"off",
 				"minimal",
 				"low",
@@ -88,8 +88,8 @@ function fixture() {
 				"high",
 			],
 		clampThinkingLevel: (
-			_model: import("../../maestro/core/routing.ts").RoutingModel,
-			level: import("../../maestro/core/types.ts").ThinkingLevel,
+			_model: import("@nubl/maestro/core/routing").RoutingModel,
+			level: import("@nubl/maestro/core/types").ThinkingLevel,
 		) => level,
 	};
 	const adapter = new PiHarnessAdapter({

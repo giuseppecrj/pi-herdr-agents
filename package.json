@@ -32,6 +32,7 @@
     "changelog": "auto-changelog",
     "docs:tools": "node --experimental-strip-types scripts/update-tool-docs.ts",
     "docs:tools:check": "node --experimental-strip-types scripts/update-tool-docs.ts --check",
+    "check:maestro-pin": "node --experimental-strip-types scripts/check-maestro-pin.ts",
     "format": "biome format --write pi-extension test maestro plugins scripts",
     "format:check": "biome format pi-extension test maestro plugins scripts",
     "lint": "oxlint pi-extension test maestro plugins scripts",
@@ -72,5 +73,8 @@
     "auto-changelog": "^2.6.0",
     "oxlint": "^1.80.0",
     "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "@nubl/maestro": "file:vendor/nubl-maestro-0.1.0.tgz"
   }
 }

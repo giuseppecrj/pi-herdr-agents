@@ -7,7 +7,7 @@ import {
 	reportPaneToken,
 	requestHerdrSocket,
 } from "../../maestro/surfaces/herdr/herdr-socket.ts";
-import type { JsonObject } from "../../maestro/core/config/type-guards.ts";
+import type { JsonObject } from "@nubl/maestro/core/config/type-guards";
 import {
 	replyError,
 	replyResult,

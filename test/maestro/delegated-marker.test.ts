@@ -9,12 +9,12 @@ import {
 	DelegatedMarkers,
 	type MarkerSessionReader,
 	type MarkerWriter,
-} from "../../maestro/runtime/delegated-marker.ts";
+} from "@nubl/maestro/runtime/delegated-marker";
 import {
 	herdrMarkerSessionReader,
 	herdrMarkerWriter,
 } from "../../pi-extension/subagents/marker-transport.ts";
-import { RECONCILE_INTERVAL_MS } from "../../maestro/core/supervision.ts";
+import { RECONCILE_INTERVAL_MS } from "@nubl/maestro/core/supervision";
 import type {
 	PaneAgentSessionRead,
 	PaneTokenOutcome,

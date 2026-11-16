@@ -1,20 +1,20 @@
 import "../clean-host-env.ts";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { FakeHarnessAdapter } from "../../maestro/adapters/fake/fake-harness-adapter.ts";
-import type { SpawnOptions } from "../../maestro/core/harness-adapter.ts";
+import { FakeHarnessAdapter } from "@nubl/maestro/testing";
+import type { SpawnOptions } from "@nubl/maestro/core/harness-adapter";
 import type {
 	AgentHandle,
 	Role,
 	RunResult,
 	Task,
-} from "../../maestro/core/types.ts";
+} from "@nubl/maestro/core/types";
 import {
 	createRunSession,
 	type OwnedRunAttempt,
 	type PreparedRun,
 	type RunSession,
-} from "../../maestro/runtime/index.ts";
+} from "@nubl/maestro/runtime";
 
 const role: Role = {
 	name: "worker",

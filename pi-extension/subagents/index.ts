@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { createPiExtension } from "./extension.ts";
+import { createPiExtension } from "@nubl/maestro/pi";
 import { hostSurfaceBinding } from "./host-surface.ts";
 import { borderLine, createWidgetController } from "./widgets.ts";
 import { registerMessageRenderers } from "./renderers.ts";
@@ -12,7 +12,7 @@ export {
 	shouldPreserveSubagentsOnShutdown,
 	cleanupSubagentsForShutdown,
 	shouldAdvanceToFallback,
-} from "./extension.ts";
+} from "@nubl/maestro/pi/subagents/index";
 
 // Invoke per load, not in the engine cache. Presentation never replaces a run owner.
 const extension = createPiExtension({

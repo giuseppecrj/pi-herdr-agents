@@ -12,25 +12,25 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import * as runtime from "../../maestro/runtime/index.ts";
+import * as runtime from "@nubl/maestro/runtime";
 import type {
 	DefaultRunSessionOptions,
 	PiCompletedMetadata,
 	PiLaunchInput,
 	PiRunRecord,
-} from "../../maestro/runtime/pi-run-session-types.ts";
-import { createWorktreeOperations } from "../../maestro/runtime/worktree-operations.ts";
-import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
-import { launchOperationsFromSurface } from "../../maestro/adapters/pi/launch-operations.ts";
-import type { AcceptRunner } from "../../maestro/adapters/pi/accept-runner.ts";
+} from "@nubl/maestro/runtime/pi-run-session-types";
+import { createWorktreeOperations } from "@nubl/maestro/runtime/worktree-operations";
+import { FakeSurfaceProvider } from "@nubl/maestro/testing";
+import { launchOperationsFromSurface } from "@nubl/maestro/adapters/pi/launch-operations";
+import type { AcceptRunner } from "@nubl/maestro/adapters/pi/accept-runner";
 import {
 	normalizeAcceptSpec,
 	type AcceptRequest,
 	type ChildAcceptReport,
 	type OutcomeLedgerLine,
-} from "../../maestro/core/accept.ts";
-import { FileWakeRegistry } from "../../maestro/core/wake.ts";
-import { SupervisionCoordinator } from "../../maestro/core/supervision.ts";
+} from "@nubl/maestro/core/accept";
+import { FileWakeRegistry } from "@nubl/maestro/core/wake";
+import { SupervisionCoordinator } from "@nubl/maestro/core/supervision";
 import { fileURLToPath } from "node:url";
 import { skipWorktreesOnWindows } from "../helpers/windows-scope.ts";
 

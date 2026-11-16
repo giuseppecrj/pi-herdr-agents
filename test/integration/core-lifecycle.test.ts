@@ -8,7 +8,7 @@ import {
 	isRecord,
 	isString,
 	type JsonObject,
-} from "../../maestro/core/config/type-guards.ts";
+} from "@nubl/maestro/core/config/type-guards";
 import { CoreLab, findLabBinary } from "./herdr-core-lab.ts";
 import {
 	captureCoreEvidence,

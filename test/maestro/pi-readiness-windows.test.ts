@@ -1,7 +1,7 @@
 import "../clean-host-env.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isExpectedPiProcess } from "../../maestro/adapters/pi/launch-operations.ts";
+import { isExpectedPiProcess } from "@nubl/maestro/adapters/pi/launch-operations";
 
 const SESSION = "C:\\Users\\dev\\.pi\\agent\\sessions\\child.jsonl";
 const CWD = "D:\\source\\repo";

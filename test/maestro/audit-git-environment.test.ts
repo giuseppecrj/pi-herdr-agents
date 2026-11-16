@@ -13,14 +13,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { gitEnvironment } from "../../maestro/core/git-environment.ts";
+import { gitEnvironment } from "@nubl/maestro/core/git-environment";
 import {
 	captureWorktreeHandoff,
 	createWorktreeCleanupOperations,
 	resolveGitCommit,
 	resolveWorktreeProvisionCwd,
-} from "../../maestro/runtime/worktree-operations.ts";
-import { FakeSurfaceProvider } from "../../maestro/surfaces/fake/fake-surface-provider.ts";
+} from "@nubl/maestro/runtime/worktree-operations";
+import { FakeSurfaceProvider } from "@nubl/maestro/testing";
 import { worktreesUnsupportedOnWindows } from "../helpers/windows-scope.ts";
 
 test("Git environment drops only repository overrides and copies its input", () => {

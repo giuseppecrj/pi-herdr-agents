@@ -4,7 +4,7 @@ import {
 	isRecord,
 	isString,
 	type JsonObject,
-} from "../../core/config/type-guards.ts";
+} from "@nubl/maestro/core/config/type-guards";
 
 export const HERDR_SOCKET_TIMEOUT_MS = 2_000;
 export const HERDR_SOCKET_MAX_REPLY_BYTES = 64 * 1024;

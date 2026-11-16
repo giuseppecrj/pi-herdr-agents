@@ -35,7 +35,7 @@ import {
 	PI_TIMEOUT,
 	type TestEnv,
 } from "./harness.ts";
-import { parsePaneConfig } from "../../maestro/core/config/pane-config.ts";
+import { parsePaneConfig } from "@nubl/maestro/core/config/pane-config";
 
 const backends = getAvailableBackends();
 

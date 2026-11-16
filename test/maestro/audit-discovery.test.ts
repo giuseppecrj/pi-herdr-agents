@@ -11,11 +11,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { discoverAgentCatalog } from "../../maestro/core/roles/discovery.ts";
+import { discoverAgentCatalog } from "@nubl/maestro/core/roles/discovery";
 import {
 	getAgentConfigDir,
 	getSubagentsConfigPath,
-} from "../../pi-extension/subagents/config-path.ts";
+} from "@nubl/maestro/pi/subagents/config-path";
 
 const role =
 	"---\ndescription: audit role\nspawning: false\ntools: read\n---\nBody";

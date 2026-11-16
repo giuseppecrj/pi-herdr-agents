@@ -4,12 +4,12 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { discoverAgentCatalog } from "../../maestro/core/roles/discovery.ts";
-import { loadRoleConfig } from "../../maestro/core/config/role-config.ts";
-import { loadModelConfig } from "../../maestro/core/config/model-config.ts";
-import { loadPaneConfig } from "../../maestro/core/config/pane-config.ts";
-import { loadPersistentConfig } from "../../maestro/core/config/persistent-config.ts";
-import { loadSupervisionConfig } from "../../maestro/core/config/supervision-config.ts";
+import { discoverAgentCatalog } from "@nubl/maestro/core/roles/discovery";
+import { loadRoleConfig } from "@nubl/maestro/core/config/role-config";
+import { loadModelConfig } from "@nubl/maestro/core/config/model-config";
+import { loadPaneConfig } from "@nubl/maestro/core/config/pane-config";
+import { loadPersistentConfig } from "@nubl/maestro/core/config/persistent-config";
+import { loadSupervisionConfig } from "@nubl/maestro/core/config/supervision-config";
 
 test("Task17 core discovery consumes the injected role-pack protocol and preserves order, diagnostics, raw defaults and provenance", () => {
 	const root = mkdtempSync(join(tmpdir(), "core-role-discovery-"));

@@ -1,5 +1,5 @@
 import { Box, Text } from "@earendil-works/pi-tui";
-import type { ChildPresentationHook } from "../../maestro/adapters/pi/child/protocol.ts";
+import type { ChildPresentationHook } from "@nubl/maestro/pi/child";
 
 export const renderChildWidget: ChildPresentationHook = (
 	ctx,

@@ -7,11 +7,11 @@ import type {
 	SurfaceProvider,
 	WorktreeSurface,
 	WorktreeSurfaceInfo,
-} from "../../core/surface-provider.ts";
-import type { OpenedPrimaryWorkspaceReport } from "../../core/opened-primary-workspace.ts";
-import type { PaneInspection, SurfaceHandle } from "../../core/types.ts";
-import type { PaneConfig } from "../../core/config/pane-config.ts";
-import type { ScriptShellResolver } from "../../core/script-launch.ts";
+} from "@nubl/maestro/core/surface-provider";
+import type { OpenedPrimaryWorkspaceReport } from "@nubl/maestro/core/opened-primary-workspace";
+import type { PaneInspection, SurfaceHandle } from "@nubl/maestro/core/types";
+import type { PaneConfig } from "@nubl/maestro/core/config/pane-config";
+import type { ScriptShellResolver } from "@nubl/maestro/core/script-launch";
 import {
 	closeHerdrSurface,
 	createHerdrGroupedSurface,

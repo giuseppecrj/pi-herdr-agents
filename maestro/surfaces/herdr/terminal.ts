@@ -6,8 +6,8 @@ import {
 	classifyPaneShell,
 	type PaneShell,
 	type ScriptShellResolver,
-} from "../../core/script-launch.ts";
-import { shellQuote } from "../../core/shell.ts";
+} from "@nubl/maestro/core/script-launch";
+import { shellQuote } from "@nubl/maestro/core/shell";
 import {
 	closeHerdrSurface,
 	createHerdrSurface,
@@ -194,7 +194,7 @@ export async function readPaneAsync(
 export type {
 	PaneInspection,
 	SurfaceAgentStatus as HerdrAgentStatus,
-} from "../../core/types.ts";
+} from "@nubl/maestro/core/types";
 
 export async function listPanes(): Promise<
 	import("./herdr-pane.ts").HerdrPaneListEntry[] | null
@@ -205,7 +205,7 @@ export async function listPanes(): Promise<
 
 export async function inspectPane(
 	paneId: PaneId,
-): Promise<import("../../core/types.ts").PaneInspection> {
+): Promise<import("@nubl/maestro/core/types").PaneInspection> {
 	assertTerminalAvailable();
 	const result = await inspectHerdrPane(paneId);
 	if (result.kind === "present") {

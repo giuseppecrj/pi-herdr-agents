@@ -141,10 +141,25 @@ function classifyRepoPath(repoPath: string): RepoArea {
 	return "other";
 }
 
+/** H2: moved modules come from @nubl/maestro; keep their original layer. */
+function packageArea(specifier: string): RepoArea | undefined {
+	const subpath = /^@nubl\/maestro\/(.+)$/.exec(specifier)?.[1];
+	if (!subpath) return undefined;
+	if (subpath.startsWith("core/")) return "core";
+	if (subpath.startsWith("adapters/pi/") || subpath === "pi/child")
+		return "adapters/pi";
+	if (subpath === "runtime" || subpath.startsWith("runtime/")) return "runtime";
+	if (subpath === "testing") return "adapters/fake";
+	if (subpath === "pi" || subpath.startsWith("pi/")) return "pi-extension";
+	return "other";
+}
+
 function importedArea(
 	root: string,
 	reference: ModuleReference,
 ): RepoArea | "external" {
+	const fromPackage = packageArea(reference.specifier);
+	if (fromPackage) return fromPackage;
 	if (!isRelativeSpecifier(reference.specifier)) return "external";
 	const resolved = path.resolve(
 		path.dirname(reference.file),
@@ -165,21 +180,15 @@ function isForbiddenEdge(root: string, reference: ModuleReference) {
 			[
 				"../../maestro/surfaces/herdr/herdr-surface-provider.ts",
 				"../../maestro/surfaces/herdr/herdr-core-surface-provider.ts",
-				"../../maestro/adapters/pi/script-shell.ts",
+				"@nubl/maestro/adapters/pi/script-shell",
 			],
 		],
 		[
 			"pi-extension/subagents/marker-transport.ts",
 			["../../maestro/surfaces/herdr/herdr-socket.ts"],
 		],
-		[
-			"pi-extension/subagents/child.ts",
-			["../../maestro/adapters/pi/child/protocol.ts"],
-		],
-		[
-			"pi-extension/subagents/child-widget.ts",
-			["../../maestro/adapters/pi/child/protocol.ts"],
-		],
+		["pi-extension/subagents/child.ts", ["@nubl/maestro/pi/child"]],
+		["pi-extension/subagents/child-widget.ts", ["@nubl/maestro/pi/child"]],
 		[
 			"maestro/adapters/pi/child/subagent-done.ts",
 			["../../../../pi-extension/subagents/child.ts"],

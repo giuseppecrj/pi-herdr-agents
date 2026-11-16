@@ -21,31 +21,31 @@ import {
 	PI_LAUNCH_SESSION_ENV,
 	type PiLaunchOperations,
 	type WorktreeSurfaceForLaunch,
-} from "../maestro/adapters/pi/launch-operations.ts";
+} from "@nubl/maestro/adapters/pi/launch-operations";
 import {
 	AcquiredPiLaunchError,
 	launchPiSubagent,
 	launchPiWorktreeHandoff,
 	type FreshPiLaunchRequest,
 	type ResumePiLaunchRequest,
-} from "../maestro/adapters/pi/launch.ts";
-import { DEFAULT_CHILD_ENTRY_PATH } from "../maestro/adapters/pi/launch-command.ts";
+} from "@nubl/maestro/adapters/pi/launch";
+import { DEFAULT_CHILD_ENTRY_PATH } from "@nubl/maestro/adapters/pi/launch-command";
 import { HerdrClientError } from "../maestro/surfaces/herdr/herdr-cli.ts";
 import { runScriptInPane } from "../maestro/surfaces/herdr/terminal.ts";
-import { createWorktreeOperations } from "../maestro/runtime/worktree-operations.ts";
-import { createSubagentPaneFactory } from "../maestro/core/config/pane-config.ts";
-import { FakeSurfaceProvider } from "../maestro/surfaces/fake/fake-surface-provider.ts";
-import type { SurfaceProvider } from "../maestro/core/surface-provider.ts";
+import { createWorktreeOperations } from "@nubl/maestro/runtime/worktree-operations";
+import { createSubagentPaneFactory } from "@nubl/maestro/core/config/pane-config";
+import { FakeSurfaceProvider } from "@nubl/maestro/testing";
+import type { SurfaceProvider } from "@nubl/maestro/core/surface-provider";
 import {
 	AcquisitionUncertainError,
 	isAcquisitionUncertainError,
 	WorktreeProvisioningError,
-} from "../maestro/core/surface-provider.ts";
+} from "@nubl/maestro/core/surface-provider";
 import {
 	findStoredSessionModel,
 	readSubagentSessionPolicy,
 	writeSubagentSessionPolicy,
-} from "../maestro/adapters/pi/session.ts";
+} from "@nubl/maestro/adapters/pi/session";
 
 function expectedShellQuote(value: string): string {
 	return `'${value.replaceAll("'", "'\\''")}'`;

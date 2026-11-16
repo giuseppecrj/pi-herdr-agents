@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, parse, resolve } from "node:path";
 import { test } from "node:test";
-import { realpathWithoutOpening } from "../../maestro/core/realpath-without-opening.ts";
+import { realpathWithoutOpening } from "@nubl/maestro/core/realpath-without-opening";
 
 test("a filesystem root resolves to itself, whatever its form", () => {
 	const root = parse(resolve(".")).root; // "/" on POSIX, "C:\\" on Windows

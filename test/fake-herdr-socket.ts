@@ -8,7 +8,7 @@ import {
 	isRecord,
 	isString,
 	type JsonObject,
-} from "../maestro/core/config/type-guards.ts";
+} from "@nubl/maestro/core/config/type-guards";
 import { socketPath as fixtureSocketPath } from "./socket-path.ts";
 
 export interface ReceivedRequest {
