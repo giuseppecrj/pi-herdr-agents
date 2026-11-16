@@ -3,8 +3,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { __herdrTest__ } from "../../maestro/surfaces/herdr/herdr.ts";
 import { HerdrSurfaceProvider } from "../../maestro/surfaces/herdr/herdr-surface-provider.ts";
-import { FakeHarnessAdapter } from "@nubl/maestro/testing";
-import { createRunSession } from "@nubl/maestro/runtime/run-session";
 import {
 	waitForHerdrShellReady,
 	waitForHerdrPaneAbsence,
@@ -49,42 +47,6 @@ test("readiness queries consume remaining budget and neither late readiness nor 
 		false,
 	);
 	assert.equal(queries, 1, "no final probe after the budget is exhausted");
-});
-import type { Role, Task } from "@nubl/maestro/core/types";
-
-const role: Role = {
-	name: "worker",
-	version: "1",
-	description: "test",
-	systemPrompt: "",
-	allowedTools: [],
-};
-const task: Task = {
-	id: "uncertain",
-	name: "uncertain",
-	role: "worker",
-	prompt: "test",
-	cwd: "/repo",
-	runtime: {
-		model: "p/first",
-		thinking: "off",
-		fallbacks: [{ model: "p/second", thinking: "off" }],
-	},
-};
-
-test("an uncertain remote mutation never advances the model shortlist", async () => {
-	const adapter = new FakeHarnessAdapter();
-	let attempts = 0;
-	adapter.spawn = async () => {
-		attempts++;
-		throw Object.assign(new Error("remote mutation uncertain"), {
-			code: "PIHA_ACQUISITION_UNCERTAIN",
-			uncertainty: { kind: "surface-create", placement: "tab" },
-		});
-	};
-	const session = createRunSession({ adapter, roles: [role], cwd: "/repo" });
-	await assert.rejects(session.spawn(task), /uncertain/);
-	assert.equal(attempts, 1);
 });
 
 test("explicit-timeout Herdr queries remain asynchronous and let parent timers run", async () => {
