@@ -20,7 +20,7 @@ L="node --experimental-strip-types .pi/skills/verify-pi-herdr-agents/scripts/lab
 | Change | Run |
 | --- | --- |
 | Any normal change | `npm test`, `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run docs:tools:check`, `npm pack --dry-run`, `git diff --check` |
-| Tool schema or description | `npm run docs:tools`, then `npm run docs:tools:check`. A breaking change fails `test/maestro/tool-schema.test.ts` against `test/fixtures/tool-schema/released.json`. Never edit `released.json` outside a release ([../release/SKILL.md](../release/SKILL.md)). |
+| Tool schema or description | `npm run docs:tools`, then `npm run docs:tools:check`. Schemas come from the installed `@nubl/maestro`, so the breaking-change test against the released contract runs in its suite; `test/fixtures/tool-schema/released.json` is this package's last released contract. Never edit `released.json` outside a release ([../release/SKILL.md](../release/SKILL.md)). |
 | Lifecycle, delivery or Herdr behavior | The integration suite via [../run-integration-tests/SKILL.md](../run-integration-tests/SKILL.md), plus one lab drive of the affected feature (below). |
 | Refactor (no behavior change) | The behavior pin, the size rule and a mutation proof (below). |
 | Release | [../release/SKILL.md](../release/SKILL.md). |

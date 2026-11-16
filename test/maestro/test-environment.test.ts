@@ -20,7 +20,8 @@ describe("unit-test environment isolation", () => {
 		.sort();
 
 	it("runs the unit suite from known entry files", () => {
-		assert.ok(entries.length > 40, entries.join("\n"));
+		// H3 of the maestro extraction moved the engine's unit tests to @nubl/maestro.
+		assert.ok(entries.length > 30, entries.join("\n"));
 	});
 
 	for (const file of entries)

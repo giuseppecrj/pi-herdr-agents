@@ -46,13 +46,16 @@ legacy Herdr and isolated Core integration remain local gates; see
 architecture decision. [ADR-0018](adr/0018-herdr-core-execution.md) extends it
 to legacy Herdr and Core execution, with Desktop presentation kept separate.
 
-- `../maestro/core/` — harness-neutral interfaces, domain rules, roles, and config.
-- `../maestro/adapters/pi/` — Pi harness and child protocol.
+The engine (harness-neutral core, the Pi harness adapter and child protocol,
+run ownership and Pi composition, the tools and their controllers) is the
+exact `@nubl/maestro` dependency. This repository keeps the terminal host:
+
+- `../pi-extension/subagents/index.ts` — Pi host entry point; it composes
+  `@nubl/maestro`'s Pi factory with the host's providers and presentation.
 - `../maestro/surfaces/herdr/` — legacy Herdr provider/CLI and local Core native-execution provider/RPC.
-- `../maestro/runtime/` — run ownership and real Pi/Herdr composition.
-- `../pi-extension/subagents/index.ts` — Pi host entry point;
-  `model-registry.ts` and `config-path.ts` remain permanent host-local owners.
-- `../test/maestro/` — seam conformance and dependency-rule tests; real
+- `../maestro/adapters/pi/child/subagent-done.ts` — the launched child path,
+  kept so existing launch artifacts resolve.
+- `../test/maestro/` — host seam and dependency-rule tests; real
   conformance runs in `../test/integration/`.
 
 See the [full code map](development.md#code-map). Pi and Herdr remain the only
