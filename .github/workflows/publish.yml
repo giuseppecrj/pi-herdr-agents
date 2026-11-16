@@ -189,7 +189,7 @@ jobs:
           NODE
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Check formatting
         run: npm run format:check

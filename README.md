@@ -34,6 +34,9 @@ Delegate investigation, implementation, and review without blocking the parent s
 ## Requirements
 
 - [Pi](https://github.com/earendil-works/pi) with package support
+- Node.js 22.19 or later (Pi's own floor). The subagent engine ships as the
+  [`@nubl/maestro`](https://www.npmjs.com/package/@nubl/maestro) dependency and
+  installs with this package.
 - Either legacy [Herdr](https://herdr.dev) and its CLI (`HERDR_ENV=1`), or a
   local Herdr Core terminal with its native `HC_TERMINAL_ID` and socket context.
 
@@ -74,6 +77,10 @@ For Core/Desktop, run `pi` in an existing local Core terminal instead. Restart
 Pi when switching backends or upgrading from a runtime without backend binding;
 ordinary reloads retain the selected backend and live ownership. Review package
 source before you install any Pi package.
+
+**Upgrading:** let running subagents finish (or stop them), update the package,
+then restart Pi. `/reload` keeps the previously loaded engine code until Pi
+restarts.
 
 ### Optional methodology pack
 
