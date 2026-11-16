@@ -9,11 +9,12 @@
   [open questions](#open-questions) and [later steps](#rollout) remain.
 - **Code anchors:** every `file:line` cites commit
   `97944a65f840a6a1026b1947a8dc7ae3a9e8e61e`, before the code was split; they
-  are historical. The implementation lives in `maestro/core/accept.ts`,
+  are historical. The implementation lives in `@nubl/maestro`:
+  `maestro/core/accept.ts`,
   `maestro/adapters/pi/accept-runner.ts`,
   `maestro/adapters/pi/child/accept-check.ts`,
   `maestro/runtime/accept-recheck.ts`, and `finalize` in
-  `maestro/runtime/pi-run-session.ts`.
+  `maestro/runtime/pi-run-session.ts` in its repository.
 - **Constrained by:** [ADR-0013](adr/0013-pack-neutral-execution-host.md)
   (pack-neutral host) and
   [ADR-0014](adr/0014-operator-cancel-terminal-intent.md) (operator cancel).

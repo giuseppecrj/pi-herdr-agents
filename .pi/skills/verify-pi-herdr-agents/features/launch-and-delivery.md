@@ -13,7 +13,7 @@ A parent calls `subagent` and gets an acknowledgement after provisioning and com
 ## How to get to it (user POV)
 
 - The model calls the `subagent` tool with `name`, `agent` and `task` (docs/tools.md, "Spawning Subagents").
-- A human types `/subagent <agent> <task>` in the parent Pi (`/subagent list` lists roles; registered in `pi-extension/subagents/launch-tools.ts`). It launches without a model turn, so `$L send "/subagent test-echo Return exactly CMD_RESULT_x"` should be drivable on the deterministic provider; this entry has not been proved in the lab yet.
+- A human types `/subagent <agent> <task>` in the parent Pi (`/subagent list` lists roles; registered by `@nubl/maestro`'s `pi/subagents/launch-tools`). It launches without a model turn, so `$L send "/subagent test-echo Return exactly CMD_RESULT_x"` should be drivable on the deterministic provider; this entry has not been proved in the lab yet.
 
 ## Driving it with lab.ts
 

@@ -9,7 +9,10 @@
   contract), [ADR-0017](adr/0017-accept-check.md) (the accept check)
 - **Code anchors:** every `file:line` cites commit `9befa7f`. Anchors for
   [host-line values](#host-line-values) and [verdicts](#verdicts) name the
-  symbol instead, because they postdate that commit.
+  symbol instead, because they postdate that commit. The implementation now
+  lives in `@nubl/maestro` under the same relative paths. The cited unit tests
+  run in its suite; its `provenance/m*-test-map.json` files record each moved
+  test's file.
 
 This contract defines what a parent agent receives when a delegated child
 finishes, fails, or asks for help, and which requests the parent may send. An
