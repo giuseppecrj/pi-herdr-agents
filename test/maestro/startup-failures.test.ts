@@ -269,7 +269,11 @@ test("a child that exits before its session starts reports its last terminal lin
 		);
 		assert.match(text, /Sub-agent "Echo" failed \(exit code 1\)\./);
 		assert.match(text, /before its session started/);
-		assert.ok(text.includes("status must be an object"), text);
+		// The error's prefix survives. Its last word may not: @nubl/maestro
+		// documents that the relay, which cannot learn the terminal width, joins
+		// this full-width line to the credential line, and masks an ordinary word
+		// glued to the credential-shaped run ("status must be an [redacted]").
+		assert.ok(text.includes("Invalid subagent status config in"), text);
 		assert.ok(!text.includes("sk-proj-AbCdEf0123456789"), text);
 	} finally {
 		await session.shutdown("quit");
