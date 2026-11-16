@@ -151,6 +151,40 @@ describe("pack-neutral package contents", () => {
 			assert.equal(packageFiles.has(path), false, `unexpected ${path}`);
 	});
 
+	it("ships every host module its Pi entry loads and no local engine copy", () => {
+		// H3 of the maestro extraction: the engine is the exact @nubl/maestro
+		// dependency, and the package keeps only the terminal host. Follow
+		// relative imports and URL-built module paths (the legacy child
+		// forwarder) from the declared extension entry.
+		assert.match(
+			manifest.dependencies?.["@nubl/maestro"] ?? "",
+			/^\d+\.\d+\.\d+$/,
+		);
+		const loaded = new Set();
+		const visit = (path) => {
+			if (loaded.has(path)) return;
+			loaded.add(path);
+			const source = readFileSync(join(root, path), "utf8");
+			for (const [, specifier] of source.matchAll(
+				/(?:from\s+|import\(\s*|new URL\(\s*)"(\.{1,2}\/[^"]+\.ts)"/g,
+			))
+				visit(join(dirname(path), specifier).split("\\").join("/"));
+		};
+		for (const entry of manifest.pi.extensions)
+			visit(join(entry).split("\\").join("/"));
+		assert.ok(loaded.has("maestro/adapters/pi/child/subagent-done.ts"));
+		assert.ok(loaded.has("pi-extension/subagents/child.ts"));
+		for (const path of loaded)
+			assert.ok(packageFiles.has(path), `missing loaded module: ${path}`);
+		assert.deepEqual(
+			[...packageFiles]
+				.filter((path) => /^(?:maestro|pi-extension)\//.test(path))
+				.sort(),
+			[...loaded].sort(),
+			"packaged host modules must be exactly the ones the entry loads",
+		);
+	});
+
 	it("ships the self-contained sidebar plugin but not its active plan", () => {
 		assert.deepEqual(
 			[...packageFiles].filter((path) => path.startsWith("plugins/")).sort(),
