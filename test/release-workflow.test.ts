@@ -274,7 +274,7 @@ test("CI runs the local gates with the release workflow's pinned tools", async (
 	assert.deepEqual(
 		[...workflow.matchAll(/^\s+run: (.+)$/gm)].map((match) => match[1]),
 		[
-			"npm ci",
+			"npm ci --ignore-scripts",
 			"npm run format:check",
 			"npm run docs:tools:check",
 			"npm run lint",
@@ -307,7 +307,7 @@ test("CI runs only unit tests on Windows without blocking", async () => {
 	);
 	assert.deepEqual(
 		[...windows.matchAll(/^\s+run: (.+)$/gm)].map((match) => match[1]),
-		["npm ci", "npm test"],
+		["npm ci --ignore-scripts", "npm test"],
 	);
 });
 

@@ -1,6 +1,6 @@
 {
   "name": "pi-herdr-agents",
-  "version": "3.11.0",
+  "version": "3.12.0",
   "description": "Asynchronous Pi subagents in Herdr, with optional isolated Git worktrees",
   "keywords": [
     "pi-package",
@@ -75,6 +75,6 @@
     "typescript": "5.9.3"
   },
   "dependencies": {
-    "@nubl/maestro": "0.1.0"
+    "@nubl/maestro": "0.1.1"
   }
 }
