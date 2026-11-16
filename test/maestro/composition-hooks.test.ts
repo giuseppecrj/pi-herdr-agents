@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { createDefaultRunSession } from "@nubl/maestro/runtime/pi-run-session";
@@ -198,7 +198,10 @@ test("H1 protocol-only child entry imports no terminal host, Herdr or pi-tui mod
 	const dist = fileURLToPath(
 		new URL("dist/", import.meta.resolve("@nubl/maestro/package.json")),
 	);
-	const local = [...seen].map((file) => relative(dist, file));
+	// POSIX separators so the prefix checks also hold on Windows.
+	const local = [...seen].map((file) =>
+		relative(dist, file).split(sep).join("/"),
+	);
 	assert.ok(local.includes("maestro/adapters/pi/child/protocol.js"));
 	assert.deepEqual(
 		local.filter(
