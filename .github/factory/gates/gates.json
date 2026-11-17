@@ -1,0 +1,63 @@
+{
+	"version": 2,
+	"toolingRevision": "c3fd3b749324c52bbaf6b0962a7f817cc0511063",
+	"sourceRoots": [
+		"pi-extension",
+		"maestro",
+		"plugins",
+		"scripts",
+		"skills",
+		"tools",
+		".pi/skills"
+	],
+	"testGlobs": [
+		"test/test.ts",
+		"test/*.test.ts",
+		"test/*.test.js",
+		"test/maestro/*.test.ts"
+	],
+	"checks": [
+		{
+			"name": "typecheck",
+			"argv": [
+				"node",
+				"/g/tooling/node_modules/typescript/bin/tsc",
+				"--noEmit",
+				"-p",
+				"/w/tsconfig.json"
+			]
+		},
+		{
+			"name": "lint",
+			"argv": [
+				"/g/tooling/node_modules/.bin/oxlint",
+				"--disable-nested-config",
+				"--ignore-path",
+				"/dev/null",
+				"--ignore-pattern",
+				"test/acceptance/**",
+				"-c",
+				"/g/tooling/oxlint.config.ts",
+				"pi-extension",
+				"test",
+				"maestro",
+				"plugins",
+				"scripts"
+			]
+		},
+		{
+			"name": "format",
+			"argv": [
+				"/g/tooling/node_modules/.bin/biome",
+				"format",
+				"--config-path",
+				"/w/biome.json",
+				"pi-extension",
+				"test",
+				"maestro",
+				"plugins",
+				"scripts"
+			]
+		}
+	]
+}

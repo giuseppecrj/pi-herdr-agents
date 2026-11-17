@@ -19,8 +19,9 @@ You need:
 - Permission to manage this repository's GitHub Actions settings and npm package access for `pi-herdr-agents`
 - A clean local `main` branch
 
-The **CI** workflow (`.github/workflows/ci.yml`) runs on pushes and pull
-requests to `main`, and supports manual dispatch. Its **Checks** job runs the
+The **CI** workflow (`.github/workflows/check.yml`) runs on pushes and pull
+requests to `main`, and supports manual dispatch; `.github/workflows/ci.yml` is
+the factory's trusted gate dispatch, not ordinary CI. Its **Checks** job runs the
 checks below plus `git diff --check`, with read-only repository permissions,
 no publishing, and cancellation of superseded CI runs. It uses the same pinned
 Node.js version as **Release**. CI also has a **Unit tests (Windows, non-blocking)**

@@ -1,85 +1,211 @@
-name: CI
-
+---
+name: candidate gates
+run-name: gates ${{ inputs.candidate_sha }} ${{ inputs.nonce }}
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
-
+    inputs:
+      candidate_sha:
+        description: Exact candidate commit (40 lowercase hex characters)
+        required: true
+        type: string
+      nonce:
+        description: Unique controller dispatch identifier
+        required: true
+        type: string
+      replacements:
+        description: Trusted replacement list (digest checks transport, not authorization)
+        default: '[]'
+        type: string
+      replacements_digest:
+        description: SHA-256 of canonical replacement list JSON
+        default: 4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
+        type: string
+      heldout_dir:
+        description: Controller-published test/acceptance directory
+        required: false
+        type: string
+      heldout_digest:
+        description: SHA-256 of published check paths and exact-byte digests
+        required: false
+        type: string
 permissions:
   contents: read
-
-concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
+env:
+  FACTORY_PRODUCT_REVISION: c3fd3b749324c52bbaf6b0962a7f817cc0511063
 jobs:
-  checks:
-    name: Checks
+  gates:
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          persist-credentials: false
-
-      - name: Set up Node.js
-        # v5.0.0
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
-        with:
-          node-version: 26.12.1
-          package-manager-cache: false
-
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
-
-      - name: Check formatting
-        run: npm run format:check
-
-      - name: Check generated tool documentation
-        run: npm run docs:tools:check
-
-      - name: Run lint
-        run: npm run lint
-
-      - name: Type-check production sources
-        run: npm run typecheck
-
-      - name: Run tests
-        run: npm test
-
-      - name: Verify package contents
-        run: npm pack --dry-run
-
-      - name: Check diff whitespace
-        run: git diff --check
-
-  windows-unit:
-    name: Unit tests (Windows, non-blocking)
-    runs-on: windows-latest
-    continue-on-error: true
     timeout-minutes: 20
-
     steps:
-      - name: Check out repository
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Require a full product revision
+        run: '[[ "$FACTORY_PRODUCT_REVISION" =~ ^[0-9a-f]{40}$ ]]'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          repository: nublai/pi-herdr-factorio
+          ref: ${{ env.FACTORY_PRODUCT_REVISION }}
+          path: product
           persist-credentials: false
-
-      - name: Set up Node.js
-        # v5.0.0
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          node-version: 26.12.1
-          package-manager-cache: false
-
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
-
-      - name: Run tests
-        run: npm test
+          ref: ${{ github.sha }}
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 26
+      - name: Prepare trusted product and target
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git -C product rev-parse HEAD)" = "$FACTORY_PRODUCT_REVISION"
+          test "$(git -C target rev-parse HEAD)" = "$GATE_SHA"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {readFileSync} from 'node:fs';
+          const policy = JSON.parse(
+            readFileSync('target/.github/factory/gates/gates.json', 'utf8'));
+          assert.equal(policy.toolingRevision, process.env.FACTORY_PRODUCT_REVISION);
+          NODE
+          git -C target fetch --no-tags origin "$CANDIDATE_SHA"
+          npm --prefix product ci --ignore-scripts --no-audit --no-fund
+          docker pull node@sha256:6d2c7d5d074bf72f81ddc252b4fbb5d625bc028eeda49cb4b8c2ff8eda1ee617
+      - name: Run trusted gates
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          GATE_SHA: ${{ github.sha }}
+          NONCE: ${{ inputs.nonce }}
+          REPLACEMENTS: ${{ inputs.replacements }}
+          REPLACEMENTS_DIGEST: ${{ inputs.replacements_digest }}
+          HELDOUT_DIR: ${{ inputs.heldout_dir }}
+          HELDOUT_DIGEST: ${{ inputs.heldout_digest }}
+        run: |
+          node --experimental-strip-types product/host/cli/index.ts gates \
+            --repository "$PWD/target" --gate-sha "$GATE_SHA" --candidate-sha "$CANDIDATE_SHA" \
+            --nonce "$NONCE" --output "$RUNNER_TEMP/gate-results" \
+            --replacements "$REPLACEMENTS" --replacements-digest "$REPLACEMENTS_DIGEST" \
+            --heldout-dir "$HELDOUT_DIR" --heldout-digest "$HELDOUT_DIGEST"
+      - name: Upload trusted receipt
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: gate-receipt
+          path: ${{ runner.temp }}/gate-results/
+          if-no-files-found: error
+          retention-days: 14
+  report:
+    if: ${{ always() && !cancelled() && github.ref == 'refs/heads/main' }}
+    needs: gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      checks: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        continue-on-error: true
+        with:
+          name: gate-receipt
+          path: ${{ runner.temp }}/factory-report-input
+      - name: Report exact candidate result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          GATE_SHA: ${{ github.sha }}
+          NONCE: ${{ inputs.nonce }}
+          HELDOUT_DIR: ${{ inputs.heldout_dir }}
+          HELDOUT_DIGEST: ${{ inputs.heldout_digest }}
+          GATE_RESULT: ${{ needs.gates.result }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          REPORT_INPUT: ${{ runner.temp }}/factory-report-input/receipt.json
+          REPORT_OUTPUT: ${{ runner.temp }}/factory-report
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+          import assert from 'node:assert/strict';
+          const e = process.env;
+          assert.match(e.CANDIDATE_SHA ?? '', /^[0-9a-f]{40}$/);
+          assert.match(e.GATE_SHA ?? '', /^[0-9a-f]{40}$/);
+          assert.match(e.NONCE ?? '', /^[a-f0-9]{16}-r[0-2]-d[12](?:-g[1-3])?$/);
+          assert.equal(e.GITHUB_REF, 'refs/heads/main');
+          assert.equal(e.GITHUB_EVENT_NAME, 'workflow_dispatch');
+          assert.equal(e.GITHUB_ACTOR, 'exe-dev-github-integration[bot]');
+          assert.equal(e.TRIGGERING_ACTOR, e.GITHUB_ACTOR);
+          assert.match(e.GITHUB_REPOSITORY ?? '', /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/);
+          assert.match(e.GITHUB_RUN_ID ?? '', /^[1-9][0-9]*$/);
+          assert.equal(e.GITHUB_RUN_ATTEMPT, '1');
+          const expected = ['install', 'baseline_tests', 'typecheck', 'lint', 'format',
+            'main_tests', 'candidate_tests', 'heldout'];
+          let passed = false;
+          try {
+            const r = JSON.parse(readFileSync(e.REPORT_INPUT, 'utf8'));
+            assert.equal(e.GATE_RESULT, 'success');
+            assert.equal(r.version, 2);
+            assert.equal(r.status, 'passed');
+            assert.equal(r.modelCalls, 0);
+            assert.equal(r.candidateSha, e.CANDIDATE_SHA);
+            assert.equal(r.gateSha, e.GATE_SHA);
+            assert.equal(r.nonce, e.NONCE);
+            assert.match(e.HELDOUT_DIR ?? '', /^test\/acceptance\/[1-9][0-9]*$/);
+            assert.match(e.HELDOUT_DIGEST ?? '', /^[a-f0-9]{64}$/);
+            assert.equal(r.heldoutDigest, e.HELDOUT_DIGEST);
+            assert.ok(r.heldoutCounts && Object.values(r.heldoutCounts)
+              .some(n => Number.isSafeInteger(n) && n > 0));
+            assert.ok(Array.isArray(r.requiredChecks));
+            assert.ok(Array.isArray(r.checks));
+            assert.equal(new Set(r.requiredChecks).size, r.requiredChecks.length);
+            assert.ok(expected.every(name => r.requiredChecks.includes(name)));
+            assert.equal(r.checks.length, r.requiredChecks.length);
+            for (const name of r.requiredChecks) {
+              assert.ok(typeof name === 'string' && name.length > 0);
+              const matching = r.checks.filter(c => c.name === name);
+              assert.equal(matching.length, 1);
+              assert.equal(matching[0].exitCode, 0);
+              assert.notEqual(matching[0].timedOut, true);
+              assert.ok(matching[0].signal == null);
+            }
+            passed = true;
+          } catch { passed = false; }
+          const runId = Number(e.GITHUB_RUN_ID);
+          assert.ok(Number.isSafeInteger(runId));
+          const externalId = `factory-gates:${runId}:${e.NONCE}`;
+          const url = `https://api.github.com/repos/${e.GITHUB_REPOSITORY}/check-runs`;
+          const response = await fetch(url, {
+            method: 'POST', headers: {
+              Authorization: `Bearer ${e.GH_TOKEN}`, Accept: 'application/vnd.github+json',
+              'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28'
+            },
+            body: JSON.stringify({name: 'factory-gates', head_sha: e.CANDIDATE_SHA,
+              external_id: externalId,
+              status: 'completed', conclusion: passed ? 'success' : 'failure',
+              details_url: `https://github.com/${e.GITHUB_REPOSITORY}/actions/runs/${runId}`,
+              output: {
+                title: passed ? 'Trusted gates passed' : 'Trusted gates failed or incomplete',
+                summary: 'Main-owned hard checks and held-out receipt. No model override.'
+              }})
+          });
+          assert.ok(response.ok, `check report refused: ${response.status}`);
+          const check = await response.json();
+          assert.ok(Number.isSafeInteger(check.id) && check.id > 0);
+          assert.equal(check.app?.id, 15368);
+          assert.equal(check.head_sha, e.CANDIDATE_SHA);
+          assert.equal(check.external_id, externalId);
+          mkdirSync(e.REPORT_OUTPUT, {recursive: true});
+          writeFileSync(`${e.REPORT_OUTPUT}/receipt.json`, JSON.stringify({
+            version: 1, checkId: check.id,
+            candidateSha: e.CANDIDATE_SHA, gateSha: e.GATE_SHA, runId, nonce: e.NONCE,
+            workflow: '.github/workflows/ci.yml', event: e.GITHUB_EVENT_NAME, ref: e.GITHUB_REF,
+            actor: e.GITHUB_ACTOR, triggeringActor: e.TRIGGERING_ACTOR,
+            externalId, heldoutDigest: e.HELDOUT_DIGEST,
+            status: passed ? 'passed' : 'failed'}));
+          NODE
+      - name: Upload reporter-owned identity
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: factory-report
+          path: ${{ runner.temp }}/factory-report/receipt.json
+          if-no-files-found: error
+          retention-days: 14
