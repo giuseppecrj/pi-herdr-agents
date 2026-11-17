@@ -88,6 +88,7 @@ Visible test command: `npm test`
 Write a failing test first, then the smallest change that passes it. Stay inside the contract's files.
 Add no dependency unless the contract asks for one. Preserve exact Maestro pins and host-seam ownership.
 Put regressions, helpers, and fixtures in new files unless the contract names an existing test replacement. Keep every unnamed test intact.
+Put each new unit test file at `test/maestro/<name>.test.ts`, with `import "../clean-host-env.ts";` as its first line. Never add a new top-level `test/*.test.ts` file: the `test/package-manifest.test.js` guard requires every top-level test file to be listed in the `npm test` script, and the factory restores `package.json` scripts to main's before visible tests run.
 Run focused tests while iterating, then the repository commands above. Never weaken lint, format, or TypeScript configuration to make a check pass.
 Trusted checks use main's configuration. Restore candidate configuration edits before reproducing feedback locally.
 Host/unit tests do not prove real Herdr lifecycle behavior. The unit suite gates every ticket. A ticket that touches Herdr lifecycle code also needs this repository's `linux-integration` workflow green on its PR before the owner merges.
