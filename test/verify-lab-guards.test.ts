@@ -274,6 +274,10 @@ describe("defaultEvidenceRoot", () => {
 			defaultEvidenceRoot({ XDG_STATE_HOME: "rel" }),
 			join(homedir(), ".local", "state", "pi-herdr-agents", "verify"),
 		);
-		assert.ok(!defaultEvidenceRoot({}).startsWith("/tmp/"));
+		// Without XDG_STATE_HOME it is always under the user's home, whatever HOME is (the factory gate runs with HOME=/tmp).
+		assert.equal(
+			defaultEvidenceRoot({}),
+			join(homedir(), ".local", "state", "pi-herdr-agents", "verify"),
+		);
 	});
 });
