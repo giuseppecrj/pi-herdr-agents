@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "suppression": "@ts-(?:nocheck|ignore|expect-error)|(?:oxlint|eslint)-disable[\\w-]*|biome-ignore[\\w-]*",
+  "processMembers": ["exit", "reallyExit", "exitCode", "on", "once", "addListener", "prependListener", "prependOnceListener"],
+  "processEvents": ["exit", "beforeExit", "uncaughtException"],
+  "loaderCalls": ["node:module.register", "node:module.registerHooks", "module.register", "module.registerHooks"],
+  "mutators": ["Object.defineProperty", "Object.defineProperties", "Object.assign", "Object.setPrototypeOf", "Reflect.defineProperty", "Reflect.set", "Reflect.setPrototypeOf", "Reflect.deleteProperty"]
+}
