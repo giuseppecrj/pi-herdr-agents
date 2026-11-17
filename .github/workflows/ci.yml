@@ -31,7 +31,7 @@ on:
 permissions:
   contents: read
 env:
-  FACTORY_PRODUCT_REVISION: c3fd3b749324c52bbaf6b0962a7f817cc0511063
+  FACTORY_PRODUCT_REVISION: 742f09d4578e83a508f8ebf1c32b82c61c23aae2
 jobs:
   gates:
     if: ${{ github.ref == 'refs/heads/main' }}

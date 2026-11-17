@@ -1,6 +1,6 @@
 {
 	"version": 2,
-	"toolingRevision": "c3fd3b749324c52bbaf6b0962a7f817cc0511063",
+	"toolingRevision": "742f09d4578e83a508f8ebf1c32b82c61c23aae2",
 	"sourceRoots": [
 		"pi-extension",
 		"maestro",
