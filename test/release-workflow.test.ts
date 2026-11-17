@@ -32,6 +32,36 @@ function extractStepRun(workflow: string, stepName: string): string {
 		.join("\n");
 }
 
+function workflowJobs(workflow: string): Map<string, string> {
+	const lines = workflow.split("\n");
+	const start = lines.indexOf("jobs:");
+	assert.notEqual(start, -1, "missing jobs");
+	const jobs = new Map<string, string>();
+	let id: string | undefined;
+	let body: string[] = [];
+	for (const line of lines.slice(start + 1)) {
+		if (/^\S/.test(line)) break;
+		const header = line.match(/^ {2}([A-Za-z0-9_-]+):$/);
+		if (header) {
+			if (id) jobs.set(id, body.join("\n"));
+			assert.ok(!jobs.has(header[1]), `duplicate job: ${header[1]}`);
+			id = header[1];
+			body = [];
+			continue;
+		}
+		assert.ok(id || line.trim() === "", `job content before job id: ${line}`);
+		body.push(line);
+	}
+	if (id) jobs.set(id, body.join("\n"));
+	return jobs;
+}
+
+function workflowJob(workflow: string, id: string): string {
+	const job = workflowJobs(workflow).get(id);
+	assert.ok(job, `missing workflow job: ${id}`);
+	return job;
+}
+
 function readOutputs(path: string): Record<string, string> {
 	return existsSync(path)
 		? Object.fromEntries(
@@ -230,7 +260,7 @@ globalThis.fetch = async (_url, options) => {
 }
 
 test("CI checks pushes and pull requests without release authority", async () => {
-	const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+	const workflow = await readFile(".github/workflows/check.yml", "utf8");
 
 	assert.match(workflow, /^name: CI$/m);
 	assert.match(workflow, /^  push:\n    branches:\n      - main$/m);
@@ -254,9 +284,10 @@ test("CI checks pushes and pull requests without release authority", async () =>
 });
 
 test("CI runs the local gates with the release workflow's pinned tools", async () => {
-	const workflow = (await readFile(".github/workflows/ci.yml", "utf8")).split(
-		"\n  windows-unit:",
-	)[0];
+	const workflow = workflowJob(
+		await readFile(".github/workflows/check.yml", "utf8"),
+		"checks",
+	);
 	const release = await readFile(".github/workflows/publish.yml", "utf8");
 	const actions = [...workflow.matchAll(/uses: (\S+)/g)].map(
 		(match) => match[1],
@@ -287,8 +318,9 @@ test("CI runs the local gates with the release workflow's pinned tools", async (
 });
 
 test("CI runs only unit tests on Windows without blocking", async () => {
-	const workflow = await readFile(".github/workflows/ci.yml", "utf8");
-	const [checks, windows] = workflow.split("\n  windows-unit:");
+	const workflow = await readFile(".github/workflows/check.yml", "utf8");
+	const checks = workflowJob(workflow, "checks");
+	const windows = workflowJob(workflow, "windows-unit");
 
 	assert.ok(windows, "missing Windows unit job");
 	assert.match(windows, /name: Unit tests \(Windows, non-blocking\)/);
@@ -308,6 +340,276 @@ test("CI runs only unit tests on Windows without blocking", async () => {
 	assert.deepEqual(
 		[...windows.matchAll(/^\s+run: (.+)$/gm)].map((match) => match[1]),
 		["npm ci --ignore-scripts", "npm test"],
+	);
+});
+
+test("CI keeps Checks and reports check only when Checks succeeded", async () => {
+	const workflow = await readFile(".github/workflows/check.yml", "utf8");
+	const jobs = workflowJobs(workflow);
+
+	assert.deepEqual(
+		[...jobs.keys()],
+		["checks", "check", "compatibility", "windows-unit"],
+	);
+	const checks = workflowJob(workflow, "checks");
+	assert.match(checks, /^ {4}name: Checks$/m);
+	assert.doesNotMatch(checks, /^ {4}needs:|^\s+if:|continue-on-error/m);
+
+	const check = workflowJob(workflow, "check");
+	assert.match(check, /^ {4}name: check$/m);
+	assert.match(check, /^ {4}needs: checks$/m);
+	assert.match(check, /^ {4}if: always\(\)$/m);
+	assert.match(
+		check,
+		/^ {10}CHECKS_RESULT: \$\{\{ needs\.checks\.result \}\}$/m,
+	);
+	assert.deepEqual(
+		[...check.matchAll(/^\s+(?:- )?run: (.+)$/gm)].map((match) => match[1]),
+		['test "$CHECKS_RESULT" = success'],
+	);
+	assert.doesNotMatch(check, /uses:|npm |continue-on-error/);
+
+	const compatibility = workflowJob(workflow, "compatibility");
+	assert.match(compatibility, /^ {4}needs: check$/m);
+	assert.doesNotMatch(compatibility, /^ {4}if:/m);
+	assert.doesNotMatch(compatibility, /uses:|npm |continue-on-error/);
+	assert.deepEqual(
+		[...compatibility.matchAll(/^\s+(?:- )?run: (.+)$/gm)].map(
+			(match) => match[1],
+		),
+		["printf '%s\\n' 'Ordinary PR compatibility; not factory certification.'"],
+	);
+
+	const folded = compatibility.match(/^ {4}name: >-\n((?: {6}.+\n)+)/m);
+	assert.ok(folded, "compatibility name must be a folded expression");
+	const expression = folded[1]
+		.split("\n")
+		.map((line) => line.trim())
+		.filter(Boolean)
+		.join(" ");
+	assert.equal(
+		expression,
+		"${{ (startsWith(github.head_ref, 'factory/pr/') || " +
+			"startsWith(github.head_ref, 'factory/run/') || " +
+			"github.event.pull_request.user.login == 'exe-dev-github-integration[bot]') && " +
+			"'factory-compatibility' || 'factory-gates' }}",
+	);
+	// Evaluate the workflow's own expression: its operators (||, &&, ==,
+	// startsWith) have the same meaning for these string operands in JavaScript.
+	const evaluate = new Function(
+		"startsWith",
+		"github",
+		`return ${expression.slice(4, -3).replaceAll(" == ", " === ")};`,
+	);
+	const nameFor = (headRef: string, login: string): string =>
+		String(
+			evaluate((value: string, prefix: string) => value.startsWith(prefix), {
+				head_ref: headRef,
+				event: { pull_request: { user: { login } } },
+			}),
+		);
+	assert.equal(nameFor("factory/pr/12", "someone"), "factory-compatibility");
+	assert.equal(nameFor("factory/run/12", "someone"), "factory-compatibility");
+	assert.equal(
+		nameFor("feature", "exe-dev-github-integration[bot]"),
+		"factory-compatibility",
+	);
+	assert.equal(nameFor("feature", "someone"), "factory-gates");
+	assert.equal(nameFor("factory/onboarding", "someone"), "factory-gates");
+});
+
+test("trusted gate dispatch is main-only and pins the product revision", async () => {
+	const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+	const policy = JSON.parse(
+		await readFile(".github/factory/gates/gates.json", "utf8"),
+	);
+
+	assert.match(workflow, /^name: candidate gates$/m);
+	assert.match(
+		workflow,
+		/^run-name: gates \$\{\{ inputs\.candidate_sha \}\} \$\{\{ inputs\.nonce \}\}$/m,
+	);
+	assert.match(workflow, /^on:\n {2}workflow_dispatch:\n {4}inputs:$/m);
+	assert.doesNotMatch(
+		workflow,
+		/^ {2}(?:push|pull_request|pull_request_target|schedule|workflow_run):/m,
+	);
+	assert.match(workflow, /^permissions:\n {2}contents: read$/m);
+	assert.doesNotMatch(workflow, /secrets\.|id-token:/);
+	for (const input of ["candidate_sha", "nonce"]) {
+		assert.match(
+			workflow,
+			new RegExp(
+				`^ {6}${input}:\\n {8}description: .+\\n {8}required: true\\n {8}type: string$`,
+				"m",
+			),
+		);
+	}
+	assert.match(workflow, /^ {8}default: '\[\]'$/m);
+	assert.match(
+		workflow,
+		/^ {8}default: 4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945$/m,
+	);
+	for (const input of ["heldout_dir", "heldout_digest"]) {
+		assert.match(workflow, new RegExp(`^ {6}${input}:$`, "m"));
+	}
+
+	const product = workflow.match(
+		/^ {2}FACTORY_PRODUCT_REVISION: ([0-9a-f]{40})$/m,
+	)?.[1];
+	assert.ok(product, "product revision must be a full lowercase SHA");
+	assert.equal(policy.toolingRevision, product);
+	assert.equal(policy.version, 2);
+
+	assert.deepEqual([...workflowJobs(workflow).keys()], ["gates", "report"]);
+	const gates = workflowJob(workflow, "gates");
+	assert.match(
+		gates,
+		/^ {4}if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}$/m,
+	);
+	assert.doesNotMatch(gates, /^ {4}permissions:/m);
+	assert.match(
+		gates,
+		/\[\[ "\$FACTORY_PRODUCT_REVISION" =~ \^\[0-9a-f\]\{40\}\$ \]\]/,
+	);
+	for (const action of gates.matchAll(/uses: (\S+)/g)) {
+		assert.match(action[1], /^actions\/[a-z-]+@[0-9a-f]{40}$/);
+	}
+	assert.match(
+		gates,
+		/with:\n {10}repository: nublai\/pi-herdr-factorio\n {10}ref: \$\{\{ env\.FACTORY_PRODUCT_REVISION \}\}\n {10}path: product\n {10}persist-credentials: false/,
+	);
+	assert.match(
+		gates,
+		/with:\n {10}ref: \$\{\{ github\.sha \}\}\n {10}path: target\n {10}fetch-depth: 0\n {10}persist-credentials: false/,
+	);
+	assert.match(
+		gates,
+		/test "\$\(git -C product rev-parse HEAD\)" = "\$FACTORY_PRODUCT_REVISION"/,
+	);
+	assert.match(
+		gates,
+		/test "\$\(git -C target rev-parse HEAD\)" = "\$GATE_SHA"/,
+	);
+	assert.match(
+		gates,
+		/readFileSync\('target\/\.github\/factory\/gates\/gates\.json', 'utf8'\)\);\n\s+assert\.equal\(policy\.toolingRevision, process\.env\.FACTORY_PRODUCT_REVISION\);/,
+	);
+	assert.match(gates, /\[\[ "\$CANDIDATE_SHA" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
+	assert.match(gates, /git -C target fetch --no-tags origin "\$CANDIDATE_SHA"/);
+	assert.match(gates, /npm --prefix product ci --ignore-scripts/);
+	assert.match(gates, /docker pull node@sha256:[0-9a-f]{64}\n/);
+
+	for (const [name, value] of [
+		["CANDIDATE_SHA", "inputs.candidate_sha"],
+		["GATE_SHA", "github.sha"],
+		["NONCE", "inputs.nonce"],
+		["REPLACEMENTS", "inputs.replacements"],
+		["REPLACEMENTS_DIGEST", "inputs.replacements_digest"],
+		["HELDOUT_DIR", "inputs.heldout_dir"],
+		["HELDOUT_DIGEST", "inputs.heldout_digest"],
+	]) {
+		assert.ok(
+			gates.includes(`${name}: \${{ ${value} }}`),
+			`gates must pass ${name} from ${value}`,
+		);
+	}
+	const run = extractStepRun(gates, "Run trusted gates");
+	assert.equal(
+		run.replace(/\\\n\s*/g, "").trim(),
+		"node --experimental-strip-types product/host/cli/index.ts gates " +
+			'--repository "$PWD/target" --gate-sha "$GATE_SHA" --candidate-sha "$CANDIDATE_SHA" ' +
+			'--nonce "$NONCE" --output "$RUNNER_TEMP/gate-results" ' +
+			'--replacements "$REPLACEMENTS" --replacements-digest "$REPLACEMENTS_DIGEST" ' +
+			'--heldout-dir "$HELDOUT_DIR" --heldout-digest "$HELDOUT_DIGEST"',
+	);
+	assert.match(
+		gates,
+		/- name: Upload trusted receipt\n {8}if: \$\{\{ always\(\) && !cancelled\(\) \}\}\n {8}uses: actions\/upload-artifact@[0-9a-f]{40}\n {8}with:\n {10}name: gate-receipt\n {10}path: \$\{\{ runner\.temp \}\}\/gate-results\/\n {10}if-no-files-found: error/,
+	);
+});
+
+test("trusted reporter reads only the receipt and binds the exact head", async () => {
+	const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+	const report = workflowJob(workflow, "report");
+
+	assert.match(
+		report,
+		/^ {4}if: \$\{\{ always\(\) && !cancelled\(\) && github\.ref == 'refs\/heads\/main' \}\}$/m,
+	);
+	assert.match(report, /^ {4}needs: gates$/m);
+	assert.match(
+		report,
+		/^ {4}permissions:\n {6}actions: read\n {6}checks: write\n {4}steps:$/m,
+	);
+	assert.deepEqual(
+		[...report.matchAll(/uses: (\S+)/g)].map((match) => match[1].split("@")[0]),
+		["actions/download-artifact", "actions/upload-artifact"],
+	);
+	for (const action of report.matchAll(/uses: (\S+)/g)) {
+		assert.match(action[1], /@[0-9a-f]{40}$/);
+	}
+	assert.doesNotMatch(
+		report,
+		/actions\/checkout|npm |npx |strip-types|product\/|target\/|child_process|import\(|secrets\./,
+	);
+	assert.match(
+		report,
+		/download-artifact@[0-9a-f]{40}\n {8}continue-on-error: true\n {8}with:\n {10}name: gate-receipt\n/,
+	);
+	assert.match(report, /^ {10}GH_TOKEN: \$\{\{ github\.token \}\}$/m);
+	assert.match(
+		report,
+		/^ {10}TRIGGERING_ACTOR: \$\{\{ github\.triggering_actor \}\}$/m,
+	);
+	assert.match(
+		report,
+		/^ {10}REPORT_INPUT: \$\{\{ runner\.temp \}\}\/factory-report-input\/receipt\.json$/m,
+	);
+	assert.deepEqual(
+		[...report.matchAll(/readFileSync\(([^,)]+)/g)].map((match) => match[1]),
+		["e.REPORT_INPUT"],
+	);
+
+	for (const binding of [
+		"assert.equal(e.GITHUB_REF, 'refs/heads/main');",
+		"assert.equal(e.GITHUB_EVENT_NAME, 'workflow_dispatch');",
+		"assert.equal(e.GITHUB_ACTOR, 'exe-dev-github-integration[bot]');",
+		"assert.equal(e.TRIGGERING_ACTOR, e.GITHUB_ACTOR);",
+		"assert.equal(e.GITHUB_RUN_ATTEMPT, '1');",
+		"assert.equal(e.GATE_RESULT, 'success');",
+		"assert.equal(r.status, 'passed');",
+		"assert.equal(r.modelCalls, 0);",
+		"assert.equal(r.candidateSha, e.CANDIDATE_SHA);",
+		"assert.equal(r.gateSha, e.GATE_SHA);",
+		"assert.equal(r.nonce, e.NONCE);",
+		"assert.equal(r.heldoutDigest, e.HELDOUT_DIGEST);",
+		"assert.ok(expected.every(name => r.requiredChecks.includes(name)));",
+		"assert.equal(r.checks.length, r.requiredChecks.length);",
+		"assert.equal(matching.length, 1);",
+		"assert.equal(matching[0].exitCode, 0);",
+		"} catch { passed = false; }",
+		"body: JSON.stringify({name: 'factory-gates', head_sha: e.CANDIDATE_SHA,",
+		"conclusion: passed ? 'success' : 'failure',",
+		"assert.equal(check.app?.id, 15368);",
+		"assert.equal(check.head_sha, e.CANDIDATE_SHA);",
+		"assert.equal(check.external_id, externalId);",
+	]) {
+		assert.ok(report.includes(binding), `reporter must keep: ${binding}`);
+	}
+	assert.ok(
+		report.includes(
+			"const expected = ['install', 'baseline_tests', 'typecheck', 'lint', 'format',\n" +
+				"            'main_tests', 'candidate_tests', 'heldout'];",
+		),
+		"reporter must require every trusted gate",
+	);
+	assert.ok(
+		report.indexOf("let passed = false;") < report.indexOf("passed = true;"),
+	);
+	assert.match(
+		report,
+		/- name: Upload reporter-owned identity\n {8}uses: actions\/upload-artifact@[0-9a-f]{40}\n {8}with:\n {10}name: factory-report\n {10}path: \$\{\{ runner\.temp \}\}\/factory-report\/receipt\.json\n {10}if-no-files-found: error/,
 	);
 });
 
