@@ -6,7 +6,8 @@
       "maestro/**",
       "plugins/**",
       "scripts/**",
-      "!**/*.md"
+      "!**/*.md",
+      "!test/acceptance/**"
     ]
   },
   "formatter": {

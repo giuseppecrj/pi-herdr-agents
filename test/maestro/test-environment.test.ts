@@ -24,11 +24,15 @@ describe("unit-test environment isolation", () => {
 		assert.ok(entries.length > 30, entries.join("\n"));
 	});
 
-	for (const file of entries)
-		it(`${file} scrubs the inherited Pi and Herdr environment first`, () => {
+	// One test for all entry files, so adding a test file never changes this file's test count
+	// (the factory's trusted gate compares per-file test counts against main).
+	it("every entry file scrubs the inherited Pi and Herdr environment first", () => {
+		const unscrubbed = entries.filter((file) => {
 			const firstImport = readFileSync(file, "utf8")
 				.split("\n")
 				.find((line) => line.startsWith("import "));
-			assert.match(firstImport ?? "", SCRUB);
+			return !SCRUB.test(firstImport ?? "");
 		});
+		assert.deepEqual(unscrubbed, []);
+	});
 });
