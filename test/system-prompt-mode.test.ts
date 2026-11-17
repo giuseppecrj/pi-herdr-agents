@@ -3,6 +3,8 @@
  * Tests: frontmatter parsing, identity routing, CLI flag generation.
  */
 import "./clean-host-env.ts";
+import test from "node:test";
+import assert from "node:assert/strict";
 import {
 	mkdtempSync,
 	writeFileSync,
@@ -13,19 +15,6 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-
-let passed = 0;
-let failed = 0;
-
-function assert(condition: boolean, msg: string) {
-	if (condition) {
-		console.log(`  ✅ ${msg}`);
-		passed++;
-	} else {
-		console.log(`  ❌ ${msg}`);
-		failed++;
-	}
-}
 
 // --- Extracted logic under test ---
 
@@ -101,110 +90,123 @@ system-prompt: foobar
 
 Body here.`;
 
-// --- Test 1: Frontmatter parsing ---
-console.log("\n🧪 Frontmatter parsing of system-prompt field");
+test("Frontmatter parsing of system-prompt field", () => {
+	const r1 = parseFrontmatter(AGENT_REPLACE)!;
+	assert.equal(
+		r1.systemPromptMode,
+		"replace",
+		"system-prompt: replace → mode is 'replace'",
+	);
+	assert.equal(
+		r1.body,
+		"You are a specialized agent.",
+		"body extracted correctly",
+	);
 
-const r1 = parseFrontmatter(AGENT_REPLACE)!;
-assert(
-	r1.systemPromptMode === "replace",
-	"system-prompt: replace → mode is 'replace'",
-);
-assert(r1.body === "You are a specialized agent.", "body extracted correctly");
+	const r2 = parseFrontmatter(AGENT_APPEND)!;
+	assert.equal(
+		r2.systemPromptMode,
+		"append",
+		"system-prompt: append → mode is 'append'",
+	);
 
-const r2 = parseFrontmatter(AGENT_APPEND)!;
-assert(
-	r2.systemPromptMode === "append",
-	"system-prompt: append → mode is 'append'",
-);
+	const r3 = parseFrontmatter(AGENT_DEFAULT)!;
+	assert.equal(
+		r3.systemPromptMode,
+		undefined,
+		"no system-prompt field → mode is undefined",
+	);
 
-const r3 = parseFrontmatter(AGENT_DEFAULT)!;
-assert(
-	r3.systemPromptMode === undefined,
-	"no system-prompt field → mode is undefined",
-);
+	const r4 = parseFrontmatter(AGENT_INVALID)!;
+	assert.equal(
+		r4.systemPromptMode,
+		undefined,
+		"system-prompt: foobar → mode is undefined (ignored)",
+	);
+});
 
-const r4 = parseFrontmatter(AGENT_INVALID)!;
-assert(
-	r4.systemPromptMode === undefined,
-	"system-prompt: foobar → mode is undefined (ignored)",
-);
+test("Identity routing (system prompt vs user message)", () => {
+	const s1 = simulateRouting("You are X.", "replace", undefined);
+	assert.equal(s1.roleBlock, "", "replace mode: roleBlock empty (not in task)");
+	assert.equal(
+		s1.cliFlag,
+		"--system-prompt",
+		"replace mode: uses --system-prompt flag",
+	);
 
-// --- Test 2: Identity routing ---
-console.log("\n🧪 Identity routing (system prompt vs user message)");
+	const s2 = simulateRouting("You are X.", "append", undefined);
+	assert.equal(s2.roleBlock, "", "append mode: roleBlock empty (not in task)");
+	assert.equal(
+		s2.cliFlag,
+		"--append-system-prompt",
+		"append mode: uses --append-system-prompt flag",
+	);
 
-const s1 = simulateRouting("You are X.", "replace", undefined);
-assert(s1.roleBlock === "", "replace mode: roleBlock empty (not in task)");
-assert(
-	s1.cliFlag === "--system-prompt",
-	"replace mode: uses --system-prompt flag",
-);
+	const s3 = simulateRouting("You are X.", undefined, undefined);
+	assert.equal(
+		s3.roleBlock,
+		"\n\nYou are X.",
+		"no mode: roleBlock contains identity",
+	);
+	assert.equal(s3.cliFlag, null, "no mode: no CLI flag");
 
-const s2 = simulateRouting("You are X.", "append", undefined);
-assert(s2.roleBlock === "", "append mode: roleBlock empty (not in task)");
-assert(
-	s2.cliFlag === "--append-system-prompt",
-	"append mode: uses --append-system-prompt flag",
-);
+	const s4 = simulateRouting(undefined, undefined, undefined);
+	assert.equal(s4.roleBlock, "", "no identity: roleBlock empty");
+	assert.equal(s4.cliFlag, null, "no identity: no CLI flag");
 
-const s3 = simulateRouting("You are X.", undefined, undefined);
-assert(
-	s3.roleBlock === "\n\nYou are X.",
-	"no mode: roleBlock contains identity",
-);
-assert(s3.cliFlag === null, "no mode: no CLI flag");
+	const s5 = simulateRouting(undefined, "replace", undefined);
+	assert.equal(s5.roleBlock, "", "mode set but no body: roleBlock empty");
+	assert.equal(s5.cliFlag, null, "mode set but no body: no CLI flag");
 
-const s4 = simulateRouting(undefined, undefined, undefined);
-assert(s4.roleBlock === "", "no identity: roleBlock empty");
-assert(s4.cliFlag === null, "no identity: no CLI flag");
+	const s6 = simulateRouting(undefined, "replace", "Param identity");
+	assert.equal(
+		s6.cliFlag,
+		"--system-prompt",
+		"mode + param systemPrompt: uses CLI flag",
+	);
+	assert.equal(s6.roleBlock, "", "mode + param systemPrompt: roleBlock empty");
+});
 
-const s5 = simulateRouting(undefined, "replace", undefined);
-assert(s5.roleBlock === "", "mode set but no body: roleBlock empty");
-assert(s5.cliFlag === null, "mode set but no body: no CLI flag");
+test("End-to-end with temp agent files", () => {
+	const tmpDir = mkdtempSync(join(tmpdir(), "pi-test-spm-"));
+	const agentsDir = join(tmpDir, ".pi", "agents");
+	mkdirSync(agentsDir, { recursive: true });
 
-const s6 = simulateRouting(undefined, "replace", "Param identity");
-assert(
-	s6.cliFlag === "--system-prompt",
-	"mode + param systemPrompt: uses CLI flag",
-);
-assert(s6.roleBlock === "", "mode + param systemPrompt: roleBlock empty");
+	writeFileSync(join(agentsDir, "test-replace.md"), AGENT_REPLACE);
+	writeFileSync(join(agentsDir, "test-append.md"), AGENT_APPEND);
+	writeFileSync(join(agentsDir, "test-default.md"), AGENT_DEFAULT);
 
-// --- Test 3: End-to-end with temp agent files ---
-console.log("\n🧪 End-to-end with temp agent files");
+	function loadFromDir(name: string) {
+		const p = join(agentsDir, `${name}.md`);
+		if (!existsSync(p)) return null;
+		return parseFrontmatter(readFileSync(p, "utf8"));
+	}
 
-const tmpDir = mkdtempSync(join(tmpdir(), "pi-test-spm-"));
-const agentsDir = join(tmpDir, ".pi", "agents");
-mkdirSync(agentsDir, { recursive: true });
+	const t1 = loadFromDir("test-replace")!;
+	assert.equal(
+		t1.systemPromptMode,
+		"replace",
+		"file test-replace.md → replace mode",
+	);
+	assert.equal(
+		t1.body,
+		"You are a specialized agent.",
+		"file test-replace.md → body correct",
+	);
 
-writeFileSync(join(agentsDir, "test-replace.md"), AGENT_REPLACE);
-writeFileSync(join(agentsDir, "test-append.md"), AGENT_APPEND);
-writeFileSync(join(agentsDir, "test-default.md"), AGENT_DEFAULT);
+	const t2 = loadFromDir("test-append")!;
+	assert.equal(
+		t2.systemPromptMode,
+		"append",
+		"file test-append.md → append mode",
+	);
 
-function loadFromDir(name: string) {
-	const p = join(agentsDir, `${name}.md`);
-	if (!existsSync(p)) return null;
-	return parseFrontmatter(readFileSync(p, "utf8"));
-}
+	const t3 = loadFromDir("test-default")!;
+	assert.equal(
+		t3.systemPromptMode,
+		undefined,
+		"file test-default.md → no mode",
+	);
 
-const t1 = loadFromDir("test-replace")!;
-assert(
-	t1.systemPromptMode === "replace",
-	"file test-replace.md → replace mode",
-);
-assert(
-	t1.body === "You are a specialized agent.",
-	"file test-replace.md → body correct",
-);
-
-const t2 = loadFromDir("test-append")!;
-assert(t2.systemPromptMode === "append", "file test-append.md → append mode");
-
-const t3 = loadFromDir("test-default")!;
-assert(t3.systemPromptMode === undefined, "file test-default.md → no mode");
-
-rmSync(tmpDir, { recursive: true });
-
-// --- Summary ---
-console.log(`\n${"=".repeat(40)}`);
-console.log(`Results: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
-console.log("All tests passed! ✅\n");
+	rmSync(tmpDir, { recursive: true });
+});
