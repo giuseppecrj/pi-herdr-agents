@@ -12,6 +12,8 @@ export default {
 		".roo/**",
 		".windsurf/**",
 		"tools/oxlint/anti-slop/**",
+		// Held-out checks the factory publishes; main's trusted gate already skips them.
+		"test/acceptance/**",
 	],
 	jsPlugins: [
 		{
