@@ -29,10 +29,11 @@ import {
 // ── Widget management ──
 
 function formatElapsedMMSS(startTime: number, endTime = Date.now()): string {
-	const seconds = Math.floor((endTime - startTime) / 1000);
-	const m = Math.floor(seconds / 60);
+	const seconds = Math.max(0, Math.floor((endTime - startTime) / 1000));
+	const h = Math.floor(seconds / 3600);
+	const m = Math.floor((seconds % 3600) / 60);
 	const s = seconds % 60;
-	return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+	return `${h > 0 ? `${h}:` : ""}${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
 const ACTIVE_ACCENT = "\x1b[38;2;77;163;255m";
