@@ -128,13 +128,17 @@ The parent is the coordinator. Give each child one bounded outcome with its goal
 In legacy Herdr, a `subagent` call selects the target checkout, reuses its Herdr workspace, and gives the child a pane in an extension-owned `Agents` tab. Four panes fit in each tab by default, and overflow opens another tab in the same workspace. The call provisions its resources, launches a child Pi session, and returns `started`. If dispatch is uncertain but an owner was acquired, it returns `uncertain` and keeps that owner supervised instead of trying another model. Do not blindly relaunch an uncertain request. The parent watches Herdr process state and child activity and shows the result in a live widget:
 
 ```text
-╭─ Subagents ──────────────────── 1 active · 1 open ─╮
-│ 00:23  Scout: Auth (scout)        active · read 7m │
-│ 00:45  Reviewer (reviewer)              waiting 2m │
-╰────────────────────────────────────────────────────╯
+╭─ Subagents  1 active · 1 open ─────────╮
+│ ● Scout: Auth ✎  read 7s      00:23    │
+│ ○ Reviewer ✎     waiting 20s  00:45    │
+╰────────────────────────────────────────╯
 ```
 
+The widget spans the Pi pane. Its columns align the name, state, elapsed time, model, and role. Long values are shortened to keep columns visible; narrow panes prioritize the name, state, and elapsed time.
+
 In legacy Herdr, click a row in Pi's fullscreen mode to switch to that child's pane, even in another tab or workspace. Pane switching is not available for Core/Desktop terminals.
+
+Click the `✎` next to a subagent's name in fullscreen mode to give that run a nickname. Pi shows `original name · nickname`; in legacy Herdr, the pane title uses the nickname. Submit an empty value to remove it. Tools still use the original name or ID.
 
 To jump back, add `last_pane = "prefix+tab"` under `[keys]` in your Herdr `config.toml` and reload the config with `herdr server reload-config`. Press your Herdr prefix (`Ctrl+B` by default), then `Tab`, to toggle between the last two panes.
 

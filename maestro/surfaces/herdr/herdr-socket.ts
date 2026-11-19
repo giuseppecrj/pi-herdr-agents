@@ -177,12 +177,14 @@ type PaneActionOutcome =
 	| { kind: "applied" | "pane-missing" }
 	| { kind: "failed"; reason: string };
 
-/** Focus the exact child pane, including its tab/workspace if necessary. */
-export async function focusHerdrPane(
+async function applyPaneAction(
 	socketPath: string,
+	method: "pane.focus" | "pane.rename",
 	paneId: string,
+	params: JsonObject = {},
 ): Promise<PaneActionOutcome> {
-	const reply = await requestHerdrSocket(socketPath, "pane.focus", {
+	const reply = await requestHerdrSocket(socketPath, method, {
+		...params,
 		pane_id: paneId,
 	});
 	if (reply.kind === "failed") return reply;
@@ -193,7 +195,21 @@ export async function focusHerdrPane(
 	const pane = reply.result.pane;
 	return isRecord(pane) && pane.pane_id === paneId
 		? { kind: "applied" }
-		: { kind: "failed", reason: `pane.focus did not describe ${paneId}` };
+		: { kind: "failed", reason: `${method} did not describe ${paneId}` };
+}
+
+/** Focus the exact child pane, including its tab/workspace if necessary. */
+export function focusHerdrPane(socketPath: string, paneId: string) {
+	return applyPaneAction(socketPath, "pane.focus", paneId);
+}
+
+/** Set the display label of the exact child pane without changing focus. */
+export function renameHerdrPane(
+	socketPath: string,
+	paneId: string,
+	label: string,
+) {
+	return applyPaneAction(socketPath, "pane.rename", paneId, { label });
 }
 
 /** Parses one reply line; a reply for another request id is never accepted. */

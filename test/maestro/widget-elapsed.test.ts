@@ -53,7 +53,11 @@ describe("widget elapsed time", () => {
 							],
 							80,
 						);
-						assert.ok(lines[1].includes(` ${expected}  Worker `), lines[1]);
+						assert.equal(
+							lines[1].trimEnd().split(/\s+/).at(-2),
+							expected,
+							lines[1],
+						);
 					}
 				} finally {
 					Date.now = originalNow;

@@ -1314,9 +1314,7 @@ describe("subagents widget rendering", () => {
 			);
 
 			assert.match(lines[0], /1 open/);
-			assert.ok(lines[0].includes("\x1b[38;2;214;158;46m"));
-			assert.match(lines[1], /00:25\s+Worker/);
-			assert.match(lines[1], /interrupted 10s/);
+			assert.match(lines[1], /^│ ‖ Worker  interrupted 10s  00:25 +│$/);
 			assert.doesNotMatch(lines.join("\n"), /running|active/);
 		} finally {
 			Date.now = originalNow;
@@ -1393,15 +1391,13 @@ describe("subagents widget rendering", () => {
 			);
 
 			assert.match(lines[0], /1 open/);
-			assert.match(lines[1], /00:15\s+Reviewer/);
-			assert.match(lines[1], /finalizing…/);
-			assert.doesNotMatch(lines[1], /00:25/);
+			assert.match(lines[1], /^│ ◐ Reviewer  finalizing…  00:15 +│$/);
 		} finally {
 			Date.now = originalNow;
 		}
 	});
 
-	it("keeps a blue border and summarizes mixed active and open agents", () => {
+	it("fills the pane width with the subagents frame", () => {
 		const testApi = subagentsModule.__test__;
 		const now = 30_000;
 		const active = observeLifecycleActivity(
@@ -1465,8 +1461,12 @@ describe("subagents widget rendering", () => {
 				72,
 			);
 
-			assert.match(lines[0], /1 active · 1 open/);
-			assert.ok(lines[0].includes("\x1b[38;2;77;163;255m"));
+			assert.match(lines[0], /^╭─ Subagents  1 active · 1 open ─+╮$/);
+			assert.match(lines[1], /^│ ● Active  .*│$/);
+			assert.match(lines[2], /^│ ‖ Open {4}interrupted 10s.*│$/);
+			assert.match(lines[3], /^╰─+╯$/);
+			assert.equal(lines.length, 4);
+			assert.deepEqual(lines.map(visibleWidth), [72, 72, 72, 72]);
 		} finally {
 			Date.now = originalNow;
 		}
@@ -1519,10 +1519,9 @@ describe("subagents widget rendering", () => {
 				16,
 			);
 
-			assert.deepEqual(
-				lines.map((line: string) => visibleWidth(line)),
-				[16, 16, 16, 16, 16],
-			);
+			assert.equal(lines.length, 5);
+			assert.ok(lines.every((line) => visibleWidth(line) <= 16));
+			assert.match(lines[1], /^│ ◌ A  start.*│$/);
 		} finally {
 			Date.now = originalNow;
 		}
