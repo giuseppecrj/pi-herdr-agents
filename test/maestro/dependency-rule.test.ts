@@ -180,6 +180,7 @@ function isForbiddenEdge(root: string, reference: ModuleReference) {
 			[
 				"../../maestro/surfaces/herdr/herdr-surface-provider.ts",
 				"../../maestro/surfaces/herdr/herdr-core-surface-provider.ts",
+				"../../maestro/surfaces/herdr/herdr-socket.ts",
 				"@nubl/maestro/adapters/pi/script-shell",
 			],
 		],

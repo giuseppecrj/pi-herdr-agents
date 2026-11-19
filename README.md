@@ -134,6 +134,10 @@ In legacy Herdr, a `subagent` call selects the target checkout, reuses its Herdr
 ╰────────────────────────────────────────────────────╯
 ```
 
+In legacy Herdr, click a row in Pi's fullscreen mode to switch to that child's pane, even in another tab or workspace. Pane switching is not available for Core/Desktop terminals.
+
+To jump back, add `last_pane = "prefix+tab"` under `[keys]` in your Herdr `config.toml` and reload the config with `herdr server reload-config`. Press your Herdr prefix (`Ctrl+B` by default), then `Tab`, to toggle between the last two panes.
+
 **Results arrive automatically.** When a child finishes, the parent receives one bounded `subagent_result` message and starts a new turn with that result in context. Do not poll, tail session files, or wait in a shell loop. Results longer than 16,000 characters are shortened in the parent context, and the full result stays in the child session. Active watchers survive parent `/reload`, `/new`, `/resume`, and `/fork`. Quitting Pi stops parent-side delivery.
 
 Disposable ordinary legacy panes close after their result is delivered, and Herdr removes a tab when its last pane closes. Persistent specialists keep their pane between tasks. Managed worktree roots return to retained interactive shells. Subagent launches do not steal keyboard focus.

@@ -1,5 +1,14 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type {
+	ExtensionAPI,
+	ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import {
+	isViewportTUI,
+	truncateToWidth,
+	visibleWidth,
+	type TUI,
+	type TuiMouseEvent,
+} from "@earendil-works/pi-tui";
 import type { SupervisionConfig } from "@nubl/maestro/core/config/supervision-config";
 import { encodeHostValue } from "@nubl/maestro/core/host-text";
 import {
@@ -139,12 +148,21 @@ function formatLifecycleWidgetLabel(
 	return " starting… ";
 }
 
+type PaneAction =
+	| { kind: "applied" | "pane-missing" }
+	| { kind: "failed"; reason: string };
+
+interface PaneActions {
+	focus(paneId: string): Promise<PaneAction>;
+}
+
 interface WidgetDeps {
 	runtime: SubagentRuntime;
 	statusConfig: StatusConfig;
 	supervisionConfig: SupervisionConfig;
 	observeRunningSubagent: Observation["observeRunningSubagent"];
 	evaluateNoProgressAdvisory: Observation["evaluateNoProgressAdvisory"];
+	getPaneActions?: () => PaneActions | undefined;
 }
 
 /** Widget and status refresh timers for one extension instance. */
@@ -154,6 +172,7 @@ export function createWidgetController({
 	supervisionConfig,
 	observeRunningSubagent,
 	evaluateNoProgressAdvisory,
+	getPaneActions,
 }: WidgetDeps) {
 	const runningSubagents = runtime.runningSubagents;
 
@@ -162,10 +181,31 @@ export function createWidgetController({
 
 	/** Interval timer for status transition checks. */
 	let statusInterval: ReturnType<typeof setInterval> | null = null;
+	let widget: { ctx: ExtensionContext; tui?: TUI } | undefined;
+
+	async function focusSubagent(ctx: ExtensionContext, agent: RunningSubagent) {
+		const actions = getPaneActions?.();
+		if (!actions || runtime.latestCtx !== ctx) return;
+		if (runningSubagents.get(agent.id) !== agent) {
+			ctx.ui.notify("This subagent is no longer in the list.", "warning");
+			return;
+		}
+		const result = await actions.focus(agent.surface);
+		if (runtime.latestCtx !== ctx) return;
+		if (result.kind === "pane-missing") {
+			ctx.ui.notify("That subagent pane is no longer open.", "warning");
+		} else if (result.kind === "failed") {
+			ctx.ui.notify(
+				`Could not focus subagent pane: ${encodeHostValue(result.reason)}`,
+				"warning",
+			);
+		}
+	}
 
 	function renderSubagentWidgetLines(
 		agents: RunningSubagent[],
 		width: number,
+		pressed?: RunningSubagent,
 	): string[] {
 		const now = Date.now();
 		const rendered = agents.map((agent) => ({
@@ -196,7 +236,8 @@ export function createWidgetController({
 				projection.runtimeEndedAt ?? now,
 			);
 			const agentTag = agent.agent ? ` (${encodeHostValue(agent.agent)})` : "";
-			const left = ` ${elapsed}  ${encodeHostValue(agent.name)}${agentTag} `;
+			const marker = pressed === agent ? "›" : " ";
+			const left = `${marker}${elapsed}  ${encodeHostValue(agent.name)}${agentTag} `;
 			const runtimeTag = agent.runtimePlan
 				? `${encodeHostValue(agent.runtimePlan.modelId)}|${agent.runtimePlan.thinking} · `
 				: "";
@@ -224,6 +265,7 @@ export function createWidgetController({
 		if (!latestCtx?.hasUI) return;
 
 		if (runningSubagents.size === 0) {
+			widget = undefined;
 			latestCtx.ui.setWidget("subagent-status", undefined);
 			if (widgetInterval) {
 				clearInterval(widgetInterval);
@@ -236,16 +278,65 @@ export function createWidgetController({
 			return;
 		}
 
+		if (widget?.ctx === latestCtx) {
+			widget.tui?.requestRender();
+			return;
+		}
+		const view: NonNullable<typeof widget> = { ctx: latestCtx };
+		widget = view;
 		latestCtx.ui.setWidget(
 			"subagent-status",
-			(_tui: any, _theme: any) => {
+			(tui) => {
+				view.tui = tui;
+				let rendered: RunningSubagent[] = [];
+				let hitEnd = 0;
+				let press: { agent: RunningSubagent; held: boolean } | undefined;
 				return {
 					invalidate() {},
 					render(width: number) {
+						rendered = [...runningSubagents.values()];
+						hitEnd = width - 1;
 						return renderSubagentWidgetLines(
-							Array.from(runningSubagents.values()),
+							rendered,
 							width,
+							press?.held ? press.agent : undefined,
 						);
+					},
+					handleMouse(event: TuiMouseEvent) {
+						if (!isViewportTUI(tui) || view !== widget) return;
+						const agent =
+							event.x >= 1 && event.x < hitEnd
+								? rendered[event.y - 1]
+								: undefined;
+						if (
+							press?.held &&
+							(event.type === "drag" || event.type === "release")
+						) {
+							press =
+								event.type === "release" && press.agent === agent
+									? { agent, held: false }
+									: undefined;
+							return { handled: true, render: true };
+						}
+						if (
+							event.button !== "left" ||
+							event.shift ||
+							event.alt ||
+							event.ctrl
+						)
+							return;
+						if (event.type === "press") {
+							press =
+								agent && getPaneActions?.() ? { agent, held: true } : undefined;
+							if (press) return { handled: true, render: true };
+						} else if (event.type === "click") {
+							const target = press;
+							press = undefined;
+							if (target && !target.held && target.agent === agent) {
+								void focusSubagent(latestCtx, target.agent);
+								return { handled: true, render: false };
+							}
+						}
 					},
 				};
 			},
