@@ -9,6 +9,10 @@ import type { SurfaceProvider } from "@nubl/maestro/core/surface-provider";
 import type { ScriptShellResolver } from "@nubl/maestro/core/script-launch";
 import { HerdrSurfaceProvider } from "../../maestro/surfaces/herdr/herdr-surface-provider.ts";
 import { HerdrCoreSurfaceProvider } from "../../maestro/surfaces/herdr/herdr-core-surface-provider.ts";
+import {
+	focusHerdrPane,
+	renameHerdrPane,
+} from "../../maestro/surfaces/herdr/herdr-socket.ts";
 import { createPiScriptShellResolver } from "@nubl/maestro/adapters/pi/script-shell";
 import type { PiLaunchSnapshot } from "@nubl/maestro/runtime/pi-run-session-types";
 import type { HostSurfaceBinding } from "@nubl/maestro/runtime/host-surface-binding";
@@ -28,6 +32,16 @@ export function resolveHerdrBinding(
 		platform,
 	);
 }
+export function bindLegacyPaneActions(binding: HerdrBinding) {
+	const socket = process.env.HERDR_SOCKET_PATH;
+	if (binding.backend !== "legacy" || !socket) return;
+	return {
+		focus: (paneId: string) => focusHerdrPane(socket, paneId),
+		rename: (paneId: string, label: string) =>
+			renameHerdrPane(socket, paneId, label),
+	};
+}
+
 export function createHerdrProvider(
 	binding: HerdrBinding,
 	paneConfig: PaneConfig,
