@@ -173,6 +173,29 @@ export async function readPaneAgentSession(
 		: { kind: "session" };
 }
 
+type PaneActionOutcome =
+	| { kind: "applied" | "pane-missing" }
+	| { kind: "failed"; reason: string };
+
+/** Focus the exact child pane, including its tab/workspace if necessary. */
+export async function focusHerdrPane(
+	socketPath: string,
+	paneId: string,
+): Promise<PaneActionOutcome> {
+	const reply = await requestHerdrSocket(socketPath, "pane.focus", {
+		pane_id: paneId,
+	});
+	if (reply.kind === "failed") return reply;
+	if (reply.kind === "error")
+		return reply.code === "pane_not_found"
+			? { kind: "pane-missing" }
+			: { kind: "failed", reason: `${reply.code}: ${reply.message}` };
+	const pane = reply.result.pane;
+	return isRecord(pane) && pane.pane_id === paneId
+		? { kind: "applied" }
+		: { kind: "failed", reason: `pane.focus did not describe ${paneId}` };
+}
+
 /** Parses one reply line; a reply for another request id is never accepted. */
 export function parseHerdrSocketReply(
 	line: string,

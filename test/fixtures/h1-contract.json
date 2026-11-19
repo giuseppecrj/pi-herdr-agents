@@ -696,6 +696,10 @@
 			{
 				"name": "subagent",
 				"description": "Spawn a subagent: /subagent <agent> <task>; list agents: /subagent list"
+			},
+			{
+				"name": "subagent-focus",
+				"description": "Switch to a running or open subagent's Herdr pane"
 			}
 		],
 		"renderers": [
@@ -842,6 +846,10 @@
 			{
 				"name": "subagent",
 				"description": "Spawn a subagent: /subagent <agent> <task>; list agents: /subagent list"
+			},
+			{
+				"name": "subagent-focus",
+				"description": "Switch to a running or open subagent's Herdr pane"
 			}
 		],
 		"renderers": [

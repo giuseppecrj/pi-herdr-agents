@@ -13,7 +13,7 @@
 				"subagents_list",
 				"subagent_resume"
 			],
-			"commands": ["subagents-init", "worktree", "subagent"],
+			"commands": ["subagents-init", "worktree", "subagent", "subagent-focus"],
 			"renderers": [
 				"subagent_result",
 				"subagent_status",
