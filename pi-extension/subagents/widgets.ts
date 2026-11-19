@@ -202,37 +202,6 @@ export function createWidgetController({
 		}
 	}
 
-	function registerPaneFocusCommand(pi: ExtensionAPI) {
-		pi.registerCommand("subagent-focus", {
-			description: "Switch to a running or open subagent's Herdr pane",
-			async handler(_args, ctx) {
-				if (!ctx.hasUI) return;
-				if (!getPaneActions?.()) {
-					ctx.ui.notify(
-						"Pane focus is only available inside legacy Herdr.",
-						"warning",
-					);
-					return;
-				}
-				const activeCtx = runtime.latestCtx;
-				if (!activeCtx) return;
-				const agents = [...runningSubagents.values()];
-				if (agents.length === 0) {
-					ctx.ui.notify("No open subagent panes.", "info");
-					return;
-				}
-				const choices = agents.map(
-					(agent, index) =>
-						`${index + 1}. ${encodeHostValue(agent.name)} · ${encodeHostValue(agent.surface)}`,
-				);
-				const choice = await ctx.ui.select("Focus a subagent pane", choices);
-				const agent =
-					choice === undefined ? undefined : agents[choices.indexOf(choice)];
-				if (agent) await focusSubagent(activeCtx, agent);
-			},
-		});
-	}
-
 	function renderSubagentWidgetLines(
 		agents: RunningSubagent[],
 		width: number,
@@ -490,7 +459,6 @@ export function createWidgetController({
 
 	return {
 		renderSubagentWidgetLines,
-		registerPaneFocusCommand,
 		updateWidget,
 		startStatusRefresh,
 		startWidgetRefresh,

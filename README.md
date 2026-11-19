@@ -134,7 +134,7 @@ In legacy Herdr, a `subagent` call selects the target checkout, reuses its Herdr
 ╰────────────────────────────────────────────────────╯
 ```
 
-In legacy Herdr, click a row in Pi's fullscreen mode to switch to that child's pane, even in another tab or workspace. Use `/subagent-focus` to pick a pane with the keyboard, including in regular mode. Pane switching is not available for Core/Desktop terminals.
+In legacy Herdr, click a row in Pi's fullscreen mode to switch to that child's pane, even in another tab or workspace. Pane switching is not available for Core/Desktop terminals.
 
 To jump back, add `last_pane = "prefix+tab"` under `[keys]` in your Herdr `config.toml` and reload the config with `herdr server reload-config`. Press your Herdr prefix (`Ctrl+B` by default), then `Tab`, to toggle between the last two panes.
 
@@ -175,7 +175,6 @@ Children get `caller_ping` to ask the parent for help. Interactive children also
 | Command | Use |
 | --- | --- |
 | `/subagent <agent> <task>` | Launch a named role. `/subagent list` lists roles. |
-| `/subagent-focus` | Pick a listed subagent and switch to its legacy Herdr pane. |
 | `/worktree <name> [task]` | Continue this conversation in a new managed worktree. `/worktree list` and `/worktree remove <target>` manage them. |
 | `/subagents-init [preferences]` | Draft task-category model preferences from the live model registry. |
 | `/skill:pi-herdr-agents` | Load the host operating guide. |

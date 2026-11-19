@@ -478,11 +478,6 @@
 			"description": "Spawn a subagent: /subagent <agent> <task>; list agents: /subagent list"
 		},
 		{
-			"name": "subagent-focus",
-			"scopes": ["parent", "child"],
-			"description": "Switch to a running or open subagent's Herdr pane"
-		},
-		{
 			"name": "subagents-init",
 			"scopes": ["parent"],
 			"description": "Draft task-category model preferences from the live registry; optional arguments set ranking preferences"

@@ -16,9 +16,6 @@ export {
 
 // Keep pane actions on the same backend the run owner selects.
 let paneActions: ReturnType<typeof bindLegacyPaneActions>;
-let registerPaneFocusCommand: ReturnType<
-	typeof createWidgetController
->["registerPaneFocusCommand"];
 
 // Invoke per load, not in the engine cache. Presentation never replaces a run owner.
 const extension = createPiExtension({
@@ -33,12 +30,10 @@ const extension = createPiExtension({
 	presentation: {
 		borderLine,
 		createWidgets(deps) {
-			const widgets = createWidgetController({
+			return createWidgetController({
 				...deps,
 				getPaneActions: () => paneActions,
 			});
-			registerPaneFocusCommand = widgets.registerPaneFocusCommand;
-			return widgets;
 		},
 		registerMessageRenderers,
 		toolRenderers,
@@ -53,10 +48,4 @@ const extension = createPiExtension({
 });
 
 export const __test__ = extension.__test__;
-export default function subagentsExtension(
-	...args: Parameters<typeof extension>
-) {
-	paneActions = undefined;
-	extension(...args);
-	registerPaneFocusCommand(args[0]);
-}
+export default extension;

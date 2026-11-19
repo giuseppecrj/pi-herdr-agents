@@ -17,7 +17,6 @@ import {
 	withFakeHerdrSocket,
 	type ReceivedRequest,
 } from "../fake-herdr-socket.ts";
-import { createMockExtensionApi } from "../helpers/mock-extension-api.ts";
 
 function makeRow(id: string, surface: string): RunningSubagent {
 	return {
@@ -33,14 +32,17 @@ function makeRow(id: string, surface: string): RunningSubagent {
 	};
 }
 
-function setup(socket?: string, viewport = true) {
+function setup(
+	socket?: string,
+	viewport = true,
+	notify: (message: string) => void = () => {},
+) {
 	const first = makeRow("first", "w1:p2");
 	const second = makeRow("second", "w3:p4");
 	const runningSubagents = new Map([
 		[first.id, first],
 		[second.id, second],
 	]);
-	const notifications: string[] = [];
 	let component: Component | undefined;
 	let renders = 0;
 	// SAFETY: the controller only uses the viewport brand and requestRender.
@@ -66,22 +68,9 @@ function setup(socket?: string, viewport = true) {
 	// SAFETY: the controller only uses hasUI and the supplied UI methods.
 	const ctx = {
 		hasUI: true,
-		ui: {
-			setWidget,
-			async select(_title: string, choices: string[]) {
-				assert.deepEqual(choices, [
-					"1. Same name · w1:p2",
-					"2. Same name · w3:p4",
-				]);
-				return choices[1];
-			},
-			notify(message: string) {
-				notifications.push(message);
-			},
-		},
+		ui: { setWidget, notify },
 	} as ExtensionContext;
 	const runtime: SubagentRuntime = { latestCtx: ctx, runningSubagents };
-	const mock = createMockExtensionApi();
 	const controller = createWidgetController({
 		runtime,
 		statusConfig: { enabled: true, lineLimit: 6 },
@@ -92,21 +81,10 @@ function setup(socket?: string, viewport = true) {
 				? { focus: (paneId) => focusHerdrPane(socket, paneId) }
 				: undefined,
 	});
-	controller.registerPaneFocusCommand(mock.api);
 	controller.updateWidget();
 	assert.ok(component);
 	assert.equal(component.render(80).length, 4);
-	const command = mock.registeredCommands.find(
-		({ name }) => name === "subagent-focus",
-	);
-	return {
-		controller,
-		runningSubagents,
-		component,
-		notifications,
-		renders: () => renders,
-		command: () => command.handler("", ctx),
-	};
+	return { controller, runningSubagents, component, renders: () => renders };
 }
 
 function mouse(type: TuiMouseEvent["type"], y: number, x = 10): TuiMouseEvent {
@@ -182,28 +160,26 @@ test("dragging a pressed row cancels focus", () => {
 	assert.equal(component.handleMouse?.(mouse("click", 2)), undefined);
 });
 
-test("the keyboard picker is available without fullscreen and reports a closed pane", () =>
+test("clicking a closed pane shows a warning", { timeout: 3_000 }, () =>
 	withFakeHerdrSocket(
 		replyError("pane_not_found", "pane gone"),
-		async (path, requests) => {
-			const { component, command, notifications } = setup(path, false);
-			assert.equal(component.handleMouse?.(mouse("press", 2)), undefined);
-			await command();
-			assert.deepEqual(
-				requests.map(({ method, params }) => [method, params]),
-				[["pane.focus", { pane_id: "w3:p4" }]],
-			);
-			assert.deepEqual(notifications, [
-				"That subagent pane is no longer open.",
-			]);
+		async (path) => {
+			let notify: (message: string) => void = () => {};
+			const warning = new Promise<string>((resolve) => {
+				notify = resolve;
+			});
+			const { component } = setup(path, true, notify);
+			for (const type of ["press", "release", "click"] as const) {
+				assert.equal(component.handleMouse?.(mouse(type, 2))?.handled, true);
+			}
+			assert.equal(await warning, "That subagent pane is no longer open.");
 		},
-	));
+	),
+);
 
-test("without a legacy socket the widget is passive and the command explains why", async () => {
-	const { component, command, notifications } = setup();
-	assert.equal(component.handleMouse?.(mouse("press", 1)), undefined);
-	await command();
-	assert.deepEqual(notifications, [
-		"Pane focus is only available inside legacy Herdr.",
-	]);
+test("the widget is passive without fullscreen or a legacy socket", () => {
+	for (const { component } of [setup("unused.sock", false), setup()]) {
+		assert.equal(component.handleMouse?.(mouse("press", 1)), undefined);
+		assert.equal(component.handleMouse?.(mouse("click", 1)), undefined);
+	}
 });
