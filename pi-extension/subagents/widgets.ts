@@ -156,6 +156,7 @@ export function createWidgetController({
 	evaluateNoProgressAdvisory,
 }: WidgetDeps) {
 	const runningSubagents = runtime.runningSubagents;
+	let stopped = false;
 
 	/** Interval timer for widget re-renders. */
 	let widgetInterval: ReturnType<typeof setInterval> | null = null;
@@ -220,6 +221,7 @@ export function createWidgetController({
 	}
 
 	function updateWidget() {
+		if (stopped) return;
 		const latestCtx = runtime.latestCtx;
 		if (!latestCtx?.hasUI) return;
 
@@ -254,7 +256,7 @@ export function createWidgetController({
 	}
 
 	function startStatusRefresh(pi: ExtensionAPI) {
-		if (!statusConfig.enabled || statusInterval) return;
+		if (stopped || !statusConfig.enabled || statusInterval) return;
 
 		statusInterval = setInterval(() => {
 			if (runningSubagents.size === 0) {
@@ -339,7 +341,7 @@ export function createWidgetController({
 	}
 
 	function startWidgetRefresh() {
-		if (widgetInterval) return;
+		if (stopped || widgetInterval) return;
 		updateWidget(); // immediate first render
 		widgetInterval = setInterval(() => {
 			updateWidget();
@@ -348,6 +350,8 @@ export function createWidgetController({
 	}
 
 	function stopRefresh() {
+		// Preserved watchers can still call this load after session replacement.
+		stopped = true;
 		if (widgetInterval) {
 			clearInterval(widgetInterval);
 			widgetInterval = null;
